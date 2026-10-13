@@ -128,6 +128,7 @@
     <li><a href="#pieges">Pièges et correctifs</a></li>
     <li><a href="#david">Travailler avec David</a></li>
     <li><a href="#archi">Architecture proposée pour Alive-Comics</a></li>
+    <li><a href="#appris-13">Ajouts : fal, hébergement, appli v0.1</a></li>
     <li><a href="#fichiers">Index des fichiers sources</a></li>
   </ol>
 </nav>
@@ -792,6 +793,34 @@ p5 (vaisseau) : cosmic dark ambient, deep space horror, extremely low ; distant 
   <li><b>v0.4</b> : aide LLM aux prompts, bulles et texte en calque, albums de plusieurs planches, re-timing des orbites à vitesse irrégulière, agrandissement SeedVR2 (à tester).</li>
 </ol>
 <div class="warn"><b>Risques connus</b> : sens de caméra imprévisible (prévoir des variantes et la revue dès la v0.1), VRAM au plafond en 124 images, workers occupés ou éteints (preflight + file), temps de rendu (4 à 15 min par vidéo, 20 rendus par planche).</div>
+</section>
+
+<!-- ============================================================ 22b -->
+<section id="appris-13">
+<h2><span class="n">22b</span>Ajouts du 13 octobre : fal, hébergement, application v0.1</h2>
+<h3>fal.ai (vérifié sur leur schéma OpenAPI)</h3>
+<ul>
+  <li><code>minimax/h3/image-to-video</code> et <code>minimax/h3/image-to-video/lora</code> : <code>image_url</code>, <code>end_image_url</code> (1re = dernière pour boucler), <code>prompt</code>, <code>duration</code> en secondes <b>5 à 15</b>, <code>resolution</code> 480P / 768P (2K et 4K = agrandissement d'un 768P), <code>seed</code>, <code>prompt_expansion_mode</code> (à mettre sur <code>disabled</code>), <code>loras: [{path, scale, weight_name}]</code> (path = URL ou dépôt Hugging Face, scale 0 à 4).</li>
+  <li>LoRA 360 Orbit : <code>{"path": "pablodawson/MiniMax-H3-360-Orbit-LoRA", "weight_name": "minimax_h3_flf2v_lora_v1.safetensors"}</code>.</li>
+  <li>Pas de fiche perso ni de vues de décor sur ces endpoints (les références n'existent que sur <code>minimax/h3/reference-to-video</code>, sans images clés). H3 y génère une bande-son : la retirer à l'assemblage.</li>
+  <li>File d'attente : <code>POST https://queue.fal.run/&lt;endpoint&gt;</code> (en-tête <code>Authorization: Key …</code>) → <code>status_url</code>, <code>response_url</code>, <code>cancel_url</code> ; réponse <code>{video: {url}}</code>. Images envoyées en data URI.</li>
+</ul>
+<h3>Hébergement (Hostinger, forfait Premium)</h3>
+<ul>
+  <li>Site <code>alive-comics.placenta.tv</code> créé comme site PHP/HTML vide ; le DNS de placenta.tv est déjà chez Hostinger (le sous-domaine répond tout de suite, HTTPS compris).</li>
+  <li>SSH actif (port 65002) ; dossier du site : <code>domains/alive-comics.placenta.tv/public_html</code>. Publication par <b>tar + ssh</b> avec une <b>clé par poste</b> (ajoutée par David dans hPanel › Avancé › Accès SSH). Pas de mot de passe dans l'appli.</li>
+  <li>Le serveur gère les requêtes Range (206) : le saut dans les vidéos marche en ligne. <code>.htaccess</code> : <code>X-Robots-Tag noindex</code>, types mp4/mp3, cache long pour les médias, <code>no-cache</code> pour html/js/css (les corrections se voient tout de suite).</li>
+  <li>Premier livre en ligne : <code>https://alive-comics.placenta.tv/essais/</code> (planches 1 à 3), accueil = liste des livres.</li>
+  <li>Demande de David : <b>tête de lecture cachée</b> dans le lecteur publié (option <code>gauge</code> ou <code>?gauge</code> pour la revoir).</li>
+</ul>
+<h3>Application v0.1 (dépôt grosdada/Alive-Comics)</h3>
+<ul>
+  <li>Serveur Python sans dépendance (comme Q-Builder), port 8790 ; interface web en modules JS sans compilation.</li>
+  <li>Cadres façon komawari : arbre de découpes, chaque trait a deux positions (a, b) à ses bouts ; glisser le trait = le déplacer, glisser un bout = l'incliner ; 12 découpages + variante au hasard ; couleur du fond et des traits.</li>
+  <li>Par case : image recadrable, menu caméra, menu action, son (aucun / fichier / Music 3), aide IA. Les règles de compatibilité (caméra pilotée = scène figée) et les textes viennent des §8 et §9.</li>
+  <li>File de rendus : un fil par machine, priorité aux vidéos, même type de modèle d'affilée, tâches reprises après un redémarrage, fal en cloud ou en débordement (mode mixte).</li>
+  <li>Assemblage : vidéos tout-intra, livre d'une page ; livres de plusieurs planches ; publication avec mise à jour de l'accueil.</li>
+</ul>
 </section>
 
 <!-- ============================================================ 23 -->

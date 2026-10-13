@@ -159,6 +159,20 @@ def _arc(subject, short, toward, ending, angle, rigid):
 
 
 def plan_panel(panel, project_style=""):
+    """Comme _plan_panel, plus les « precisions » libres de la camera et de l'action, ajoutees au prompt."""
+    res = _plan_panel(panel, project_style)
+    cam, act = panel.get("camera") or {}, panel.get("action") or {}
+    extra = [(cam.get("extra") or "").strip()]
+    if res["autoplay"]:
+        extra.append((act.get("extra") or "").strip())
+    extra = " ".join(e for e in extra if e)
+    if extra:
+        for j in res["jobs"]:
+            j["prompt"] = (j["prompt"] + " " + extra).strip()
+    return res
+
+
+def _plan_panel(panel, project_style=""):
     """Decrit les rendus d'une case : [{side, engine, mode, prompt, lora, length, loop_keyframe}], type lecteur.
 
     panel : {"camera": {"id", "fields", "amplitude", "rigid"}, "action": {"id", "fields", "loop"}}

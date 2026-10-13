@@ -51,6 +51,7 @@ export function cameraForm(app, pid, compact) {
     cb.addEventListener("change", () => { cam.rigid = cb.checked; app.commitSoon("panel"); });
     box.append(h("label.check", cb, " Objet rigide (masque, statue, véhicule) : évite qu'il pivote sur lui-même"));
   }
+  box.append(extraField(app, cam, redraw));
   if (!compact) box.append(aiButton(app, pid, redraw));
   return box;
 }
@@ -83,8 +84,16 @@ export function actionForm(app, pid, compact) {
     cb.addEventListener("change", () => { act.loop = cb.checked; app.commitSoon("panel"); });
     box.append(h("label.check", cb, " En boucle (la dernière image rejoint la première)"));
   }
+  if (act.id !== "fige") box.append(extraField(app, act, redraw));
   if ((panel.camera?.id || "fixe") === "fixe" && act.id === "fige") box.append(h("p.note", "Caméra fixe + temps figé : la case reste une image (pas de vidéo)."));
   return box;
+}
+
+// precisions libres ajoutees au prompt, quel que soit le preset
+function extraField(app, obj, redraw) {
+  return field("Précisions (ajoutées au prompt, anglais)",
+               textInput(obj.extra, "e.g. soft morning light, dust in the air", (v) => { obj.extra = v; app.commitSoon("panel"); }, true),
+               h("button.mini", { on: { click: () => app.translateField(obj, "extra", redraw) } }, "✨ en anglais"));
 }
 
 function aiButton(app, pid, redraw) {

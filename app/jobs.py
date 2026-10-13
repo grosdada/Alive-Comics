@@ -225,8 +225,8 @@ class Scheduler:
     def _pick_local(self, w):
         with self.lock:
             pf = w["pf"] or {}
-            if not w["enabled"] or not pf.get("online"):
-                return None
+            if not w["enabled"] or not pf.get("online") or w["job"]:
+                return None                       # w["job"] : une tache reprise apres redemarrage tourne deja
             others_free = [o for o in self.workers.values() if o is not w and o["enabled"] and not o["job"]
                            and (o["pf"] or {}).get("online") and (o["pf"] or {}).get("load", 0) == 0]
             cands = []
