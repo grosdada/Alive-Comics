@@ -68,12 +68,13 @@ class App {
     const add = h("select", h("option", { value: "" }, "+ ajouter une planche…"), projects.map(p => h("option", { value: p.id }, p.name)));
     add.addEventListener("change", () => { if (add.value) { b.pages.push(add.value); save().then(() => this.home()); } });
     const act = async (what) => {
-      toast(what === "publish" ? "Publication du livre…" : "Assemblage du livre…");
+      const tab = what === "export" ? openPending("Assemblage du livre…") : null;
+      if (what === "publish") toast("Publication du livre…");
       try {
         const res = await post(`books/${b.id}/${what}`);
-        if (what === "export") window.open(res.url, "_blank");
+        if (what === "export") showIn(tab, res.url);
         else this.publishedDialog(res.url);
-      } catch (e) { toast(e.message, "error", 9000); }
+      } catch (e) { if (tab) tab.close(); toast(e.message, "error", 9000); }
     };
     return h("div.book", title, pages, h("div.row", add,
       h("button", { on: { click: () => act("export") } }, "Aperçu"),
@@ -574,13 +575,14 @@ class App {
   }
 
   async preview() {
-    toast("Assemblage de la page…");
+    // l'onglet s'ouvre AU CLIC : ouvert apres l'assemblage (plusieurs secondes), le navigateur le bloquerait
+    const tab = openPending("Assemblage de la page…");
     try {
       await this.flushAll();
       const res = await post(`projects/${this.project.id}/export`);
       for (const r of res.report.filter(x => x.includes("manquant"))) toast(r, "info", 7000);
-      window.open(res.url + "?t=" + Date.now(), "_blank");
-    } catch (e) { toast(e.message, "error", 9000); }
+      showIn(tab, res.url + "?t=" + Date.now());
+    } catch (e) { if (tab) tab.close(); toast(e.message, "error", 9000); }
   }
 
   async revealFolder() {
@@ -731,6 +733,25 @@ function pickFile(accept, cb) {
   inp.addEventListener("change", () => { if (inp.files[0]) cb(inp.files[0]); inp.remove(); });
   document.body.append(inp);
   inp.click();
+}
+
+// onglet ouvert tout de suite (geste de l'utilisateur), rempli quand la page est prete
+function openPending(message) {
+  const tab = window.open("", "_blank");
+  if (tab) {
+    tab.document.write(`<!doctype html><meta charset="utf-8"><title>Alive Comics</title>
+      <body style="margin:0;background:#141414;color:#ece8e1;font:16px system-ui;display:grid;place-items:center;height:100vh">
+      <p>${message}</p></body>`);
+    tab.document.close();
+  }
+  return tab;
+}
+
+function showIn(tab, url) {
+  if (tab && !tab.closed) { tab.location.href = url; return; }
+  // onglet bloque ou ferme : un lien a cliquer
+  const a = h("a", { href: url, target: "_blank" }, "Ouvrir l'aperçu");
+  toast(h("span", "La page est prête : ", a), "ok", 15000);
 }
 
 function slugify(t) {
