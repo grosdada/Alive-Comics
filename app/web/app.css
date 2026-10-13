@@ -192,3 +192,5 @@ audio { width: 100%; height: 34px; }
 .veil { position: fixed; inset: 0; z-index: 70; background: rgba(0, 0, 0, .6); display: grid; place-items: center; }
 .veil > div { background: var(--panel); border: 1px solid #555; border-radius: 14px; padding: 18px 24px; text-align: center; }
 .veil b { font-size: 16px; }
+
+.vwarn { font-size: 11px; color: var(--warn); }

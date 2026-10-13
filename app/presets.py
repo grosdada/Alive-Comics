@@ -45,7 +45,7 @@ CAMERAS = [
     {"id": "avancee", "label": "Lente avancée", "kind": "animated", "fields": ["subject"],
      "hint": "La caméra s'approche doucement du sujet. Se combine avec une action."},
     {"id": "epaule", "label": "Caméra à l'épaule", "kind": "animated", "fields": [],
-     "hint": "Léger tremblé, sans déplacement. Se combine avec une action."},
+     "hint": "Caméra tenue à la main : balancement et tremblé visibles, sans déplacement. Se combine avec une action."},
     {"id": "custom", "label": "Texte libre…", "kind": "animated", "fields": ["text"],
      "hint": "Décris toi-même le mouvement de caméra (en anglais de préférence)."},
 ]
@@ -55,8 +55,8 @@ CAMERAS = [
 ACTIONS = [
     {"id": "fige", "label": "Temps figé", "loop": False, "fields": [],
      "hint": "Rien ne bouge dans la scène, seule la caméra se déplace."},
-    {"id": "vie", "label": "Vie subtile en boucle", "loop": True, "fields": ["subject"],
-     "hint": "Respiration, clignements, cheveux et vêtements qui bougent à peine."},
+    {"id": "vie", "label": "Vie en boucle", "loop": True, "fields": ["subject"],
+     "hint": "Les personnages vivent sur place : respiration, regards, mains, poids du corps, cheveux. Naturel mais visible."},
     {"id": "nerveux", "label": "Mouvement nerveux en boucle", "loop": True, "fields": ["subject", "detail"],
      "hint": "Un détail qui gigote sans arrêt (doigts, tentacules…). Précise lequel dans « détail »."},
     {"id": "danse", "label": "Danse / mouvement rythmé", "loop": False, "fields": ["subject", "detail"],
@@ -278,8 +278,10 @@ def _plan_panel(panel, project_style=""):
     detail = _f(af, "detail", "")
     action_text = {
         "fige": "",
-        "vie": (f"{asub} stays in place, alive and natural: slow breathing, blinking eyes, tiny movements of the hair "
-                f"and clothes. The movement is gentle and continuous for the whole shot."),
+        # mesure du 14/10 : « stays in place / slow / tiny » donnait des videos quasi figees (indice 0,05 a 0,2)
+        "vie": (f"{asub} come alive and keep moving naturally for the whole shot: visible breathing, blinking, small head "
+                f"turns and glances, hands and fingers moving, shifting weight, hair and clothes reacting. Natural but "
+                f"clearly visible, continuous motion, never frozen."),
         "nerveux": (f"There is constant, nervous movement of {detail or 'part of ' + asub}: crawling, wriggling and "
                     f"twitching in a fast rippling motion, never stopping and clearly visible for the whole shot, while "
                     f"the rest of {asub} stays in place."),
@@ -300,7 +302,8 @@ def _plan_panel(panel, project_style=""):
         "grue": (f"Cinematic crane shot. The camera rises smoothly upward from eye level to a high angle looking down "
                  f"on {subject}."),
         "avancee": f"The camera slowly and physically travels forward toward {subject}, a dolly in and not a zoom.",
-        "epaule": "Handheld camera with a light, subtle shake, as if held by a nervous operator; no orbit, no pan, no zoom.",
+        "epaule": ("Handheld camera held by an operator: it gently sways and drifts with a noticeable, organic shake "
+                   "for the whole shot; no orbit, no pan, no zoom."),
         "custom": _f(cf, "text", ""),
         # mouvements « pilotes au glisser » joues en un seul plan avec une action
         "orbit360": f"The camera orbits smoothly all the way around {subject} in a continuous circle, always aimed at the subject.",

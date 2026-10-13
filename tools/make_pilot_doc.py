@@ -348,6 +348,10 @@ relancée une fois automatiquement, sur une autre machine si possible ; regarde 
 <ul>
 <li>Après chaque rendu, {code("GET /api/projects/<id>")} : {code("panels[case].renders")} liste toutes les variantes,
 {code("chosen")} la vidéo utilisée (la plus récente par défaut).</li>
+<li><b>Indice de mouvement</b> : chaque variante a un champ {code("motion")} (écart moyen entre images successives).
+Repères mesurés : <b>moins de 0,3 = presque immobile</b> (à refaire si la case devait vivre : action plus forte, précisions
+plus explicites, autre graine) ; 1,5 à 4,5 = une case qui bouge bien. Les cases « temps figé » pilotées au glisser
+bougent par la caméra : leur indice est normalement entre 1 et 4.</li>
 <li><b>Regarde les images</b> : extrais la première, celle du milieu et la dernière image avec ffmpeg et ouvre-les :
 <pre><code>ffmpeg -v error -y -i projects/&lt;id&gt;/renders/p3/V_s904231_xxxx.mp4 \\
   -vf "select='eq(n\\,0)+eq(n\\,60)+eq(n\\,123)',scale=-1:240,tile=3x1" -frames:v 1 controle_p3.jpg</code></pre>
@@ -359,6 +363,8 @@ sens : fie-toi à ce que tu vois.</li>
 <li>l'objet pivote sur lui-même : {code("camera.rigid = true")} ;</li>
 <li>quasiment rien ne bouge : angle plus grand ({code("amplitude: grand")}), action plus forte, ou autre graine ;</li>
 <li>une vingtaine d'images presque noires (« volet noir ») : autre graine ;</li>
+<li>plan animé presque figé ({code("motion")} &lt; 0,3) : les mots « slow », « tiny », « stays in place » freinent H3 ; écrire un
+mouvement continu et visible (le preset {code("vie")} le fait depuis le 14/10/2026), ou passer en {code("nerveux")} ;</li>
 <li>zoom au lieu d'un déplacement : {code("travelling")} écrit « a dolly in and not a zoom » (déjà dans le gabarit).</li>
 </ul></li>
 <li><b>Relancer</b> : {code('POST /panels/<case> {"seed": <graine+1>}')} puis {code("/render")} sur cette case ; ou

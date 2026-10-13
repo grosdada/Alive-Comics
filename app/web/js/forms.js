@@ -295,7 +295,9 @@ export function renderSection(app, pid) {
       v.addEventListener("mouseleave", () => v.pause());
       const chosen = (panel.chosen || {})[side] === r.file;
       return h("div.variant" + (chosen ? ".chosen" : ""), v,
-               h("div.vmeta", `graine ${r.seed} · ${r.worker || ""} · ${Math.round(r.seconds || 0)} s${r.audio ? " · son" : ""}`),
+               h("div.vmeta", `graine ${r.seed} · ${r.worker || ""} · ${Math.round(r.seconds || 0)} s${r.audio ? " · son" : ""}`
+                 + (r.motion != null ? ` · mouvement ${r.motion}` : "")),
+               r.motion != null && r.motion < 0.3 ? h("div.vwarn", "⚠ presque immobile : action plus forte ou autre graine") : null,
                h("button.mini" + (chosen ? ".on" : ""), { on: { click: () => app.choose(pid, side, r.file) } }, chosen ? "Utilisée" : "Utiliser"));
     })));
   }

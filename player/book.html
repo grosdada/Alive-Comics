@@ -24,6 +24,8 @@
   button:hover:not(:disabled) { border-color: var(--accent); }
   button:disabled { opacity: .35; cursor: default; }
   button[aria-pressed="true"] { background: var(--accent); color: #1b150c; border-color: var(--accent); }
+  #unlock { background: var(--accent); color: #1b150c; border-color: var(--accent); font-weight: 600; animation: pulse 1.6s infinite; }
+  @keyframes pulse { 50% { opacity: .6; } }
   main { position: relative; flex: 1 1 auto; min-height: 0; display: grid; place-items: center; padding: 10px 12px;
          touch-action: pan-y; }
   .ac-page { width: min(calc(100vw - 24px), calc((100vh - var(--head) - 24px) * var(--ac-ratio)));
@@ -55,6 +57,7 @@
   <button type="button" id="reset" class="wide">Vue initiale</button>
   <button type="button" id="bw" aria-pressed="false">N&amp;B</button>
   <button type="button" id="snd" aria-pressed="true" hidden>Son</button>
+  <button type="button" id="unlock" hidden>🔊 Activer le son</button>
   <button type="button" id="fs" class="wide">Plein écran</button>
   <button type="button" id="folder" hidden title="Ouvrir le dossier (index.html, vidéos, sons)">📁 Dossier</button>
 </header>
@@ -93,6 +96,7 @@
     $("prev").disabled = $("sprev").disabled = i === 0;
     $("next").disabled = $("snext").disabled = i === B.pages.length - 1;
     $("snd").hidden = !AlivePlayer.hasAudio(pg.data);
+    $("unlock").hidden = !AlivePlayer.hasAudio(pg.data) || AlivePlayer.isUnlocked();
     if (!single) history.replaceState(null, "", "#" + (i + 1));
     const nx = B.pages[i + 1];               // precharge l'image de la page suivante
     if (nx) new Image().src = nx.base + nx.data.page;
@@ -118,6 +122,9 @@
   });
 
   $("reset").onclick = () => AlivePlayer.resetAll();
+  // les navigateurs bloquent le son jusqu'au premier geste : un bouton bien visible (tout clic dans la page marche aussi)
+  $("unlock").onclick = () => { $("unlock").hidden = true; };
+  document.addEventListener("alive-unlocked", () => { $("unlock").hidden = true; });
   $("bw").onclick = () => {
     const on = $("bw").getAttribute("aria-pressed") !== "true";
     $("bw").setAttribute("aria-pressed", String(on)); AlivePlayer.setBW(on);

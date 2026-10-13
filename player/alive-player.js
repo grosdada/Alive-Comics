@@ -322,7 +322,11 @@
   document.addEventListener("pointerdown", () => {
     if (unlocked) return;
     unlocked = true;
-    for (const inst of pages) { unlockPage(inst); startGlobal(inst); }
+    for (const inst of pages) {
+      unlockPage(inst); startGlobal(inst);
+      for (const st of inst.panels) if (st.hover) setTimeout(() => soundOnPanel(st, true), 0);   // case deja survolee
+    }
+    document.dispatchEvent(new Event("alive-unlocked"));
   }, { capture: true });
 
   // ---------------------------------------------------------------- agrandissement
@@ -370,6 +374,6 @@
   function resetAll() { for (const inst of pages) resetPage(inst); }
   function hasAudio(M) { return !!M.sound || M.panels.some(p => p.audio || p.voice || p.foley); }
 
-  window.AlivePlayer = { mount, setBW, setSound, resetAll, hasAudio, isLightboxOpen: () => !!lb.st,
+  window.AlivePlayer = { isUnlocked: () => unlocked, mount, setBW, setSound, resetAll, hasAudio, isLightboxOpen: () => !!lb.st,
                          _pages: pages };
 })();

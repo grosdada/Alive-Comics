@@ -179,7 +179,7 @@ Parfait pour les compositions fortes, les objets, les tableaux.</li>
 <tr><td><code>custom</code></td><td>Texte libre…</td><td>plan animé</td><td><code>text</code></td><td>—</td><td>plan animé, lecture auto</td><td>un seul plan animé (I2V natif), lecture auto</td></tr></table></div>
 <div class='tbl'><table><tr><th>id</th><th>nom</th><th>champs</th><th>à quoi ça sert</th></tr>
 <tr><td><code>fige</code></td><td>Temps figé</td><td>—</td><td>Rien ne bouge dans la scène, seule la caméra se déplace.</td></tr>
-<tr><td><code>vie</code></td><td>Vie subtile en boucle</td><td><code>subject</code></td><td>Respiration, clignements, cheveux et vêtements qui bougent à peine.</td></tr>
+<tr><td><code>vie</code></td><td>Vie en boucle</td><td><code>subject</code></td><td>Les personnages vivent sur place : respiration, regards, mains, poids du corps, cheveux. Naturel mais visible.</td></tr>
 <tr><td><code>nerveux</code></td><td>Mouvement nerveux en boucle</td><td><code>subject</code>, <code>detail</code></td><td>Un détail qui gigote sans arrêt (doigts, tentacules…). Précise lequel dans « détail ».</td></tr>
 <tr><td><code>danse</code></td><td>Danse / mouvement rythmé</td><td><code>subject</code>, <code>detail</code></td><td>Les personnages dansent en rythme, sur place.</td></tr>
 <tr><td><code>marche</code></td><td>Marche</td><td><code>subject</code></td><td>Le personnage avance en marchant.</td></tr>
@@ -367,6 +367,10 @@ relancée une fois automatiquement, sur une autre machine si possible ; regarde 
 <ul>
 <li>Après chaque rendu, <code>GET /api/projects/&lt;id&gt;</code> : <code>panels[case].renders</code> liste toutes les variantes,
 <code>chosen</code> la vidéo utilisée (la plus récente par défaut).</li>
+<li><b>Indice de mouvement</b> : chaque variante a un champ <code>motion</code> (écart moyen entre images successives).
+Repères mesurés : <b>moins de 0,3 = presque immobile</b> (à refaire si la case devait vivre : action plus forte, précisions
+plus explicites, autre graine) ; 1,5 à 4,5 = une case qui bouge bien. Les cases « temps figé » pilotées au glisser
+bougent par la caméra : leur indice est normalement entre 1 et 4.</li>
 <li><b>Regarde les images</b> : extrais la première, celle du milieu et la dernière image avec ffmpeg et ouvre-les :
 <pre><code>ffmpeg -v error -y -i projects/&lt;id&gt;/renders/p3/V_s904231_xxxx.mp4 \
   -vf "select='eq(n\,0)+eq(n\,60)+eq(n\,123)',scale=-1:240,tile=3x1" -frames:v 1 controle_p3.jpg</code></pre>
@@ -378,6 +382,8 @@ sens : fie-toi à ce que tu vois.</li>
 <li>l'objet pivote sur lui-même : <code>camera.rigid = true</code> ;</li>
 <li>quasiment rien ne bouge : angle plus grand (<code>amplitude: grand</code>), action plus forte, ou autre graine ;</li>
 <li>une vingtaine d'images presque noires (« volet noir ») : autre graine ;</li>
+<li>plan animé presque figé (<code>motion</code> &lt; 0,3) : les mots « slow », « tiny », « stays in place » freinent H3 ; écrire un
+mouvement continu et visible (le preset <code>vie</code> le fait depuis le 14/10/2026), ou passer en <code>nerveux</code> ;</li>
 <li>zoom au lieu d'un déplacement : <code>travelling</code> écrit « a dolly in and not a zoom » (déjà dans le gabarit).</li>
 </ul></li>
 <li><b>Relancer</b> : <code>POST /panels/&lt;case&gt; {&quot;seed&quot;: &lt;graine+1&gt;}</code> puis <code>/render</code> sur cette case ; ou

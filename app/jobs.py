@@ -54,6 +54,30 @@ def _extract_audio(video, dest):
         raise RuntimeError("pas de piste son dans la vidéo renvoyée : " + r.stderr[-300:])
 
 
+def motion_index(video):
+    """Ecart moyen entre images successives (niveaux de gris, 160 px de large). Repere : < 0,3 = presque immobile,
+    1,5 a 4,5 = case qui bouge bien. None si la mesure echoue."""
+    import subprocess
+    try:
+        info = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height",
+                               "-of", "csv=p=0", str(video)], capture_output=True, text=True).stdout.strip().split(",")
+        w0, h0 = int(info[0]), int(info[1])
+        h = max(2, int(round(h0 * 160 / w0 / 2)) * 2)
+        raw = subprocess.run(["ffmpeg", "-v", "error", "-i", str(video), "-vf", f"scale=160:{h},format=gray", "-f",
+                              "rawvideo", "-"], capture_output=True).stdout
+        n = len(raw) // (160 * h)
+        if n < 2:
+            return None
+        total = 0
+        frame = 160 * h
+        for i in range(1, n):
+            a, b = raw[(i - 1) * frame:i * frame], raw[i * frame:(i + 1) * frame]
+            total += sum(abs(x - y) for x, y in zip(a[::7], b[::7])) / len(a[::7])
+        return round(total / (n - 1), 2)
+    except (OSError, ValueError, IndexError):
+        return None
+
+
 def full_prompt(mode, text):
     if mode == "orbit":
         return " ".join(t for t in (presets.ORBIT_PROMPT, text) if t)
@@ -519,6 +543,8 @@ class Scheduler:
         rel = dest.relative_to(store.pdir(job["project"])).as_posix()
         secs = round(time.time() - (job["started"] or time.time()), 1)
 
+        motion = motion_index(dest) if job["kind"] == "video" else None
+
         def record(p):
             if job["panel"] == "_page":                # son global de la page
                 ps = p.setdefault("pageSound", {})
@@ -538,7 +564,7 @@ class Scheduler:
                                                         "video": job["spec"].get("video")})
                 fol["file"] = rel
                 return
-            entry = {"file": rel, "side": job["side"], "seed": job["spec"]["seed"], "job": job["id"],
+            entry = {"file": rel, "side": job["side"], "seed": job["spec"]["seed"], "job": job["id"], "motion": motion,
                      "worker": job["worker"], "seconds": secs, "prompt": job["spec"]["prompt"],
                      "camera": (panel.get("camera") or {}).get("id"), "action": (panel.get("action") or {}).get("id"),
                      "audio": job["worker"] == "fal" or bool(job["spec"].get("h3audio")), "created": time.time()}

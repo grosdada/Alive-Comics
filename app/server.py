@@ -436,6 +436,11 @@ class Handler(BaseHTTPRequestHandler):
                                                b.get("seeds", {}).get(panel))
                 except (FileNotFoundError, KeyError, ValueError) as e:
                     errors.append(f"{panel} : {e}")
+            ps = store.get(pid).get("pageSound") or {}
+            pending = any(j["project"] == pid and j["panel"] == "_page" and j["status"] in ("queued", "running")
+                          for j in S.list(pid))
+            if ps.get("mode") == "generate" and not ps.get("file") and not pending:
+                created += S.enqueue_audio(pid, "_page", b.get("machines"))          # son global pas encore genere
             return self.send_json({"jobs": created, "errors": errors})
         if sub == "audio" and m == "POST":
             b = self.jbody()
