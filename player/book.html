@@ -81,7 +81,7 @@
     if (i === cur) return;
     if (inst) inst.destroy();
     const pg = B.pages[i];
-    inst = AlivePlayer.mount(main, pg.data, { base: pg.base, alt: pg.title || "" });
+    inst = AlivePlayer.mount(main, pg.data, { base: pg.base, alt: pg.title || "", gauge: !!B.gauge || /[?&]gauge\b/.test(location.search) });
     inst.pageEl.style.setProperty("--from", (dir || 0) * 30 + "px");
     inst.pageEl.classList.add("enter");
     main.insertBefore(inst.pageEl, $("sprev"));

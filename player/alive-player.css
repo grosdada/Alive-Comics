@@ -15,7 +15,8 @@
                       background: rgba(255, 255, 255, .28); opacity: 0; transition: opacity .3s; pointer-events: none; z-index: 6; }
 .ac-panel .ac-gauge i { position: absolute; top: -3px; width: 9px; height: 9px; margin-left: -4.5px; border-radius: 50%;
                         background: #f2b45c; }
-.ac-panel:hover .ac-gauge, .ac-panel.active .ac-gauge { opacity: 1; }
+.ac-page.ac-show-gauge .ac-panel:hover .ac-gauge, .ac-page.ac-show-gauge .ac-panel.active .ac-gauge { opacity: 1; }
+.ac-page:not(.ac-show-gauge) .ac-gauge { display: none; }      /* tete de lecture : cachee par defaut */
 .ac-panel .ac-wait { position: absolute; right: 8px; top: 8px; font: 11px/1.4 system-ui, sans-serif; color: #fff;
                      background: rgba(0, 0, 0, .55); padding: 2px 7px; border-radius: 999px; pointer-events: none; z-index: 6; }
 .ac-lightbox { position: fixed; inset: 0; z-index: 50; background: rgba(8, 8, 8, .94); display: none;

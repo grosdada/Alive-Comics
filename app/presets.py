@@ -32,7 +32,7 @@ CAMERAS = [
     {"id": "arc", "label": "Arc gauche ↔ droite", "kind": "frozen", "fields": ["subject", "left", "right"],
      "options": ["amplitude", "rigid"],
      "hint": "Deux demi-arcs, la case au milieu. Décris ce qu'on voit à la fin de chaque côté."},
-    {"id": "demi_arc", "label": "Demi-arc d'un seul côté", "kind": "frozen", "fields": ["subject", "ending"],
+    {"id": "demi_arc", "label": "Demi-arc d'un seul côté", "kind": "frozen", "fields": ["subject", "toward", "ending"],
      "options": ["amplitude", "rigid"],
      "hint": "Un seul arc, plus large. Utile quand H3 tourne toujours du même côté."},
     {"id": "vertical", "label": "Plongée ↕ contre-plongée", "kind": "frozen", "fields": ["subject"],
@@ -171,7 +171,7 @@ def plan_panel(panel, project_style=""):
     cf, af = cam.get("fields") or {}, act.get("fields") or {}
     cid, aid = cam.get("id", "fixe"), act.get("id", "fige")
     subject = _f(cf, "subject", _f(af, "subject", "the main subject"))
-    short = "it" if subject == "the main subject" else subject.replace("the ", "", 1) if False else subject
+    short = subject
     angle = AMPLITUDES.get(cam.get("amplitude") or "moyen", 55)
     rigid = bool(cam.get("rigid"))
     lora = 0.5 if rigid else 0.0
@@ -192,11 +192,12 @@ def plan_panel(panel, project_style=""):
                 {"side": "R", "mode": "path", "lora": lora, "length": LENGTH_ARC,
                  "prompt": _arc(subject, short, "the right of the frame", right, angle, rigid)}]}
         if cid == "demi_arc":
-            ending = _f(cf, "ending", "a three-quarter view of the subject from its side")
-            wide = max(angle, 70) if (cam.get("amplitude") or "grand") == "grand" else angle
+            toward = _f(cf, "toward", "one side of the frame")
+            ending = _f(cf, "ending", "a three-quarter view of the subject from that side")
+            wide = AMPLITUDES.get(cam.get("amplitude") or "grand", 70)
             return {"player": "seul", "autoplay": False, "loop": False, "jobs": [
                 {"side": "V", "mode": "path", "lora": lora, "length": LENGTH_ARC,
-                 "prompt": _arc(subject, short, "its side", ending, wide, rigid).replace("an arc of", "a wide arc of")}]}
+                 "prompt": _arc(subject, short, toward, ending, wide, rigid).replace("an arc of", "a wide arc of")}]}
         if cid == "vertical":
             up = (f"The camera moves smoothly along an arc of about {angle} degrees, rising above {subject}, always aimed "
                   f"at its center and keeping the same distance, ending on a high view looking down on it.{TAIL}")
@@ -226,11 +227,11 @@ def plan_panel(panel, project_style=""):
         "fige": "",
         "vie": (f"{asub} stays in place, alive and natural: slow breathing, blinking eyes, tiny movements of the hair "
                 f"and clothes. The movement is gentle and continuous for the whole shot."),
-        "nerveux": (f"{detail or 'part of ' + asub} never stops moving: it crawls, wriggles and twitches constantly in a "
-                    f"fast rippling motion, clearly visible and nervous for the whole shot, while the rest of {asub} "
-                    f"stays in place."),
-        "danse": (f"{asub} perform{'s' if not asub.endswith('s') else ''} a playful rhythmic dance in place"
-                  f"{', ' + detail if detail else ''}, in sync and in rhythm for the whole shot."),
+        "nerveux": (f"There is constant, nervous movement of {detail or 'part of ' + asub}: crawling, wriggling and "
+                    f"twitching in a fast rippling motion, never stopping and clearly visible for the whole shot, while "
+                    f"the rest of {asub} stays in place."),
+        "danse": (f"A playful rhythmic dance in place by {asub}{', ' + detail if detail else ''}, in sync and in rhythm "
+                  f"for the whole shot."),
         "marche": f"{asub} walks forward naturally, with natural arm swing and weight shifts.",
         "parole": f"{asub} talks expressively, mouth moving, with small natural head and hand gestures.",
         "elements": (f"{detail or 'The wind, smoke, water and light'} in the scene keep moving gently and continuously "
@@ -259,7 +260,20 @@ def audio_caption(preset_id, extra=""):
     return a["caption"].replace("{drone}", DRONE).replace("{extra}", (extra or "").strip()).replace("  ", " ").strip()
 
 
+FIELDS = {
+    "subject": ("Sujet", "the golden mask / the three men in red suits"),
+    "left": ("Arrivée côté gauche", "a three-quarter view of his face, the glasses in front"),
+    "right": ("Arrivée côté droit", "a three-quarter view from the side of his large ear"),
+    "toward": ("Vers", "its front end with the glowing mandala"),
+    "ending": ("Vue d'arrivée", "a three-quarter front view where the mandala faces the camera"),
+    "close": ("Plan serré (avance)", "a close-up of the skull's face filling the frame"),
+    "wide": ("Plan large (recul)", "a wider view revealing the whole room"),
+    "detail": ("Détail", "his ten long wrinkled fingers on the skull"),
+    "text": ("Texte", "Describe it in English…"),
+}
+
+
 def public():
     """Ce que l'interface recoit."""
     return {"cameras": CAMERAS, "actions": ACTIONS, "audio": [{k: v for k, v in a.items() if k != "caption"} for a in AUDIO],
-            "amplitudes": AMPLITUDES}
+            "amplitudes": AMPLITUDES, "fields": {k: {"label": a, "placeholder": b} for k, (a, b) in FIELDS.items()}}

@@ -12,7 +12,8 @@
  *     panels: [{ id, rect: [x0,y0,x1,y1], poly?: [[x,y]...], video?, frames, center,
  *                loop?, autoplay?, idle?, audio? }] }
  *
- * API : AlivePlayer.mount(conteneur, donnees, { base: "pages/p1/" }) -> { destroy(), reset() }
+ * API : AlivePlayer.mount(conteneur, donnees, { base: "pages/p1/", gauge: false }) -> { destroy(), reset() }
+ *       (gauge : affiche la tete de lecture au survol ; cachee par defaut)
  *       AlivePlayer.setBW(bool), AlivePlayer.setSound(bool), AlivePlayer.resetAll()
  * Les videos doivent etre « tout-intra » (ffmpeg -g 1) pour un saut instantane.
  */
@@ -38,6 +39,7 @@
     const fps = M.fps || 24;
     const pageEl = node("div", "ac-page", container);
     pageEl.classList.toggle("bw", bwOn);
+    pageEl.classList.toggle("ac-show-gauge", !!opts.gauge);   // tete de lecture : seulement si demandee
     pageEl.style.aspectRatio = PW + " / " + PH;
     pageEl.style.setProperty("--ac-ratio", String(PW / PH));
     const bg = node("img", "ac-bg", pageEl);

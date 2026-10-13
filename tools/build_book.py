@@ -26,6 +26,9 @@ HTACCESS = """# Alive-Comics : pas d'indexation, types et cache des medias
 Header set X-Robots-Tag "noindex, nofollow"
 AddType video/mp4 .mp4
 AddType audio/mpeg .mp3
+<FilesMatch "[.](html|js|css)$">
+  Header set Cache-Control "no-cache"
+</FilesMatch>
 <IfModule mod_expires.c>
   ExpiresActive On
   ExpiresByType video/mp4 "access plus 30 days"
