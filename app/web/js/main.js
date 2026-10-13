@@ -407,6 +407,7 @@ class App {
       return;
     }
     if (this._retrySave) { clearTimeout(this._retrySave); this._retrySave = null; }
+  }
 
   // reprend ce que le serveur a ecrit (rendus, choix, sons) sans toucher aux reglages en cours
   absorb(server) {
