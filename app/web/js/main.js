@@ -398,8 +398,14 @@ class App {
       const saved = await put("projects/" + this.project.id, this.project);
       this.absorb(saved);
       if (first && !saved.thumb) this.pageSoon();
-    } catch (e) { toast("Enregistrement impossible : " + e.message, "error"); }
-  }
+    } catch (e) {
+      // serveur arrete ou en redemarrage : on retente seul, sans perdre ce qui est en memoire
+      if (!this._retrySave) toast("Serveur injoignable : l'enregistrement sera retenté automatiquement.", "error", 6000);
+      clearTimeout(this._retrySave);
+      this._retrySave = setTimeout(() => { this._retrySave = null; this.save(); }, 3000);
+      return;
+    }
+    if (this._retrySave) { clearTimeout(this._retrySave); this._retrySave = null; }
 
   // reprend ce que le serveur a ecrit (rendus, choix, sons) sans toucher aux reglages en cours
   absorb(server) {

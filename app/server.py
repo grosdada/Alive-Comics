@@ -12,6 +12,7 @@ import os
 import re
 import secrets
 import shutil
+import socket
 import sys
 import threading
 import time
@@ -370,15 +371,32 @@ class Handler(BaseHTTPRequestHandler):
         raise ApiError("route livre inconnue", 404)
 
 
+class Server(ThreadingHTTPServer):
+    """Port exclusif : sous Windows, SO_REUSEADDR laisse deux serveurs se partager le port (l'ancien
+    continue alors de repondre a une partie des requetes). Un deuxieme lancement doit echouer proprement."""
+    allow_reuse_address = os.name != "nt"
+    daemon_threads = True
+
+    def server_bind(self):
+        if os.name == "nt":
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        super().server_bind()
+
+
 def main():
     cfg = settings.load()["server"]
     host, port = cfg.get("host", "127.0.0.1"), int(os.environ.get("ALIVE_PORT") or cfg.get("port", 8790))
     if not shutil.which("ffmpeg"):
         print("ATTENTION : ffmpeg introuvable dans le PATH (necessaire pour l'export)")
-    jobs.SCHEDULER.start()
-    srv = ThreadingHTTPServer((host, port), Handler)
-    srv.daemon_threads = True
     url = f"http://{'127.0.0.1' if host in ('0.0.0.0', '') else host}:{port}/"
+    try:
+        srv = Server((host, port), Handler)
+    except OSError:
+        print(f"Alive-Comics tourne deja sur {url} : ouverture de la page. (Pour le relancer, fermer l'autre fenetre.)")
+        if "--no-browser" not in sys.argv:
+            webbrowser.open(url)
+        return
+    jobs.SCHEDULER.start()
     print(f"Alive-Comics {VERSION} : {url}  (Ctrl+C pour arreter)")
     if "--no-browser" not in sys.argv:
         threading.Timer(1.0, lambda: webbrowser.open(url)).start()
