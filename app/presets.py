@@ -23,8 +23,11 @@ AMPLITUDES = {"petit": 40, "moyen": 55, "grand": 70}
 
 # Tremble « camera a l'epaule » ajoute au montage (ffmpeg), car H3 ne fait qu'un tremble mou et imprevisible.
 # (deplacement en fraction de l'image, rotation en radians) ; periodique : la boucle reste parfaite.
-SHAKES = {"aucun": (0, 0), "leger": (0.012, 0.004), "moyen": (0.022, 0.008), "fort": (0.036, 0.013)}
-SHAKE_DEFAULT = {"epaule": "fort"}             # sinon : aucun
+# v2 (14/10, retour de David) : la v1 (3,6 % + saccades rapides) faisait « faux tremble 2D ». Derive lente et douce,
+# a peine de rotation : on doit sentir l'operateur, pas voir l'image bouger.
+SHAKES = {"aucun": (0, 0), "leger": (0.004, 0.0008), "moyen": (0.008, 0.0016), "fort": (0.013, 0.0025)}
+SHAKE_VERSION = 2
+SHAKE_DEFAULT = {"epaule": "moyen"}            # sinon : aucun
 
 
 def shake_level(panel):

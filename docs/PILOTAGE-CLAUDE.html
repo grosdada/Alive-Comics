@@ -165,6 +165,9 @@ Parfait pour les compositions fortes, les objets, les tableaux.</li>
 <code>fixe</code>, <code>grue</code>, <code>avancee</code>, <code>epaule</code>, <code>custom</code>). La case joue seule, en boucle si
 <code>action.loop</code> est vrai (valeur par défaut : la dernière image rejoint la première).</li>
 <li><code>fixe</code> + <code>fige</code> sans précisions = <b>image fixe</b> (pas de vidéo). Des <code>camera.extra</code> suffisent à en faire une vidéo.</li>
+<li>Dans le lecteur, les plans animés <b>ne bougent qu'au survol</b> (démarrage et arrêt en douceur) ; au doigt, la dernière case touchée joue.</li>
+<li><b>Tremblé caméra ajouté au montage</b> (<code>camera.shake</code> : <code>aucun</code>, <code>leger</code>, <code>moyen</code>, <code>fort</code> ;
+<code>moyen</code> par défaut pour <code>epaule</code>) : dérive lente et discrète ajoutée à l'export, sans nouveau rendu, boucle intacte.</li>
 </ul>
 <div class='tbl'><table><tr><th>id</th><th>nom</th><th>type</th><th>champs</th><th>options</th><th>rendu sans action (« fige »)</th><th>avec une action</th></tr>
 <tr><td><code>fixe</code></td><td>Caméra fixe</td><td>plan animé</td><td>—</td><td>—</td><td>image fixe (sauf précisions)</td><td>un seul plan animé (I2V natif), lecture auto</td></tr>

@@ -75,11 +75,12 @@ def shake_filter(level, w, h, n):
     z = 1 - 2 * (amp * 1.15 + rot * 0.6)
     cw, ch = int(w * z) // 2 * 2, int(h * z) // 2 * 2
     two_pi_n = f"2*PI*n/{n}"
-    x = (f"({w}-{cw})/2+{amp * w:.2f}*(0.55*sin(3*{two_pi_n}+0.7)+0.30*sin(7*{two_pi_n}+2.1)"
-         f"+0.15*sin(13*{two_pi_n}+4.0))")
-    y = (f"({h}-{ch})/2+{amp * h:.2f}*(0.55*sin(4*{two_pi_n}+1.3)+0.30*sin(9*{two_pi_n}+0.4)"
-         f"+0.15*sin(17*{two_pi_n}+3.1))")
-    a = f"{rot}*(0.6*sin(2*{two_pi_n}+0.5)+0.4*sin(5*{two_pi_n}+1.9))"
+    # derive lente (1 a 2 cycles par boucle) + leger flottement (4 a 6) : pas de saccade rapide
+    x = (f"({w}-{cw})/2+{amp * w:.2f}*(0.62*sin(1*{two_pi_n}+0.7)+0.28*sin(2*{two_pi_n}+2.1)"
+         f"+0.10*sin(5*{two_pi_n}+4.0))")
+    y = (f"({h}-{ch})/2+{amp * h:.2f}*(0.62*sin(1*{two_pi_n}+1.9)+0.28*sin(3*{two_pi_n}+0.4)"
+         f"+0.10*sin(6*{two_pi_n}+3.1))")
+    a = f"{rot}*(0.7*sin(1*{two_pi_n}+0.5)+0.3*sin(3*{two_pi_n}+1.9))"
     return f"rotate=a='{a}':c=black,crop=w={cw}:h={ch}:x='{x}':y='{y}',scale={w}:{h}:flags=lanczos"
 
 
@@ -183,7 +184,7 @@ def build(pid, log=print, force=False):
         if plan["player"] != "static" and need and len(srcs) == len(need):
             dst = out / "videos" / f"{g['id']}.mp4"
             shake = presets.shake_level(panel) if plan["autoplay"] else "aucun"
-            key = json.dumps({"player": plan["player"], "shake": shake,
+            key = json.dumps({"player": plan["player"], "shake": shake, "shake_v": presets.SHAKE_VERSION,
                               "src": {s: [str(f), f.stat().st_mtime] for s, f in srcs.items()}})
             if cache.get(g["id"], {}).get("key") == key and dst.exists():
                 center, n = cache[g["id"]]["center"], cache[g["id"]]["frames"]

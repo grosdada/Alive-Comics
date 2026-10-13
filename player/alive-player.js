@@ -12,6 +12,8 @@
  *     panels: [{ id, rect: [x0,y0,x1,y1], poly?: [[x,y]...], video?, frames, center,
  *                loop?, autoplay?, idle?, audio?, audioVol?,
  *                voice?: {src, vol, loop}, foley?: {src, vol, sync} }] }
+ * play?: "hover" (defaut) | "always" : les cases qui jouent seules ne bougent qu'au survol (demarrage et arret en
+ * douceur), ou tout le temps.
  * sound?: {src, vol} = son global de la page : joue en continu (apres le premier geste, regle des
  * navigateurs), baisse de moitie pendant qu'un son de case joue, fondu en sortie de page.
  * Sons au survol : audio = ambiance en boucle ; voice = voix off (reprise du debut a chaque survol, ou
@@ -49,7 +51,7 @@
     pageEl.style.setProperty("--ac-ratio", String(PW / PH));
     const bg = node("img", "ac-bg", pageEl);
     bg.src = base + M.page; bg.alt = opts.alt || ""; bg.draggable = false;
-    const inst = { pageEl, panels: [], fps };
+    const inst = { pageEl, panels: [], fps, play: opts.play || M.play || "hover" };
 
     for (const p of M.panels) makePanel(inst, p, base, PW, PH);
     if (M.frames) {
@@ -85,7 +87,7 @@
     const wait = node("span", "ac-wait", el);
     wait.textContent = "chargement…";
     const st = { p, inst, el, dot, wait, pos: p.center || 0, vel: 0, drag: null, anim: null, videos: [], dir: 1,
-                 resumeAt: 0, period: Math.max(1, p.frames - 1), src: base + p.video };
+                 resumeAt: 0, period: Math.max(1, p.frames - 1), src: base + p.video, over: false, speed: 0 };
     st.addVideo = (v) => addVideo(st, v);
     st.addVideo(node("video", "", el));
     if (p.idle) {             // boucle au repos, camera fixe, par-dessus
@@ -111,6 +113,14 @@
       el.addEventListener("pointerleave", () => soundOnPanel(st, false));
       el.addEventListener("pointerdown", (e) => { if (e.pointerType === "touch") toggleTouchAudio(st); });
     }
+    // animation au survol (souris) ; au doigt : la derniere case touchee joue
+    el.addEventListener("pointerenter", (e) => { if (e.pointerType !== "touch") st.over = true; });
+    el.addEventListener("pointerleave", (e) => { if (e.pointerType !== "touch") st.over = false; });
+    el.addEventListener("pointerdown", (e) => {
+      if (e.pointerType !== "touch") return;
+      for (const i2 of pages) for (const o of i2.panels) o.over = false;
+      st.over = true;
+    });
     bindDrag(el, () => st);
     el.addEventListener("dblclick", () => openLightbox(st));
     inst.panels.push(st);
@@ -200,9 +210,14 @@
       if (Math.round(st.pos) !== (st.p.center || 0)) st.anim = { from: st.pos, t0: now };
       else { st.idleOn = true; st.idle.classList.add("on"); st.idle.play().catch(() => {}); }
     } else if (st.p.autoplay && !st.drag && now > st.resumeAt) {
-      if (st.p.loop) st.pos += fps * dt;
+      // vitesse qui monte et descend en douceur : la case s'anime au survol et se fige quand on la quitte
+      const active = st.inst.play === "always" || st.over || lb.st === st;
+      st.speed += ((active ? 1 : 0) - st.speed) * Math.min(1, dt * (active ? 3 : 2.2));
+      if (st.speed < 0.004 && !active) st.speed = 0;
+      const step = fps * dt * st.speed;
+      if (st.p.loop) st.pos += step;
       else {
-        st.pos += st.dir * fps * dt;
+        st.pos += st.dir * step;
         if (st.pos >= st.p.frames - 1) { st.pos = st.p.frames - 1; st.dir = -1; }
         if (st.pos <= 0) { st.pos = 0; st.dir = 1; }
       }

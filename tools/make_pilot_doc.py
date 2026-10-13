@@ -201,6 +201,9 @@ Parfait pour les compositions fortes, les objets, les tableaux.</li>
 {code("fixe")}, {code("grue")}, {code("avancee")}, {code("epaule")}, {code("custom")}). La case joue seule, en boucle si
 {code("action.loop")} est vrai (valeur par défaut : la dernière image rejoint la première).</li>
 <li>{code("fixe")} + {code("fige")} sans précisions = <b>image fixe</b> (pas de vidéo). Des {code("camera.extra")} suffisent à en faire une vidéo.</li>
+<li>Dans le lecteur, les plans animés <b>ne bougent qu'au survol</b> (démarrage et arrêt en douceur) ; au doigt, la dernière case touchée joue.</li>
+<li><b>Tremblé caméra ajouté au montage</b> ({code("camera.shake")} : {code("aucun")}, {code("leger")}, {code("moyen")}, {code("fort")} ;
+{code("moyen")} par défaut pour {code("epaule")}) : dérive lente et discrète ajoutée à l'export, sans nouveau rendu, boucle intacte.</li>
 </ul>
 {cams}
 {acts}
