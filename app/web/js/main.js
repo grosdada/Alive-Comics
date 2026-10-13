@@ -59,15 +59,27 @@ class App {
     const save = async () => { await put("books", books); };
     const title = h("input.btitle", { value: b.title });
     title.addEventListener("change", () => { b.title = title.value; save(); });
-    const pages = h("ol.bpages", b.pages.map((pid, i) => {
+    // les pages du livre, en vignettes numerotees (ordre de lecture)
+    const pages = h("div.bpages", b.pages.length ? b.pages.map((pid, i) => {
       const p = projects.find(x => x.id === pid);
-      return h("li", p ? p.name : pid + " (supprimée)",
-        h("button.mini", { title: "Monter", on: { click: () => { if (i) { [b.pages[i - 1], b.pages[i]] = [b.pages[i], b.pages[i - 1]]; save().then(() => this.home()); } } } }, "↑"),
-        h("button.mini", { title: "Retirer", on: { click: () => { b.pages.splice(i, 1); save().then(() => this.home()); } } }, "✕"));
-    }));
-    const add = h("select", h("option", { value: "" }, "+ ajouter une planche…"), projects.map(p => h("option", { value: p.id }, p.name)));
-    add.addEventListener("change", () => { if (add.value) { b.pages.push(add.value); save().then(() => this.home()); } });
+      return h("div.bpage",
+        h("span.bnum", String(i + 1)),
+        p?.thumb ? h("img", { src: p.thumb + "?t=" + Math.round(p.updated) }) : h("div.noimg"),
+        h("small", p ? p.name : pid + " (supprimée)"),
+        h("div.row",
+          h("button.mini", { title: "Avancer", disabled: i === 0, on: { click: () => { [b.pages[i - 1], b.pages[i]] = [b.pages[i], b.pages[i - 1]]; save().then(() => this.home()); } } }, "◀"),
+          h("button.mini", { title: "Reculer", disabled: i === b.pages.length - 1, on: { click: () => { [b.pages[i + 1], b.pages[i]] = [b.pages[i], b.pages[i + 1]]; save().then(() => this.home()); } } }, "▶"),
+          h("button.mini", { title: "Retirer du livre", on: { click: () => { b.pages.splice(i, 1); save().then(() => this.home()); } } }, "✕")));
+    }) : h("p.muted", "Aucune page : ajoute des planches ci-dessous."));
+    const add = h("select", projects.map(p => h("option", { value: p.id }, p.name)));
+    const addBtn = h("button", { on: { click: async () => {
+      if (!add.value) return;
+      b.pages.push(add.value); await save();
+      toast(`« ${add.selectedOptions[0].textContent} » ajoutée : le livre a ${b.pages.length} page${b.pages.length > 1 ? "s" : ""}.`, "ok");
+      this.home();
+    } } }, "+ Ajouter cette planche");
     const act = async (what) => {
+      if (what === "publish" && b.pages.length < 2 && !confirm(`Ce livre n'a que ${b.pages.length} page : on ne pourra pas tourner les pages. Publier quand même ?`)) return;
       const tab = what === "export" ? openPending("Assemblage du livre…") : null;
       if (what === "publish") toast("Publication du livre…");
       try {
@@ -76,10 +88,12 @@ class App {
         else this.publishedDialog(res.url);
       } catch (e) { if (tab) tab.close(); toast(e.message, "error", 9000); }
     };
-    return h("div.book", title, pages, h("div.row", add,
-      h("button", { on: { click: () => act("export") } }, "Aperçu"),
-      h("button.primary", { on: { click: () => act("publish") } }, "Publier le livre"),
-      h("button.mini", { on: { click: async () => { if (confirm("Supprimer ce livre (les planches restent) ?")) { books.splice(books.indexOf(b), 1); await save(); this.home(); } } } }, "Supprimer")));
+    return h("div.book", h("div.row", title, h("span.muted", `${b.pages.length} page${b.pages.length > 1 ? "s" : ""}`)), pages,
+      h("div.row", add, addBtn),
+      h("div.row",
+        h("button", { on: { click: () => act("export") } }, "Aperçu"),
+        h("button.primary", { on: { click: () => act("publish") } }, "Publier le livre"),
+        h("button.mini", { on: { click: async () => { if (confirm("Supprimer ce livre (les planches restent) ?")) { books.splice(books.indexOf(b), 1); await save(); this.home(); } } } }, "Supprimer le livre")));
   }
 
   newProjectDialog() {
