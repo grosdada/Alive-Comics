@@ -404,6 +404,29 @@ class Server(ThreadingHTTPServer):
         super().server_bind()
 
 
+def _console_safe():
+    """Windows : un clic dans la fenetre du serveur passe la console en « selection » (QuickEdit) et suspend tout
+    programme qui y ecrit -> l'application se fige. On coupe QuickEdit et on envoie le journal dans un fichier."""
+    if os.name == "nt":
+        try:
+            import ctypes
+            k = ctypes.windll.kernel32
+            h = k.GetStdHandle(-10)                       # entree de la console
+            mode = ctypes.c_uint32()
+            if k.GetConsoleMode(h, ctypes.byref(mode)):
+                k.SetConsoleMode(h, (mode.value & ~0x0040) | 0x0080)   # sans QuickEdit, avec ENABLE_EXTENDED_FLAGS
+        except (OSError, AttributeError):
+            pass
+    log = ROOT / "data" / "server.log"
+    log.parent.mkdir(exist_ok=True)
+    if log.exists() and log.stat().st_size > 5_000_000:
+        log.replace(log.with_suffix(".old.log"))
+    f = open(log, "a", encoding="utf-8", buffering=1)
+    f.write("\n===== demarrage %s =====\n" % time.strftime("%Y-%m-%d %H:%M:%S"))
+    sys.stdout = sys.stderr = f
+    return log
+
+
 def main():
     cfg = settings.load()["server"]
     host, port = cfg.get("host", "127.0.0.1"), int(os.environ.get("ALIVE_PORT") or cfg.get("port", 8790))
@@ -417,8 +440,13 @@ def main():
         if "--no-browser" not in sys.argv:
             webbrowser.open(url)
         return
+    print(f"Alive-Comics {VERSION} : {url}")
+    print("Laisser cette fenetre ouverte (la fermer arrete l'application).")
+    log = _console_safe()
+    if sys.__stdout__:                                   # absent si lance sans console (pythonw)
+        sys.__stdout__.write(f"Journal : {log}\n")
+        sys.__stdout__.flush()
     jobs.SCHEDULER.start()
-    print(f"Alive-Comics {VERSION} : {url}  (Ctrl+C pour arreter)")
     if "--no-browser" not in sys.argv:
         threading.Timer(1.0, lambda: webbrowser.open(url)).start()
     try:
