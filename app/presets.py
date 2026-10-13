@@ -204,7 +204,11 @@ def plan_panel(panel, project_style=""):
     extra = " ".join(e for e in extra if e)
     if extra:
         for j in res["jobs"]:
-            j["prompt"] = (j["prompt"] + " " + extra).strip()
+            base = j["prompt"]
+            if base.endswith("No cuts."):        # les precisions avant la consigne finale
+                j["prompt"] = (base[:-len("No cuts.")].strip() + " " + extra + " No cuts.").strip()
+            else:
+                j["prompt"] = (base + " " + extra).strip()
     return res
 
 
@@ -289,8 +293,10 @@ def _plan_panel(panel, project_style=""):
     }[aid]
     if action_text:
         action_text = action_text[0].upper() + action_text[1:]
+    # des « precisions » ecrites a la main valent consigne : elles suffisent a faire une video
+    has_extra = bool((cam.get("extra") or "").strip() or (act.get("extra") or "").strip())
     cam_text = {
-        "fixe": "Static camera, locked off, no camera movement.",
+        "fixe": "" if (cid == "fixe" and has_extra and not action_text) else "Static camera, locked off, no camera movement.",
         "grue": (f"Cinematic crane shot. The camera rises smoothly upward from eye level to a high angle looking down "
                  f"on {subject}."),
         "avancee": f"The camera slowly and physically travels forward toward {subject}, a dolly in and not a zoom.",
@@ -308,7 +314,7 @@ def _plan_panel(panel, project_style=""):
                        f"{_f(cf, 'close', 'a closer view of it')}."),
     }.get(cid, "")
     mlora = 0.6 if cid == "orbit360" else (0.5 if rigid and kind == "frozen" else 0.0)
-    if cid == "fixe" and not action_text:
+    if cid == "fixe" and not action_text and not has_extra:
         return {"player": "static", "autoplay": False, "loop": False, "jobs": []}
     text = " ".join(t for t in (cam_text, action_text, project_style.strip(), "No cuts.") if t)
     return {"player": "seul", "autoplay": True, "loop": loop, "jobs": [

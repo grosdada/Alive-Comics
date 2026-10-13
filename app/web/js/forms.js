@@ -92,7 +92,9 @@ export function actionForm(app, pid, compact) {
     box.append(extraField(app, act, redraw));
     box.append(aiBlock(app, pid, redraw));
   }
-  if ((panel.camera?.id || "fixe") === "fixe" && act.id === "fige") box.append(h("p.note", "Caméra fixe + temps figé : la case reste une image (pas de vidéo)."));
+  if ((panel.camera?.id || "fixe") === "fixe" && act.id === "fige" && !(panel.camera?.extra || "").trim()) {
+    box.append(h("p.note", "Caméra fixe + temps figé : la case reste une image, sauf si tu écris des précisions dans la caméra."));
+  }
   return box;
 }
 

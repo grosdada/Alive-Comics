@@ -176,6 +176,9 @@ class Scheduler:
             raise FileNotFoundError("image de depart manquante pour " + panel_id)
         w, h = png_size(start)
         plan = presets.plan_panel(panel, p.get("style", ""))
+        if not plan["jobs"]:
+            raise ValueError("caméra fixe + temps figé, sans précisions : c'est une image fixe, rien à calculer "
+                             "(choisis une action, un mouvement, ou écris des précisions)")
         base_seed = int(seed if seed is not None else panel.get("seed") or settings.load()["render"]["seed"])
         created = []
         for spec in plan["jobs"]:
