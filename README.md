@@ -15,10 +15,11 @@ L'interface s'ouvre sur http://127.0.0.1:8790/. Il faut Python 3.10+ et ffmpeg d
 
 ## Mode d'emploi (mode manuel)
 
-1. **Nouvelle planche** : un nom, un format (page BD, manga, 4:5, carré, 16:9) et un découpage de départ.
+1. **Nouvelle planche** : un nom, un format (page BD, manga, 4:5, carré, écran), le sens (vertical / horizontal)
+   et un découpage de départ.
 2. **Cadres** : glisse un trait pour le déplacer (les deux cases voisines suivent), glisse un de ses bouts pour
-   l'incliner (Maj : trait droit). Colonne de gauche : autres découpages, variante au hasard, couper ou supprimer
-   la case sélectionnée. Colonne de droite (rien de sélectionné) : couleur du fond autour des cases, traits,
+   l'incliner (Maj : trait droit). Colonne de gauche : autres découpages, variante au hasard, « Pivoter le
+   découpage » (les bandes deviennent des colonnes), couper ou supprimer la case sélectionnée. Colonne de droite (rien de sélectionné) : couleur du fond autour des cases, traits,
    gouttière, marge, ambiance commune. Ctrl+Z / Ctrl+Y.
 3. **Images** : glisse une image sur une case (ou clique dedans). Molette pour zoomer, glisser pour recadrer.
 4. **Dans chaque case**, quatre icônes :
@@ -26,10 +27,18 @@ L'interface s'ouvre sur http://127.0.0.1:8790/. Il faut Python 3.10+ et ffmpeg d
    - **Caméra** : orbite 360° en boucle, arc gauche ↔ droite, demi-arc, plongée ↕ contre-plongée,
      travelling avant ↔ arrière (la case se pilote au glisser, scène figée), ou caméra fixe, grue, lente avancée,
      épaule, texte libre (la scène bouge, lecture automatique).
-   - **Action** (caméras non figées) : vie subtile en boucle, mouvement nerveux en boucle, danse, marche, parole,
-     éléments en boucle, texte libre.
-   - **Son** : aucun, importer un fichier, ou générer avec MiniMax Music 3 (ambiances prêtes + précisions).
-   « ✨ Proposer les textes avec l'IA » regarde l'image et remplit les champs (sujet, vues d'arrivée…).
+   - **Action** : temps figé, vie subtile, mouvement nerveux, danse, marche, parole, éléments, texte libre.
+     « Animation en boucle » (cochée par défaut) : la fin rejoint le début. Une action fonctionne aussi avec un
+     mouvement de caméra (arc, orbite, travelling…) : la case joue alors le mouvement pendant l'action.
+   - **Sons**, trois couches :
+     1. ambiance / musique en boucle (fichier ou MiniMax Music 3, local) ;
+     2. voix off ou second son : fichier, voix off IA (MiniMax Speech sur fal, texte proposé par l'IA) ou
+        deuxième musique ; jouée depuis le début à chaque survol, ou en boucle ;
+     3. bruitages (foley) : « H3 natif » (la piste son calculée avec la vidéo, locale et synchronisée) ou
+        HunyuanVideo-Foley / MMAudio sur fal (calculés sur la vidéo finie).
+     Un volume par couche.
+   « ✨ Écrire les textes avec l'IA » regarde l'image et remplit les champs de la case ; son explication reste
+   affichée sous le bouton. Chaque caméra et action a aussi des « Précisions » libres.
 5. **Générer les cases** : choisir les cases, puis où calculer : tes machines ComfyUI, le cloud fal, ou mixte
    (fal prend ce que tes machines n'ont pas pris après 2 min). Les rendus se répartissent seuls ; une machine
    occupée garde la tâche dans sa file. Suivi dans « Rendus » en bas.
@@ -42,7 +51,8 @@ L'interface s'ouvre sur http://127.0.0.1:8790/. Il faut Python 3.10+ et ffmpeg d
 
 - **Machines** : les ComfyUI du réseau (ComfyUI ≥ 0.33, MiniMax H3, nœud `comfyui-h3-orbital`, LoRA 360 Orbit ;
   MiniMax Music 3 pour le son). Pastille verte = prête, bleue = occupée, orange = il manque quelque chose.
-- **Intelligence** : clés Anthropic (par défaut), OpenAI, Google, DeepSeek.
+- **Intelligence** : clés Anthropic (par défaut), OpenAI, Google, DeepSeek ; le modèle se choisit dans une liste
+  lue chez le fournisseur (↻ pour la recharger).
 - **fal** : clé, rendus simultanés, résolution, prix estimé.
 - **Publication** : hôte SSH, utilisateur, dossier du site. « Créer / afficher la clé de ce poste » donne la ligne
   à coller dans hPanel › Avancé › Accès SSH (une clé par poste).

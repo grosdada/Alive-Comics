@@ -31,6 +31,12 @@ def frames(video):
     return int(json.loads(out)["streams"][0]["nb_read_frames"])
 
 
+def has_audio(video):
+    out = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "a", "-show_entries", "stream=index", "-of", "csv=p=0",
+                          str(video)], capture_output=True, text=True, **NOFLASH).stdout
+    return bool(out.strip())
+
+
 def ffmpeg(args):
     r = subprocess.run(["ffmpeg", "-v", "error", "-y", *args], capture_output=True, text=True, **NOFLASH)
     if r.returncode:
@@ -101,12 +107,39 @@ def build(pid, log=print):
             report.append(f"{g['id']} {plan['player']} {n} images")
         elif plan["player"] != "static" and need:
             report.append(f"{g['id']} : rendu manquant ({', '.join(s for s in need if s not in srcs)})")
+        # ---- sons : 1 ambiance / musique (boucle), 2 voix off ou second son, 3 bruitages (foley)
         aud = panel.get("audio") or {}
         if aud.get("mode") in ("file", "generate") and aud.get("file") and (d / aud["file"]).exists():
             src = d / aud["file"]
             name = f"{g['id']}{src.suffix.lower()}"
             shutil.copy2(src, out / "sons" / name)
             entry["audio"] = f"sons/{name}"
+            entry["audioVol"] = float(aud.get("volume", 0.8))
+        voice = panel.get("voice") or {}
+        if voice.get("mode") in ("file", "tts", "music") and voice.get("file") and (d / voice["file"]).exists():
+            src = d / voice["file"]
+            name = f"{g['id']}_voix{src.suffix.lower()}"
+            shutil.copy2(src, out / "sons" / name)
+            entry["voice"] = {"src": f"sons/{name}", "vol": float(voice.get("volume", 1.0)),
+                              "loop": bool(voice.get("loop", voice.get("mode") == "music"))}
+        foley = panel.get("foley") or {}
+        if foley.get("on") and entry.get("video"):
+            name = f"{g['id']}_foley.mp3"
+            src = None
+            if foley.get("engine", "h3") == "h3":
+                side = "R" if plan["player"] == "arc" else "V"
+                vid = d / chosen[side] if chosen.get(side) else None
+                if vid and vid.exists() and has_audio(vid):
+                    src = out / "sons" / name
+                    ffmpeg(["-i", str(vid), "-vn", "-c:a", "libmp3lame", "-q:a", "2", str(src)])
+                else:
+                    report.append(f"{g['id']} : pas de piste son H3 dans ce rendu (refaire le rendu, ou bruitages cloud)")
+            elif foley.get("file") and (d / foley["file"]).exists():
+                src = out / "sons" / name
+                shutil.copy2(d / foley["file"], src)
+            if src:
+                entry["foley"] = {"src": f"sons/{name}", "vol": float(foley.get("volume", 0.9)),
+                                  "sync": bool(entry.get("autoplay"))}
         data["panels"].append(entry)
     cache_f.write_text(json.dumps(cache), encoding="utf-8")
     (out / "manga_data.js").write_text("window.MANGA = " + json.dumps(data, ensure_ascii=False) + ";\n", encoding="utf-8")
@@ -117,7 +150,9 @@ def build(pid, log=print):
         shutil.copy2(PLAYER / f, out / f)
     (out / "robots.txt").write_text("User-agent: *\nDisallow: /\n", encoding="utf-8")
     # ne garder que les videos et sons encore utilises
-    used = {e.get("video") for e in data["panels"]} | {e.get("audio") for e in data["panels"]}
+    used = ({e.get("video") for e in data["panels"]} | {e.get("audio") for e in data["panels"]}
+            | {(e.get("voice") or {}).get("src") for e in data["panels"]}
+            | {(e.get("foley") or {}).get("src") for e in data["panels"]})
     for sub in ("videos", "sons"):
         for f in (out / sub).iterdir():
             if f"{sub}/{f.name}" not in used:
@@ -139,6 +174,7 @@ def build_book(book, out, log=print):
         base = f"pages/{i + 1:02d}-{store.slug(store.get(pid).get('name', pid))}/"
         data = json.loads((src / "manga_data.js").read_text(encoding="utf-8").split("=", 1)[1].strip().rstrip(";"))
         files = [data["page"], data["frames"]] + [e[k] for e in data["panels"] for k in ("video", "audio") if e.get(k)]
+        files += [e[k]["src"] for e in data["panels"] for k in ("voice", "foley") if e.get(k)]
         for rel in files:
             (out / base / rel).parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(src / rel, out / base / rel)

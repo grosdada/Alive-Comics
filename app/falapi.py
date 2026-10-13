@@ -83,8 +83,8 @@ def poll(key, handle):
     if status != "COMPLETED":
         raise FalError("fal : statut %s" % status)
     res = _req(handle["response_url"], key, timeout=60)
-    if not res or "video" not in res:
-        raise FalError("fal : reponse sans video : %s" % json.dumps(res)[:800])
+    if not res:
+        raise FalError("fal : reponse vide")
     return res
 
 
@@ -116,3 +116,56 @@ def check_key(key):
         return True, ""
     except OSError as e:
         return False, "fal injoignable (%s)" % e.__class__.__name__
+
+
+# ------------------------------------------------------------------ fichiers, voix off, bruitages
+STORAGE = "https://rest.alpha.fal.ai/storage/upload/initiate?storage_type=fal-cdn-v3"
+TTS = "fal-ai/minimax/speech-02-hd"
+FOLEY = {"hunyuan": "fal-ai/hunyuan-video-foley", "mmaudio": "fal-ai/mmaudio-v2"}
+
+
+def upload_file(key, path):
+    """Envoie un fichier sur le stockage de fal et renvoie son URL (repli : data URI)."""
+    path = Path(path)
+    ctype = {".mp4": "video/mp4", ".mp3": "audio/mpeg", ".png": "image/png", ".jpg": "image/jpeg"}.get(
+        path.suffix.lower(), "application/octet-stream")
+    try:
+        init = _req(STORAGE, key, {"file_name": path.name, "content_type": ctype}, timeout=30)
+        req = urllib.request.Request(init["upload_url"], data=path.read_bytes(), method="PUT",
+                                     headers={"Content-Type": ctype})
+        with urllib.request.urlopen(req, timeout=600):
+            pass
+        return init["file_url"]
+    except (FalError, OSError, KeyError):
+        return "data:%s;base64,%s" % (ctype, base64.b64encode(path.read_bytes()).decode())
+
+
+def tts_payload(text, voice_id="Deep_Voice_Man", emotion="neutral", speed=1.0, language="French"):
+    vs = {"voice_id": voice_id, "speed": float(speed), "vol": 1, "pitch": 0}
+    if emotion and emotion != "neutral":
+        vs["emotion"] = emotion
+    return TTS, {"text": text, "voice_setting": vs, "language_boost": language, "output_format": "url",
+                 "audio_setting": {"format": "mp3", "sample_rate": 44100, "bitrate": 128000, "channel": 2}}
+
+
+def foley_payload(engine, video_url, prompt="", seed=None, duration=None):
+    if engine == "mmaudio":
+        body = {"video_url": video_url, "prompt": prompt or "", "num_steps": 25}
+        if duration:
+            body["duration"] = float(duration)
+    else:
+        body = {"video_url": video_url, "text_prompt": prompt or ""}
+    if seed is not None:
+        body["seed"] = int(seed)
+    return FOLEY[engine], body
+
+
+def result_url(res):
+    """URL du media renvoye (video ou audio)."""
+    for k in ("video", "audio"):
+        v = res.get(k)
+        if isinstance(v, dict) and v.get("url"):
+            return v["url"]
+        if isinstance(v, str) and v.startswith("http"):
+            return v
+    raise FalError("fal : reponse sans media : %s" % json.dumps(res)[:600])

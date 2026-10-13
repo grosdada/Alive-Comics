@@ -98,23 +98,76 @@ SYSTEM = ("You write prompts for MiniMax H3, an image-to-video model, for an ani
 def suggest_panel(image, camera_id, action_id, audio_preset=None, note=""):
     cam = presets.camera(camera_id)
     act = presets.action(action_id)
-    want = {f: presets.FIELDS[f][0] for f in cam.get("fields", []) if f != "text"}
-    want_act = {f: presets.FIELDS[f][0] for f in act.get("fields", []) if f != "text"}
+    want = {f: presets.FIELDS[f][0] for f in cam.get("fields", [])}
+    want_act = {f: presets.FIELDS[f][0] for f in act.get("fields", [])} if action_id != "fige" else {}
+    if "text" in want:
+        want["text"] = "the whole camera move, one or two English sentences"
+    if "text" in want_act:
+        want_act["text"] = "the whole action, one or two English sentences, strong and clearly visible motion"
     prompt = (
         f"This image is one panel of a comic page. Camera move chosen: '{cam['label']}' ({cam['hint']}). "
         f"Action chosen: '{act['label']}' ({act['hint']}).\n"
         f"Fill these camera fields: {json.dumps(want, ensure_ascii=False)}.\n"
         f"Fill these action fields: {json.dumps(want_act, ensure_ascii=False)}.\n"
-        "For 'left' / 'right': describe what we see at the end of the camera arc toward that side of the frame "
-        "(e.g. 'a three-quarter view of his face, the round glasses in front'). For 'close' / 'wide': the end of a "
-        "dolly in / dolly out.\n"
-        + (f"Also write an 'audio' caption for an ambient sound loop in the style '{audio_preset}': one English "
-           "sentence about mood and instruments.\n" if audio_preset else "")
+        "Field values are inserted into sentences such as 'The camera moves ... around {subject} ..., ending on {left}'. "
+        "So 'subject' is a short noun phrase (e.g. 'the golden mask'); 'left', 'right', 'ending', 'close', 'wide' are "
+        "noun phrases describing the FINAL view, starting with 'a' or 'the' (e.g. 'a three-quarter view of his face, "
+        "the round glasses in front'), never a sentence and never the word 'camera'. 'toward' is a noun phrase too.\n"
+        + (f"Also write 'audio': one English sentence for an ambient sound loop in the style '{audio_preset}' (mood, "
+           "instruments, textures).\n" if audio_preset else "")
         + (f"Author's note: {note}\n" if note else "")
         + 'Answer: {"camera": {...}, "action": {...}, "audio": "...", "rigid": true|false, "explain_fr": "une phrase en '
           'français : ce que tu as vu et pourquoi ces choix"}. "rigid" = the subject is a solid object that could '
           "wrongly spin on itself (mask, statue, vehicle).")
     return _json(chat(prompt, image=image, system=SYSTEM))
+
+
+def voice_line(image, note="", language="French"):
+    """Une courte voix off pour la case (une ou deux phrases), dans la langue demandee."""
+    lang = {"French": "français", "English": "anglais", "Spanish": "espagnol", "Italian": "italien",
+            "German": "allemand", "Portuguese": "portugais", "Japanese": "japonais"}.get(language, "français")
+    out = chat(f"Cette image est une case de bande dessinée. Écris une voix off de narrateur, en {lang}, pour cette case : "
+               "une ou deux phrases courtes, évocatrices, au présent, sans guillemets ni didascalies."
+               + (f" Indication de l'auteur : {note}" if note else ""), image=image, max_tokens=300)
+    return out.strip().strip('"«» ')
+
+
+def list_models(provider):
+    """Modeles disponibles chez un fournisseur (avec la cle enregistree)."""
+    import urllib.request
+    cfg = settings.load()["llm"]
+    key = (cfg.get(provider) or {}).get("key")
+    if not key:
+        raise LLMError("pas de clé pour " + provider)
+
+    def get(url, headers):
+        req = urllib.request.Request(url, headers=headers)
+        try:
+            with urllib.request.urlopen(req, timeout=30) as r:
+                return json.loads(r.read().decode("utf-8"))
+        except urllib.error.HTTPError as e:
+            raise LLMError(f"{e.code} : {e.read().decode('utf-8', 'replace')[:300]}")
+
+    if provider == "anthropic":
+        res = get("https://api.anthropic.com/v1/models?limit=100", {"x-api-key": key, "anthropic-version": "2023-06-01"})
+        return [{"id": m["id"], "label": m.get("display_name") or m["id"]} for m in res.get("data", [])]
+    if provider == "openai":
+        res = get("https://api.openai.com/v1/models", {"Authorization": "Bearer " + key})
+        skip = re.compile(r"audio|realtime|tts|transcribe|whisper|embedding|image|dall|moderation|search|davinci|babbage", re.I)
+        ids = sorted((m["id"] for m in res.get("data", []) if re.match(r"(gpt|o\d|chatgpt)", m["id"]) and not skip.search(m["id"])),
+                     reverse=True)
+        return [{"id": i, "label": i} for i in ids]
+    if provider == "google":
+        res = get("https://generativelanguage.googleapis.com/v1beta/models?pageSize=200", {"x-goog-api-key": key})
+        out = []
+        for m in res.get("models", []):
+            if "generateContent" in (m.get("supportedGenerationMethods") or []) and "gemini" in m["name"]:
+                out.append({"id": m["name"].split("/", 1)[1], "label": m.get("displayName") or m["name"]})
+        return out
+    if provider == "deepseek":
+        res = get("https://api.deepseek.com/models", {"Authorization": "Bearer " + key})
+        return [{"id": m["id"], "label": m["id"]} for m in res.get("data", [])]
+    raise LLMError("fournisseur inconnu : " + provider)
 
 
 def translate(text, purpose="video"):

@@ -1,6 +1,6 @@
 // Alive-Comics : application (etat, projets, edition, rendus, export, publication, reglages, livres).
 import { api, get, post, put, upload, h, toast, debounce, modal, loadImage } from "./api.js";
-import { compute, PRESETS, PAGE_DEFAULTS, FORMATS, randomLayout, removeLeaf, splitLeaf, leaves, clone } from "./geometry.js";
+import { compute, PRESETS, PAGE_DEFAULTS, FORMATS, pageSize, transpose, randomLayout, removeLeaf, splitLeaf, leaves, clone } from "./geometry.js";
 import { Editor, icon } from "./editor.js";
 import { startImage, pageImages } from "./exporter.js";
 import { cameraForm, actionForm, audioForm, renderSection, pageForm, statusText, sideName } from "./forms.js";
@@ -84,23 +84,30 @@ class App {
   newProjectDialog() {
     const name = h("input", { value: "Planche " + new Date().toLocaleDateString("fr-FR") });
     const fmt = h("select", FORMATS.map(f => h("option", { value: f.id }, f.label)));
-    let preset = "david";
+    let preset = "david", orient = "portrait";
     const thumbs = h("div.preset-grid", PRESETS.map(p => {
       const b = h("button.preset" + (p.id === preset ? ".on" : ""), { title: p.label, on: { click: () => {
         preset = p.id; thumbs.querySelectorAll(".preset").forEach(x => x.classList.toggle("on", x === b));
       } } }, presetThumb(p, FORMATS[0]), h("span", p.label));
       return b;
     }));
-    fmt.addEventListener("change", () => {
-      const f = FORMATS.find(x => x.id === fmt.value);
-      thumbs.querySelectorAll(".preset").forEach((b, i) => b.firstChild.replaceWith(presetThumb(PRESETS[i], f)));
-    });
-    modal("Nouvelle planche", h("div.form", h("label.field", h("span.lab", "Nom"), name), h("label.field", h("span.lab", "Format"), fmt),
+    const redrawThumbs = () => {
+      const [w, hh] = pageSize(fmt.value, orient);
+      thumbs.querySelectorAll(".preset").forEach((b, i) => b.firstChild.replaceWith(presetThumb(PRESETS[i], { w, h: hh })));
+    };
+    fmt.addEventListener("change", redrawThumbs);
+    const sens = h("div.seg", [["portrait", "Vertical"], ["paysage", "Horizontal"]].map(([k, l]) => {
+      const b = h("button" + (k === orient ? ".on" : ""), { on: { click: () => {
+        orient = k; sens.querySelectorAll("button").forEach(x => x.classList.toggle("on", x === b)); redrawThumbs();
+      } } }, l);
+      return b;
+    }));
+    modal("Nouvelle planche", h("div.form", h("label.field", h("span.lab", "Nom"), name), h("div.row", h("label.field", h("span.lab", "Format"), fmt), h("label.field", h("span.lab", "Sens"), sens)),
                                 h("span.lab", "Découpage de départ (modifiable ensuite)"), thumbs), [
       { label: "Annuler" },
       { label: "Créer", primary: true, click: async () => {
-        const f = FORMATS.find(x => x.id === fmt.value);
-        const page = Object.assign({}, PAGE_DEFAULTS, { format: f.id, width: f.w, height: f.h });
+        const [w, hh] = pageSize(fmt.value, orient);
+        const page = Object.assign({}, PAGE_DEFAULTS, { format: fmt.value, orientation: orient, width: w, height: hh });
         let n = 0;
         const layout = PRESETS.find(p => p.id === preset).make(() => ({ t: "leaf", id: "p" + (++n) }));
         const p = await post("projects", { name: name.value, page, layout });
@@ -117,6 +124,7 @@ class App {
     catch (e) { toast(e.message, "error"); location.hash = ""; return; }
     const P = this.project;
     P.page = Object.assign({}, PAGE_DEFAULTS, P.page);
+    if (P.page.format === "paysage") Object.assign(P.page, { format: "ecran", orientation: "paysage" });
     P.nextId = P.nextId || (Math.max(0, ...leaves(P.layout).map(id => +id.slice(1) || 0)) + 1);
     for (const id of leaves(P.layout)) P.panels[id] = Object.assign(NEW_PANEL(), P.panels[id] || {});
     this.selected = null; this.undo = []; this.redo = [];
@@ -176,7 +184,11 @@ class App {
     this.left.textContent = "";
     this.left.append(
       h("h3", "Découpage"), grid,
-      h("div.form", h("label.field", h("span.lab", "Cases (hasard)"), count), h("label.field", h("span.lab", "Inclinaison"), tilt), rnd),
+      h("div.form", h("label.field", h("span.lab", "Cases (hasard)"), count), h("label.field", h("span.lab", "Inclinaison"), tilt), rnd,
+        h("button", { title: "Les bandes deviennent des colonnes et inversement", on: { click: () => {
+          const before = this.snapshot(); P.layout = transpose(P.layout); this.pushUndo(before);
+          this.editor.render(); this.save(); this.pageSoon();
+        } } }, "↻ Pivoter le découpage")),
       h("h3", "Case sélectionnée"),
       sel ? h("div.form",
         h("button", { on: { click: () => this.splitSelected("h") } }, "Couper en deux ━"),
@@ -264,7 +276,7 @@ class App {
       section("Image", "image", imgBox),
       section("Caméra", "camera", cameraForm(this, id)),
       section("Action", "action", actionForm(this, id)),
-      section("Son", "audio", audioForm(this, id)),
+      section("Sons", "audio", audioForm(this, id)),
       section("Rendus", null, renderSection(this, id)));
   }
 
@@ -274,10 +286,16 @@ class App {
   }
 
   audioLabel(panel) {
-    const a = panel.audio || {};
-    if (a.mode === "file") return a.name || "fichier importé";
-    if (a.mode === "generate") return "généré : " + ((this.presets.audio.find(x => x.id === a.preset) || this.presets.audio[0]).label);
-    return "aucun";
+    const a = panel.audio || {}, v = panel.voice || {}, parts = [];
+    if (a.mode === "file") parts.push(a.name || "fichier");
+    if (a.mode === "generate") parts.push((this.presets.audio.find(x => x.id === a.preset) || this.presets.audio[0]).label);
+    if (v.mode && v.mode !== "none") parts.push(v.mode === "tts" ? "voix off" : v.mode === "music" ? "2e musique" : (v.name || "2e son"));
+    if (panel.foley?.on) parts.push("bruitages");
+    return parts.join(" + ") || "aucun";
+  }
+
+  hasSound(panel) {
+    return (panel.audio?.mode && panel.audio.mode !== "none") || (panel.voice?.mode && panel.voice.mode !== "none") || !!panel.foley?.on;
   }
 
   panelStatus(id) {
@@ -298,7 +316,7 @@ class App {
     if (this.selected !== id) this.select(id);
     if (kind === "image") return this.pickImage(id);
     const form = kind === "camera" ? cameraForm(this, id, true) : kind === "action" ? actionForm(this, id, true) : audioForm(this, id);
-    const pop = h("div.popover", h("div.pop-head", icon(kind), h("b", { camera: "Prompt caméra", action: "Prompt action", audio: "Son de la case" }[kind]),
+    const pop = h("div.popover", h("div.pop-head", icon(kind), h("b", { camera: "Prompt caméra", action: "Prompt action", audio: "Sons de la case" }[kind]),
                                    h("button.icon", { on: { click: () => pop.remove() } }, "✕")), form);
     document.body.append(pop);
     pop.style.left = Math.min(window.innerWidth - 340, Math.max(8, r.left)) + "px";
@@ -309,7 +327,7 @@ class App {
 
   // ---------------------------------------------------------------- import
   pickImage(id) { pickFile("image/*", (f) => this.importImage(id, f)); }
-  pickAudio(id) { pickFile("audio/*", (f) => this.importAudio(id, f)); }
+  pickAudio(id, layer = "audio") { pickFile("audio/*", (f) => this.importAudio(id, f, layer)); }
 
   async importImage(id, file) {
     try {
@@ -326,10 +344,11 @@ class App {
     } catch (e) { toast(e.message, "error"); }
   }
 
-  async importAudio(id, file) {
+  async importAudio(id, file, layer = "audio") {
     try {
-      const res = await upload(`projects/${this.project.id}/upload?kind=audio&panel=${id}&name=${encodeURIComponent(file.name)}`, file);
-      Object.assign(this.panel(id).audio = this.panel(id).audio || {}, { mode: "file", file: res.file, name: file.name });
+      const res = await upload(`projects/${this.project.id}/upload?kind=${layer}&panel=${id}&name=${encodeURIComponent(file.name)}`, file);
+      const panel = this.panel(id);
+      Object.assign(panel[layer] = panel[layer] || {}, { mode: "file", file: res.file, name: file.name });
       this.refreshInspector(); this.editor.renderOverlay(); this.save();
       toast("Son importé dans la case.", "ok");
     } catch (e) { toast(e.message, "error"); }
@@ -388,7 +407,12 @@ class App {
       const lp = this.project.panels[id];
       if (!lp) continue;
       lp.renders = sp.renders || []; lp.chosen = sp.chosen || {};
-      if (sp.audio) { lp.audio = lp.audio || {}; lp.audio.generated = sp.audio.generated || []; if (sp.audio.file) lp.audio.file = sp.audio.file; }
+      for (const layer of ["audio", "voice", "foley"]) {
+        if (!sp[layer]) continue;
+        lp[layer] = lp[layer] || {};
+        lp[layer].generated = sp[layer].generated || [];
+        if (sp[layer].file) lp[layer].file = sp[layer].file;
+      }
     }
     this.project.published = server.published;
   }
@@ -442,8 +466,17 @@ class App {
       } catch (err) { est.textContent = err.message; }
     };
     refresh();
+    const falNote = h("p.note");
+    const paints = () => {
+      const ids = [...chosen];
+      const tts = ids.filter(id => P.panels[id].voice?.mode === "tts" && !P.panels[id].voice.file).length;
+      const fol = ids.filter(id => P.panels[id].foley?.on && (P.panels[id].foley.engine || "h3") !== "h3").length;
+      falNote.textContent = (tts || fol) ? `À noter : ${tts ? tts + " voix off" : ""}${tts && fol ? " et " : ""}${fol ? fol + " bruitages cloud" : ""} passeront par fal (payant), même en mode « Mes machines ».` : "";
+    };
+    paints();
+    list.addEventListener("change", paints);
     modal("Générer les vidéos", h("div.form", h("span.lab", "Cases"), list, h("span.lab", "Où calculer ?"), tgt,
-                                  h("span.lab", "Machines"), wl, est), [
+                                  h("span.lab", "Machines"), wl, est, falNote), [
       { label: "Annuler" },
       { label: "Lancer", primary: true, click: async () => {
         if (!chosen.size) return false;
@@ -460,12 +493,14 @@ class App {
       } }]);
   }
 
-  async generateAudio(id) {
+  async generateLayer(id, layer) {
     await this.save();
     try {
-      await post(`projects/${this.project.id}/audio/${id}`, { seed: Math.floor(Math.random() * 1e8) });
-      toast("Son en file (2 à 6 min).", "ok"); this.drawerOpen = true; this.pollJobs();
-    } catch (e) { toast(e.message, "error"); }
+      if (layer === "foley" && !Object.keys(this.panel(id).chosen || {}).length) throw new Error("rends d'abord la vidéo de la case");
+      await post(`projects/${this.project.id}/${layer}/${id}`, { seed: Math.floor(Math.random() * 1e8) });
+      toast({ audio: "Son en file (2 à 6 min, sur tes machines).", voice: "Voix en file.", foley: "Bruitages en file (fal)." }[layer], "ok");
+      this.drawerOpen = true; this.pollJobs();
+    } catch (e) { toast(e.message, "error", 8000); }
   }
 
   async choose(id, side, file) {
@@ -589,9 +624,20 @@ class App {
         prov.value = S.llm.provider; prov.addEventListener("change", () => { S.llm.provider = prov.value; });
         const block = (p, label) => {
           const k = h("input", { type: "password", value: S.llm[p].key, placeholder: "clé API" });
-          const m = h("input", { value: S.llm[p].model });
-          k.addEventListener("input", () => { S.llm[p].key = k.value; }); m.addEventListener("input", () => { S.llm[p].model = m.value; });
-          return h("div.row", h("b.w8", label), k, m, h("button.mini", { on: { click: async () => {
+          const m = h("select.model", h("option", { value: S.llm[p].model }, S.llm[p].model));
+          k.addEventListener("input", () => { S.llm[p].key = k.value; }); m.addEventListener("change", () => { S.llm[p].model = m.value; });
+          const load = async () => {
+            try {
+              const models = await get("llm/models?provider=" + p);
+              const cur = S.llm[p].model;
+              m.replaceChildren(...models.map(x => h("option", { value: x.id }, x.label === x.id ? x.id : `${x.label} (${x.id})`)));
+              if (!models.some(x => x.id === cur)) m.prepend(h("option", { value: cur }, cur));
+              m.value = cur;
+            } catch (e) { /* pas de cle ou fournisseur injoignable : on garde le modele enregistre */ }
+          };
+          if (S.llm[p].key) load();
+          return h("div.row", h("b.w8", label), k, m, h("button.mini", { title: "Recharger la liste des modèles", on: { click: async () => {
+            await put("settings", { llm: S.llm }); await load(); } } }, "↻"), h("button.mini", { on: { click: async () => {
             try { await put("settings", { llm: S.llm }); const r = await post("llm/test", { provider: p }); toast(label + " : " + r.text, "ok"); }
             catch (e) { toast(label + " : " + e.message, "error", 8000); }
           } } }, "Tester"));

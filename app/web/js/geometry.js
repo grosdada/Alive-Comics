@@ -7,15 +7,27 @@
 //   pour "h", a = hauteur au bord gauche, b = hauteur au bord droit (a != b : trait penche).
 // Les cases sont des polygones convexes : le parent decoupe par deux demi-plans, ecartes de la gouttiere.
 
+// formats donnes en vertical ; « Horizontal » echange largeur et hauteur
 export const FORMATS = [
   { id: "bd", label: "Page BD (2:3)", w: 1600, h: 2400 },
   { id: "manga", label: "Manga B5", w: 1500, h: 2120 },
-  { id: "portrait45", label: "Portrait 4:5", w: 1600, h: 2000 },
+  { id: "portrait45", label: "4:5", w: 1600, h: 2000 },
   { id: "carre", label: "Carré", w: 2000, h: 2000 },
-  { id: "paysage", label: "Paysage 16:9", w: 2400, h: 1350 },
+  { id: "ecran", label: "Écran 9:16", w: 1350, h: 2400 },
 ];
 
-export const PAGE_DEFAULTS = { format: "bd", width: 1600, height: 2400, bg: "#ffffff", stroke: "#111111",
+export function pageSize(format, orientation) {
+  const f = FORMATS.find(x => x.id === format) || FORMATS[0];
+  return orientation === "paysage" ? [f.h, f.w] : [f.w, f.h];
+}
+
+// pivote un decoupage : les bandes deviennent des colonnes et inversement
+export function transpose(node) {
+  if (!node || node.t === "leaf") return node;
+  return { ...node, dir: node.dir === "h" ? "v" : "h", c: [transpose(node.c[0]), transpose(node.c[1])] };
+}
+
+export const PAGE_DEFAULTS = { format: "bd", orientation: "portrait", width: 1600, height: 2400, bg: "#ffffff", stroke: "#111111",
                                strokeWidth: 5, gutter: 22, margin: 60 };
 
 // ------------------------------------------------------------------ outils

@@ -18,6 +18,7 @@ H3_UNET = "minimax_h3_fl2va_pruned_int8_convrot.safetensors"
 H3_LORA = "minimax_h3_flf2v_lora_v1.safetensors"
 H3_CLIP = "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors"
 H3_VAE = "minimax_h3_video_vae_fp16.safetensors"
+H3_AUDIO_VAE = "minimax_h3_audio_vae_fp32.safetensors"   # piste son native (bruitages)
 M3_DIT = "minimax_music3_dit_fp16.safetensors"
 M3_TE = "minimax_music3_text_encoder_pruned_int8_convrot.safetensors"
 M3_VAE = "minimax_music3_dav.safetensors"
@@ -69,7 +70,7 @@ def _h3_common(g, lora):
     })
 
 
-def h3_graph(spec, image_names, prefix, steps=28):
+def h3_graph(spec, image_names, prefix, steps=28, audio=True):
     """spec : {mode: orbit|path|animated, prompt, lora, length, seed, megapixels, last_is_first, refs}
     image_names : {"start": "...", "character": [...], "set": [...]} (noms renvoyes par upload)."""
     g = {
@@ -91,6 +92,10 @@ def h3_graph(spec, image_names, prefix, steps=28):
                                                      "format": "auto", "codec": "auto"}},
     }
     _h3_common(g, spec.get("lora", 0.0))
+    if audio:   # comme le modele officiel : la piste son du latent AV, decodee et jointe a la video
+        g["50"] = {"class_type": "VAELoader", "inputs": {"vae_name": H3_AUDIO_VAE}}
+        g["51"] = {"class_type": "VAEDecodeAudio", "inputs": {"samples": ["13", 0], "vae": ["50", 0]}}
+        g["15"]["inputs"]["audio"] = ["51", 0]
     if spec["mode"] in ("orbit", "path"):
         cond = {"clip": ["6", 0], "vae": ["7", 0], "start_image": ["2", 0], "mode": spec["mode"],
                 "prompt": spec.get("prompt", ""), "length": int(spec["length"]), "ref_image_size": "match",
@@ -189,7 +194,8 @@ def cancel(server, prompt_id):
 
 def preflight(server):
     """{online, version, video: bool, music: bool, missing: [...], load} pour l'interface et le planificateur."""
-    out = {"online": False, "version": "", "video": False, "music": False, "missing": [], "load": 0, "gpu": ""}
+    out = {"online": False, "version": "", "video": False, "music": False, "h3audio": False, "missing": [], "load": 0,
+           "gpu": ""}
     try:
         stats = http_json(server.rstrip("/") + "/system_stats", timeout=6)
     except (OSError, ValueError) as exc:
@@ -227,6 +233,7 @@ def preflight(server):
                                                ("UNETLoader", "unet_name", M3_DIT, "modele Music 3")]
               if not has(node, f, fn)]
     out["music"] = not miss_m and not out["missing"]
+    out["h3audio"] = has("VAELoader", "vae_name", H3_AUDIO_VAE)
     out["missing"] += miss_v + miss_m
     try:
         out["load"] = queue_load(server)

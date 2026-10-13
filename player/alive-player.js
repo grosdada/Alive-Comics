@@ -10,7 +10,10 @@
  * Donnees d'une page (format produit par Alive-Comics et par les scripts H3-Orbital) :
  *   { page: "page.jpg", frames: "frames.png"?, size: [W, H], fps: 24,
  *     panels: [{ id, rect: [x0,y0,x1,y1], poly?: [[x,y]...], video?, frames, center,
- *                loop?, autoplay?, idle?, audio? }] }
+ *                loop?, autoplay?, idle?, audio?, audioVol?,
+ *                voice?: {src, vol, loop}, foley?: {src, vol, sync} }] }
+ * Sons au survol : audio = ambiance en boucle ; voice = voix off (reprise du debut a chaque survol, ou
+ * boucle) ; foley = bruitages, cales sur l'image affichee quand la case joue toute seule.
  *
  * API : AlivePlayer.mount(conteneur, donnees, { base: "pages/p1/", gauge: false }) -> { destroy(), reset() }
  *       (gauge : affiche la tete de lecture au survol ; cachee par defaut)
@@ -85,10 +88,19 @@
       el.insertBefore(iv, gauge);
       st.idle = iv; st.idleOn = true;
     }
-    if (p.audio) {            // son au survol, en fondu
-      st.audio = new Audio(base + p.audio); st.audio.loop = true; st.audio.volume = 0;
-      el.addEventListener("pointerenter", (e) => { if (e.pointerType !== "touch") fadeAudio(st, 1); });
-      el.addEventListener("pointerleave", () => fadeAudio(st, 0));
+    // sons au survol, en fondu : jusqu'a trois couches
+    st.layers = [];
+    const layer = (src, vol, mode) => {
+      const a = new Audio(base + src);
+      a.loop = mode !== "once"; a.volume = 0; a.preload = "auto";
+      st.layers.push({ a, vol: Math.max(0, Math.min(1, vol ?? 1)), mode, timer: null });
+    };
+    if (p.audio) layer(p.audio, p.audioVol ?? 1, "loop");
+    if (p.voice) layer(p.voice.src, p.voice.vol, p.voice.loop ? "loop" : "once");
+    if (p.foley) layer(p.foley.src, p.foley.vol, p.foley.sync ? "sync" : "loop");
+    if (st.layers.length) {
+      el.addEventListener("pointerenter", (e) => { if (e.pointerType !== "touch") soundOnPanel(st, true); });
+      el.addEventListener("pointerleave", () => soundOnPanel(st, false));
       el.addEventListener("pointerdown", (e) => { if (e.pointerType === "touch") toggleTouchAudio(st); });
     }
     bindDrag(el, () => st);
@@ -192,6 +204,7 @@
 
   function render(st) {
     const idx = wrap(Math.round(st.pos), st);
+    if (st.hover) for (const L of st.layers || []) if (L.mode === "sync") syncLayer(st, L, false);
     st.dot.style.left = idx / (st.p.frames - 1) * 100 + "%";
     for (const rec of st.videos) seek(rec, idx);
   }
@@ -214,34 +227,55 @@
     for (const st of inst.panels) {
       for (const rec of st.videos) { rec.v.removeAttribute("src"); rec.v.load(); }
       if (st.idle) { st.idle.pause(); st.idle.removeAttribute("src"); st.idle.load(); }
-      if (st.audio) { clearInterval(st.fadeTimer); st.audio.pause(); st.audio.src = ""; }
+      for (const L of st.layers || []) { clearInterval(L.timer); L.a.pause(); L.a.src = ""; }
     }
     inst.pageEl.remove();
     pages.delete(inst);
   }
 
   // ---------------------------------------------------------------- son
-  function fadeAudio(st, target) {
-    const a = st.audio;
-    if (!a) return;
-    clearInterval(st.fadeTimer);
-    if (target > 0) {
-      if (!soundOn) return;
-      a.play().catch(() => {});
-    }
-    st.fadeTimer = setInterval(() => {
-      a.volume = Math.max(0, Math.min(1, a.volume + (target > a.volume ? 0.08 : -0.08)));
-      if (Math.abs(a.volume - target) < 0.08) {
-        a.volume = target; clearInterval(st.fadeTimer);
-        if (target === 0) a.pause();
+  function fade(L, target) {
+    clearInterval(L.timer);
+    L.timer = setInterval(() => {
+      const v = L.a.volume + (target > L.a.volume ? 0.06 : -0.06);
+      L.a.volume = Math.max(0, Math.min(1, v));
+      if (Math.abs(L.a.volume - target) < 0.06) {
+        L.a.volume = target; clearInterval(L.timer);
+        if (target === 0) L.a.pause();
       }
     }, 30);
   }
 
+  // allume / eteint les sons d'une case
+  function soundOnPanel(st, on) {
+    st.hover = on;
+    for (const L of st.layers || []) {
+      if (on && soundOn) {
+        if (L.mode === "once" && (L.a.paused || L.a.ended)) L.a.currentTime = 0;
+        if (L.mode === "sync") syncLayer(st, L, true);
+        L.a.play().catch(() => {});
+        fade(L, L.vol);
+      } else {
+        fade(L, 0);
+      }
+    }
+  }
+
+  // bruitages : suivent l'image affichee (lecture auto vers l'avant) ; coupes pendant un retour en arriere
+  function syncLayer(st, L, force) {
+    const d = L.a.duration;
+    if (!d || !isFinite(d)) return;
+    const back = st.p.autoplay && !st.p.loop && st.dir < 0;
+    if (back || st.drag) { if (!L.a.paused) L.a.pause(); return; }
+    const t = (wrap(Math.round(st.pos), st) / st.inst.fps) % d;
+    if (L.a.paused && st.hover && soundOn) L.a.play().catch(() => {});
+    if (force || Math.abs(L.a.currentTime - t) > 0.25) L.a.currentTime = t;
+  }
+
   // tactile : pas de survol, le son suit la derniere case touchee
   function toggleTouchAudio(st) {
-    for (const inst of pages) for (const o of inst.panels) if (o !== st && o.audio) fadeAudio(o, 0);
-    fadeAudio(st, 1);
+    for (const inst of pages) for (const o of inst.panels) if (o !== st && o.hover) soundOnPanel(o, false);
+    soundOnPanel(st, true);
   }
 
   // iOS / Android : les videos ne chargent qu'apres un premier geste
@@ -298,10 +332,10 @@
   }
   function setSound(on) {
     soundOn = !!on;
-    if (!soundOn) for (const inst of pages) for (const st of inst.panels) fadeAudio(st, 0);
+    if (!soundOn) for (const inst of pages) for (const st of inst.panels) if (st.hover) soundOnPanel(st, false);
   }
   function resetAll() { for (const inst of pages) resetPage(inst); }
-  function hasAudio(M) { return M.panels.some(p => p.audio); }
+  function hasAudio(M) { return M.panels.some(p => p.audio || p.voice || p.foley); }
 
   window.AlivePlayer = { mount, setBW, setSound, resetAll, hasAudio, isLightboxOpen: () => !!lb.st,
                          _pages: pages };

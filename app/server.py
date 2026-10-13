@@ -49,12 +49,13 @@ def merge_project(server_p, ui_p):
         panel = dict(panel)
         panel["renders"] = old.get("renders", [])
         panel["chosen"] = old.get("chosen", {})
-        aud = dict(panel.get("audio") or {})
-        oa = old.get("audio") or {}
-        aud["generated"] = oa.get("generated", [])
-        if oa.get("file"):
-            aud["file"] = oa["file"] if aud.get("file") != "" else ""
-        panel["audio"] = aud
+        for layer in ("audio", "voice", "foley"):
+            cur = dict(panel.get(layer) or {})
+            prev = old.get(layer) or {}
+            cur["generated"] = prev.get("generated", [])
+            if prev.get("file") and cur.get("file") != "":
+                cur["file"] = prev["file"]
+            panel[layer] = cur
         panels[pid] = panel
     out["panels"] = panels
     return out
@@ -232,6 +233,13 @@ class Handler(BaseHTTPRequestHandler):
             if parts[1:] == ["test"] and m == "POST":
                 b = self.jbody()
                 return self.send_json({"text": llm.chat("Réponds juste : OK", provider=b.get("provider"), max_tokens=20)})
+            if parts[1:] == ["models"] and m == "GET":
+                return self.send_json(llm.list_models(q.get("provider", "anthropic")))
+            if parts[1:] == ["voice"] and m == "POST":
+                b = self.jbody()
+                img = store.path(b["project"], f"start/{b['panel']}.png")
+                return self.send_json({"text": llm.voice_line(img if img.exists() else None, b.get("note", ""),
+                                                              b.get("language", "French"))})
         if head == "fal" and parts[1:] == ["test"] and m == "POST":
             ok, msg = falapi.check_key(settings.load()["fal"].get("key", ""))
             return self.send_json({"ok": ok, "message": msg})
@@ -272,9 +280,9 @@ class Handler(BaseHTTPRequestHandler):
             name = q.get("name") or "fichier"
             stamp = time.strftime("%Y%m%d-%H%M%S") + "-" + secrets.token_hex(2)
             rel = store.write_file(pid, "assets", f"{stamp}-{name}", data)
-            if q.get("kind") == "audio" and q.get("panel"):
+            if q.get("kind") in ("audio", "voice") and q.get("panel"):
                 def setaud(p):
-                    aud = p["panels"].setdefault(q["panel"], {}).setdefault("audio", {})
+                    aud = p["panels"].setdefault(q["panel"], {}).setdefault(q["kind"], {})
                     aud.update(mode="file", file=rel, name=name)
                 store.mutate(pid, setaud)
             return self.send_json({"file": rel, "url": f"/projects/{pid}/{rel}"})
@@ -304,13 +312,20 @@ class Handler(BaseHTTPRequestHandler):
         if sub == "audio" and m == "POST":
             b = self.jbody()
             return self.send_json({"jobs": S.enqueue_audio(pid, parts[3], b.get("machines"), b.get("seed"))})
+        if sub == "voice" and m == "POST":
+            b = self.jbody()
+            return self.send_json({"jobs": S.enqueue_voice(pid, parts[3], b.get("machines"), b.get("seed"))})
+        if sub == "foley" and m == "POST":
+            b = self.jbody()
+            return self.send_json({"jobs": S.enqueue_foley(pid, parts[3], seed=b.get("seed"))})
         if sub == "choose" and m == "POST":
             b = self.jbody()
 
             def choose(p):
                 panel = p["panels"].setdefault(b["panel"], {})
-                if b.get("side") == "A":
-                    panel.setdefault("audio", {})["file"] = b["file"]
+                layer = {"A": "audio", "B": "voice", "F": "foley"}.get(b.get("side"))
+                if layer:
+                    panel.setdefault(layer, {})["file"] = b["file"]
                 else:
                     panel.setdefault("chosen", {})[b["side"]] = b["file"]
             return self.send_json(store.mutate(pid, choose))
@@ -354,7 +369,7 @@ class Handler(BaseHTTPRequestHandler):
 
 def main():
     cfg = settings.load()["server"]
-    host, port = cfg.get("host", "127.0.0.1"), int(cfg.get("port", 8790))
+    host, port = cfg.get("host", "127.0.0.1"), int(os.environ.get("ALIVE_PORT") or cfg.get("port", 8790))
     if not shutil.which("ffmpeg"):
         print("ATTENTION : ffmpeg introuvable dans le PATH (necessaire pour l'export)")
     jobs.SCHEDULER.start()

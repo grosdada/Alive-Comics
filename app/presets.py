@@ -67,7 +67,7 @@ ACTIONS = [
      "hint": "Le personnage parle avec expression, petits gestes."},
     {"id": "elements", "label": "Éléments en boucle", "loop": True, "fields": ["detail"],
      "hint": "Vent, fumée, eau, feu, lumière qui bougent en continu ; les personnages restent presque immobiles."},
-    {"id": "custom", "label": "Texte libre…", "loop": False, "fields": ["text"], "options": ["loop"],
+    {"id": "custom", "label": "Texte libre…", "loop": False, "fields": ["text"],
      "hint": "Décris toi-même l'action (en anglais de préférence). Coche « en boucle » si elle doit se refermer."},
 ]
 
@@ -115,6 +115,38 @@ AUDIO = [
 ]
 DRONE = ("Dark ambient drone, no melody, no beat, no drums, made to loop seamlessly: a slowly evolving texture "
          "with no clear beginning or end.")
+
+# ------------------------------------------------------------------ deuxieme son : voix off (MiniMax Speech sur fal)
+VOICES = [
+    {"id": "Deep_Voice_Man", "label": "Homme, voix grave"},
+    {"id": "Imposing_Manner", "label": "Homme, solennel"},
+    {"id": "Elegant_Man", "label": "Homme, élégant"},
+    {"id": "Patient_Man", "label": "Homme, posé"},
+    {"id": "Casual_Guy", "label": "Homme, décontracté"},
+    {"id": "Determined_Man", "label": "Homme, déterminé"},
+    {"id": "Young_Knight", "label": "Jeune homme"},
+    {"id": "Decent_Boy", "label": "Garçon"},
+    {"id": "Wise_Woman", "label": "Femme, sage"},
+    {"id": "Calm_Woman", "label": "Femme, calme"},
+    {"id": "Abbess", "label": "Femme, mystérieuse"},
+    {"id": "Inspirational_girl", "label": "Jeune femme, inspirée"},
+    {"id": "Lively_Girl", "label": "Jeune femme, vive"},
+    {"id": "Lovely_Girl", "label": "Jeune fille, douce"},
+    {"id": "Exuberant_Girl", "label": "Jeune fille, exubérante"},
+    {"id": "Friendly_Person", "label": "Voix neutre, amicale"},
+]
+EMOTIONS = ["neutral", "sad", "fearful", "surprised", "happy", "angry", "disgusted"]
+LANGUAGES = ["French", "English", "Spanish", "Italian", "German", "Portuguese", "Japanese", "auto"]
+
+# ------------------------------------------------------------------ bruitages (foley)
+FOLEY = [
+    {"id": "h3", "label": "H3 natif (local, synchronisé, gratuit)",
+     "hint": "La piste son que H3 calcule avec la vidéo. Pour les vidéos rendues après le 13/10/2026."},
+    {"id": "hunyuan", "label": "HunyuanVideo-Foley (cloud fal)",
+     "hint": "Bruitages calculés à partir de la vidéo finie de la case. Payant (fal)."},
+    {"id": "mmaudio", "label": "MMAudio (cloud fal)",
+     "hint": "Bruitages calculés à partir de la vidéo finie, plus rapide. Payant (fal)."},
+]
 INSTRUMENTAL_LYRICS = "[Intro]\n\n[Instrumental]\n\n[Outro]"
 
 LENGTH_ARC = 73       # 3 s par demi-arc
@@ -137,10 +169,14 @@ def action(aid):
 
 
 def compatible(cam_id, act_id):
-    """(ok, message). Une camera pilotee au glisser impose le temps fige."""
+    """(ok, message). Toute combinaison est permise ; on explique seulement ce qui va se passer."""
     cam = camera(cam_id)
     if cam["kind"] == "frozen" and act_id != "fige":
-        return False, "Avec une caméra pilotée au glisser, la scène est figée : l'action est ignorée."
+        msg = ("Avec une action, la case se joue toute seule : la caméra fait son mouvement pendant l'action "
+               "(un seul plan, plus de pilotage au glisser).")
+        if cam_id == "orbit360":
+            msg += " Orbite + action : expérimental (LoRA 360 à 0,6)."
+        return True, msg
     return True, ""
 
 
@@ -191,7 +227,7 @@ def _plan_panel(panel, project_style=""):
     lora = 0.5 if rigid else 0.0
     kind = camera(cid)["kind"]
 
-    if kind == "frozen":
+    if kind == "frozen" and aid == "fige":
         if cid == "orbit360":
             extra = f"The camera orbits around {subject}." if cf.get("subject") else ""
             return {"player": "loop", "autoplay": False, "loop": True,
@@ -232,9 +268,8 @@ def _plan_panel(panel, project_style=""):
                 {"side": "L", "mode": "path", "lora": 0.0, "length": LENGTH_ARC, "prompt": back},
                 {"side": "R", "mode": "path", "lora": 0.0, "length": LENGTH_ARC, "prompt": fwd}]}
 
-    # ---- plans animes : la scene bouge, lecture automatique
-    act_def = action(aid)
-    loop = bool(act.get("loop")) if aid == "custom" else act_def["loop"]
+    # ---- plans animes : la scene bouge, lecture automatique (camera libre, ou mouvement + action)
+    loop = bool(act.get("loop", True))          # « animation en boucle » : cochee par defaut
     asub = _f(af, "subject", subject)
     detail = _f(af, "detail", "")
     action_text = {
@@ -261,12 +296,23 @@ def _plan_panel(panel, project_style=""):
         "avancee": f"The camera slowly and physically travels forward toward {subject}, a dolly in and not a zoom.",
         "epaule": "Handheld camera with a light, subtle shake, as if held by a nervous operator; no orbit, no pan, no zoom.",
         "custom": _f(cf, "text", ""),
+        # mouvements « pilotes au glisser » joues en un seul plan avec une action
+        "orbit360": f"The camera orbits smoothly all the way around {subject} in a continuous circle, always aimed at the subject.",
+        "arc": (f"The camera moves smoothly along an arc of about {angle} degrees around {subject}, always aimed at the subject, "
+                f"revealing {_f(cf, 'right', _f(cf, 'left', 'its side'))}."),
+        "demi_arc": (f"The camera moves smoothly along a wide arc around {subject} toward "
+                     f"{_f(cf, 'toward', 'one side of the frame')}, always aimed at the subject, revealing "
+                     f"{_f(cf, 'ending', 'a three-quarter view of it')}."),
+        "vertical": f"The camera slowly rises above {subject}, always aimed at the subject, ending on a high view looking down on it.",
+        "travelling": (f"The camera physically travels forward toward {subject}, a dolly in and not a zoom, ending on "
+                       f"{_f(cf, 'close', 'a closer view of it')}."),
     }.get(cid, "")
+    mlora = 0.6 if cid == "orbit360" else (0.5 if rigid and kind == "frozen" else 0.0)
     if cid == "fixe" and not action_text:
         return {"player": "static", "autoplay": False, "loop": False, "jobs": []}
     text = " ".join(t for t in (cam_text, action_text, project_style.strip(), "No cuts.") if t)
     return {"player": "seul", "autoplay": True, "loop": loop, "jobs": [
-        {"side": "V", "mode": "animated", "lora": 0.0, "length": LENGTH_LONG, "prompt": text, "last_is_first": loop}]}
+        {"side": "V", "mode": "animated", "lora": mlora, "length": LENGTH_LONG, "prompt": text, "last_is_first": loop}]}
 
 
 def audio_caption(preset_id, extra=""):
@@ -290,4 +336,5 @@ FIELDS = {
 def public():
     """Ce que l'interface recoit."""
     return {"cameras": CAMERAS, "actions": ACTIONS, "audio": [{k: v for k, v in a.items() if k != "caption"} for a in AUDIO],
-            "amplitudes": AMPLITUDES, "fields": {k: {"label": a, "placeholder": b} for k, (a, b) in FIELDS.items()}}
+            "amplitudes": AMPLITUDES, "fields": {k: {"label": a, "placeholder": b} for k, (a, b) in FIELDS.items()},
+            "voices": VOICES, "emotions": EMOTIONS, "languages": LANGUAGES, "foley": FOLEY}

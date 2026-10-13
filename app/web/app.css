@@ -163,3 +163,11 @@ table.jobs tr.done td:nth-child(3) { color: var(--ok); }
   .work { grid-template-columns: 200px minmax(0, 1fr) 300px; }
   .pname { width: 150px; }
 }
+
+/* ---------- couches de son, IA */
+.form h5 { margin: 8px 0 0; font-size: 12.5px; color: var(--accent); text-transform: uppercase; letter-spacing: .04em; }
+.form.layer { border-left: 2px solid #3a3a3a; padding-left: 9px; }
+.ai-row { display: flex; flex-direction: column; gap: 6px; }
+.ai-explain { margin: 0; font-size: 12.5px; color: #d8c9a8; background: #221d14; border-radius: 6px; padding: 7px 9px; }
+select.model { flex: 1; min-width: 180px; }
+audio { width: 100%; height: 34px; }

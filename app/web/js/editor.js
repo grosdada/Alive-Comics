@@ -133,7 +133,7 @@ export class Editor {
         this.tool(g.id, "image", panel.image ? "Remplacer l'image" : "Importer une image"),
         this.tool(g.id, "camera", "Caméra : " + this.app.label("camera", panel.camera?.id)),
         this.tool(g.id, "action", "Action : " + this.app.label("action", panel.action?.id)),
-        this.tool(g.id, "audio", "Son : " + this.app.audioLabel(panel), !!panel.audio && panel.audio.mode !== "none"),
+        this.tool(g.id, "audio", "Sons : " + this.app.audioLabel(panel), this.app.hasSound(panel)),
         st ? h("span.dot." + st.kind, { title: st.text }) : null);
       box.append(bar);
       if (!panel.image) {

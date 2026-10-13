@@ -77,6 +77,7 @@ def main():
         files = [data["page"]] + ([data["frames"]] if data.get("frames") else [])
         for p in data["panels"]:
             files += [p[k] for k in ("video", "idle", "audio") if p.get(k)]
+            files += [p[k]["src"] for k in ("voice", "foley") if p.get(k)]
         for rel in files:
             copy(folder / rel, out / base / rel)
         book["pages"].append({"title": title, "base": base, "data": data})
