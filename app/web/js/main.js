@@ -135,7 +135,7 @@ class App {
 
   // ================================================================ espace de travail
   async open(pid) {
-    try { this.project = await get("projects/" + pid); }
+    try { this.project = await get("projects/" + pid); this._rev = this.project.rev; this._savedSig = null; }
     catch (e) { toast(e.message, "error"); location.hash = ""; return; }
     const P = this.project;
     P.page = Object.assign({}, PAGE_DEFAULTS, P.page);
@@ -416,8 +416,10 @@ class App {
     const sig = this.snapshot();
     try {
       const saved = await put("projects/" + this.project.id, this.project);
-      this._savedSig = sig;
+      this._rev = saved.rev;
+      const untouched = this.snapshot() === sig;          // rien modifie pendant l'envoi
       this.absorb(saved);
+      this._savedSig = untouched ? this.snapshot() : sig;   // apres absorb : copie locale = copie du serveur
       if (first && !saved.thumb) this.pageSoon();
     } catch (e) {
       // serveur arrete ou en redemarrage : on retente seul, sans perdre ce qui est en memoire
@@ -624,8 +626,26 @@ class App {
 
   async cancelJob(jid) { await post(`jobs/${jid}/cancel`); this.pollJobs(); }
 
+  // planche modifiee par un autre (pilotage par API, autre onglet) : on recharge si rien n'est en cours ici
+  async watchRev() {
+    if (!this.project || this._reloading) return;
+    try {
+      const r = await get(`projects/${this.project.id}/rev`);
+      if (this._rev == null) { this._rev = r.rev; return; }
+      if (r.rev > this._rev && this.snapshot() === this._savedSig && !document.querySelector(".popover, .modal-back, .veil")) {
+        this._reloading = true;
+        const keep = this.selected;
+        await this.open(this.project.id);
+        if (keep && this.project.panels[keep]) this.select(keep);
+        this._reloading = false;
+      }
+      this._rev = Math.max(this._rev, r.rev);
+    } catch (e) { this._reloading = false; }
+  }
+
   async pollJobs() {
     if (!this.project) return;
+    this.watchRev();
     try {
       const jobs = await get("jobs?project=" + this.project.id);
       const finished = jobs.some(j => j.status === "done" && !this.jobs.find(o => o.id === j.id && o.status === "done"));

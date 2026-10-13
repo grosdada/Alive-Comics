@@ -22,7 +22,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
-from . import assemble, director, falapi, jobs, llm, presets, publish, settings, store
+from . import assemble, compose, director, falapi, geometry, jobs, llm, presets, publish, settings, store
 
 ROOT = Path(__file__).resolve().parent.parent
 WEB = ROOT / "app" / "web"
@@ -217,6 +217,9 @@ class Handler(BaseHTTPRequestHandler):
                                    "fal": bool(settings.load()["fal"].get("key"))})
         if head == "presets" and m == "GET":
             return self.send_json(presets.public())
+        if head == "layouts" and m == "GET":          # decoupages prets (pilotage par API)
+            return self.send_json([{"id": k, "label": v[0]} for k, v in geometry.PRESETS.items()]
+                                  + [{"id": "random:N", "label": "N cases au hasard (ex. random:6)"}])
         if head == "plan" and m == "POST":
             b = self.jbody()
             plan = presets.plan_panel(b.get("panel") or {}, b.get("style", ""))
@@ -284,7 +287,28 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json(store.list_projects())
             if m == "POST":
                 b = self.jbody()
-                return self.send_json(store.create(b.get("name") or "Nouvelle planche", b.get("page"), b.get("layout")))
+                page, layout, nxt = b.get("page"), b.get("layout"), None
+                if not layout:                         # pilotage : format + sens + decoupage pret (ou au hasard)
+                    w, hh = geometry.page_size(b.get("format", "bd"), b.get("orientation", "portrait"))
+                    page = dict(geometry.PAGE_DEFAULTS, format=b.get("format", "bd"),
+                                orientation=b.get("orientation", "portrait"), width=w, height=hh, **(page or {}))
+                    preset = b.get("preset") or "3x2"
+                    if preset.startswith("random:"):
+                        layout, nxt = geometry.random_layout(int(preset.split(":")[1]), float(b.get("tilt", 0.05)), b.get("seed"))
+                    else:
+                        layout, nxt = geometry.make_layout(preset)
+                p = store.create(b.get("name") or "Nouvelle planche", page, layout)
+                ids = geometry.leaves(p["layout"])
+
+                def init(pp):
+                    for i in ids:
+                        pp["panels"].setdefault(i, store.new_panel())
+                    pp["nextId"] = nxt or (max([int(i[1:]) for i in ids if i[1:].isdigit()] or [0]) + 1)
+                p = store.mutate(p["id"], init)
+                if not b.get("layout"):
+                    compose.compose(p["id"])
+                    p = store.get(p["id"])
+                return self.send_json(p)
         pid = parts[1]
         sub = parts[2] if len(parts) > 2 else ""
         if not sub:
@@ -312,6 +336,81 @@ class Handler(BaseHTTPRequestHandler):
                     aud.update(mode="file", file=rel, name=name)
                 store.mutate(pid, setaud)
             return self.send_json({"file": rel, "url": f"/projects/{pid}/{rel}"})
+        if sub == "rev" and m == "GET":                 # numero de version (l'interface se recharge s'il bouge)
+            p = store.get(pid)
+            return self.send_json({"rev": p.get("rev", 0), "updated": p.get("updated")})
+        if sub == "compose" and m == "POST":            # images de depart + page, cote serveur
+            b = self.jbody()
+            return self.send_json(compose.compose(pid, b.get("panels")))
+        if sub == "update" and m == "POST":             # reglages de la planche (nom, style, page, son global, decoupage)
+            b = self.jbody()
+
+            def upd(p):
+                for k in ("name", "style"):
+                    if k in b:
+                        p[k] = b[k]
+                if isinstance(b.get("page"), dict):
+                    p["page"] = dict(p.get("page") or {}, **b["page"])
+                    if "format" in b["page"] or "orientation" in b["page"]:
+                        w, hh = geometry.page_size(p["page"].get("format", "bd"), p["page"].get("orientation", "portrait"))
+                        p["page"].update(width=w, height=hh)
+                if isinstance(b.get("pageSound"), dict):
+                    p["pageSound"] = dict(p.get("pageSound") or {}, **b["pageSound"], rev=time.time())
+                if isinstance(b.get("layout"), dict):
+                    p["layout"] = b["layout"]
+                    for i in geometry.leaves(p["layout"]):
+                        p["panels"].setdefault(i, store.new_panel())
+            return self.send_json(store.mutate(pid, upd))
+        if sub == "panels" and len(parts) == 4 and m == "POST":     # reglages d'une case (cles remplacees en entier)
+            b = self.jbody()
+            allowed = {"camera", "action", "audio", "voice", "foley", "seed", "view"}
+            bad = set(b) - allowed
+            if bad:
+                raise ApiError("clés inconnues : " + ", ".join(sorted(bad)) + " (permises : " + ", ".join(sorted(allowed)) + ")")
+
+            def setp(p):
+                panel = p["panels"].get(parts[3])
+                if panel is None:
+                    raise KeyError(parts[3])
+                for k, v in b.items():
+                    if k in ("audio", "voice", "foley") and isinstance(v, dict):
+                        old = panel.get(k) or {}
+                        v = dict(v, generated=old.get("generated", []))
+                        if "file" not in v and v.get("mode") == old.get("mode"):
+                            v["file"] = old.get("file")
+                    panel[k] = v
+            p = store.mutate(pid, setp)
+            return self.send_json(p["panels"][parts[3]])
+        if sub == "panels" and len(parts) == 5 and parts[4] in ("image", "sound") and m == "POST":
+            data = self.body()
+            name = q.get("name") or ("image.png" if parts[4] == "image" else "son.mp3")
+            stamp = time.strftime("%Y%m%d-%H%M%S") + "-" + secrets.token_hex(2)
+            rel = store.write_file(pid, "assets", f"{stamp}-{name}", data)
+            if parts[4] == "image":
+                from PIL import Image
+                with Image.open(store.path(pid, rel)) as im:
+                    w, hh = im.size
+
+                def setimg(p):
+                    panel = p["panels"].get(parts[3])
+                    if panel is None:
+                        raise KeyError(parts[3])
+                    panel["image"] = {"file": rel, "url": f"/projects/{pid}/{rel}", "w": w, "h": hh, "name": name}
+                    panel["view"] = {"zoom": 1, "ox": 0, "oy": 0}
+                    panel["startSig"] = None
+                store.mutate(pid, setimg)
+                return self.send_json({"file": rel, "w": w, "h": hh})
+            layer = q.get("layer", "audio")
+            if layer not in ("audio", "voice"):
+                raise ApiError("layer : audio ou voice")
+
+            def setsnd(p):
+                panel = p["panels"].get(parts[3])
+                if panel is None:
+                    raise KeyError(parts[3])
+                panel.setdefault(layer, {}).update(mode="file", file=rel, name=name)
+            store.mutate(pid, setsnd)
+            return self.send_json({"file": rel, "layer": layer})
         if sub == "start" and m == "POST":
             rel = store.write_file(pid, "start", f"{parts[3]}.png", self.body())
             return self.send_json({"file": rel})
@@ -328,6 +427,9 @@ class Handler(BaseHTTPRequestHandler):
         if sub == "render" and m == "POST":
             b = self.jbody()
             created, errors = [], []
+            missing = [x for x in b.get("panels", []) if not store.path(pid, f"start/{x}.png").exists()]
+            if missing or not store.get(pid).get("geometry"):
+                compose.compose(pid, missing or None)
             for panel in b.get("panels", []):
                 try:
                     created += S.enqueue_panel(pid, panel, b.get("target", "local"), b.get("machines"),
@@ -365,6 +467,8 @@ class Handler(BaseHTTPRequestHandler):
                     panel.setdefault("chosen", {})[b["side"]] = b["file"]
             return self.send_json(store.mutate(pid, choose))
         if sub == "export" and m == "POST":
+            if not store.get(pid).get("geometry") or not store.path(pid, "page/page.jpg").exists():
+                compose.compose(pid)
             return self.send_json(assemble.build(pid))
         if sub == "reveal" and m == "POST":
             folder = store.pdir(pid) / "export"

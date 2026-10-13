@@ -72,10 +72,18 @@ def get(pid):
     return json.loads((pdir(pid) / "project.json").read_text(encoding="utf-8"))
 
 
+NEW_PANEL = {"camera": {"id": "arc", "fields": {}}, "action": {"id": "fige", "fields": {}}, "audio": {"mode": "none"}}
+
+
+def new_panel():
+    return json.loads(json.dumps(NEW_PANEL))
+
+
 def save(p):
     with _lock:
         d = pdir(p["id"])
         p["updated"] = time.time()
+        p["rev"] = int(p.get("rev") or 0) + 1        # chaque enregistrement : l'interface voit les changements venus d'ailleurs
         tmp = d / "project.json.tmp"
         tmp.write_text(json.dumps(p, indent=1, ensure_ascii=False), encoding="utf-8")
         tmp.replace(d / "project.json")
