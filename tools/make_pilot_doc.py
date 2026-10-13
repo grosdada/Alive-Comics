@@ -100,6 +100,7 @@ et des chemins de fichiers (images, sons).</p>
 <li><a href="#sons">Les sons</a></li>
 <li><a href="#api">Référence de l'API</a></li>
 <li><a href="#recette">La recette, du thème à la page</a></li>
+<li><a href="#enchainer">Plusieurs pages à la suite</a></li>
 <li><a href="#verifier">Vérifier et corriger les rendus</a></li>
 <li><a href="#publier">Exporter, publier, livres</a></li>
 <li><a href="#pieges">Pièges connus</a></li>
@@ -323,6 +324,25 @@ Lire {code("geometry.panels")} : trier par {code("order")}, noter la forme de ch
 {code("http://127.0.0.1:8790/projects/<id>/export/index.html")}). Publier seulement s'il le demande.</li>
 </ol>
 </section>
+
+<section id="enchainer"><h2><span class="n">8 bis</span>Plusieurs pages à la suite</h2>
+<ul>
+<li><b>Pas besoin d'attendre qu'une page soit finie</b> pour lancer la suivante : la file de rendus est commune à toutes les
+planches. Prépare une page (création, images, réglages, {code("/compose")}, contrôle des prompts), lance son {code("/render")},
+passe à la suivante. Les tâches s'empilent et se répartissent sur toutes les machines libres, dans l'ordre d'envoi.</li>
+<li>Chaque machine enchaîne d'abord les <b>vidéos</b>, puis les <b>sons</b> (MiniMax Music 3) quand il n'y a plus de vidéo pour
+elle : ça évite de recharger les modèles. Les ambiances arrivent donc plutôt en fin de file.</li>
+<li>Suivi global : {code("GET /api/jobs")} (sans {code("project")}) ; par page : {code("GET /api/jobs?project=<id>")}.
+Quand toutes les tâches d'une page sont {code("done")}, vérifie-la et exporte-la, même si les suivantes calculent encore.</li>
+<li>N'exporte une page qu'après ses rendus : avant, ses cases resteraient des images fixes (l'export le signale dans
+{code("report")} : « rendu manquant »).</li>
+<li>Ordre de grandeur, 3 machines : une vidéo prend 4 à 11 min, un arc en compte deux. Une page de 6 cases ≈ 8 à 10 vidéos
+≈ 20 à 30 min ; 10 pages ≈ 3 à 5 h de calcul, plus les sons. Pour aller plus vite, préfère les caméras à une seule vidéo
+(plans animés, {code("demi_arc")}, {code("orbit360")}) aux {code("arc")}, {code("vertical")} et {code("travelling")} (deux vidéos).</li>
+<li>La file survit à un redémarrage du serveur (les rendus en cours sont repris). Une erreur passagère de mémoire vidéo est
+relancée une fois automatiquement, sur une autre machine si possible ; regarde quand même {code("errors")} à la fin.</li>
+<li>Pour faire de la place dans la liste des tâches : {code('POST /api/jobs/clear {"project": "<id>"}')} (efface les terminées).</li>
+</ul></section>
 
 <section id="verifier"><h2><span class="n">9</span>Vérifier et corriger les rendus</h2>
 <ul>
