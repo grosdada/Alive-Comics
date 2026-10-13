@@ -494,7 +494,9 @@ class App {
       h("div.pop-head", h("b", "🎬 Réalisateur IA"), h("button.icon", { title: "Réduire", on: { click: () => toggle(false) } }, "–")),
       h("p.muted", "Tes images restent. L'IA regarde toute la page et règle le reste : caméras, actions, textes, sons."),
       ta,
-      h("div.checks2", cb("audio", "Ambiance par case"), cb("pageSound", "Son global de la page"), cb("foley", "Bruitages (H3)"),
+      h("div.checks2", cb("audio", "Ambiance par case (tes fichiers gardés)"),
+        P.pageSound?.mode === "file" ? h("label.check.muted", "Son global : ton fichier est gardé") : cb("pageSound", "Son global de la page"),
+        cb("foley", "Bruitages (H3)"),
         cb("voice", "Voix off qui raconte (fal)"), cb("render", "Lancer les rendus ensuite")),
       go,
       dir.summary ? h("p.ai-explain", dir.summary) : null);

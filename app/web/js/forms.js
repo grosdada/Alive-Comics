@@ -64,6 +64,15 @@ export function cameraForm(app, pid, compact) {
     box.append(check("Objet rigide (masque, statue, véhicule) : évite qu'il pivote sur lui-même", cam.rigid,
                      (v) => { cam.rigid = v; app.commitSoon("panel"); }));
   }
+  // tremble ajoute au montage : pour les plans qui jouent tout seuls
+  if (def.kind !== "frozen" || animated) {
+    const dflt = (app.presets.shake_default || {})[cam.id] || "aucun";
+    const labels = { aucun: "aucun", leger: "léger", moyen: "moyen", fort: "fort" };
+    box.append(field("Tremblé caméra ajouté au montage",
+      select(app.presets.shakes.map(k => ({ id: k, label: labels[k] + (k === dflt ? " (par défaut)" : "") })), cam.shake || dflt,
+             (v) => { cam.shake = v; app.commitSoon("panel"); }),
+      "Ajouté à l'assemblage (pas de nouveau rendu) ; la boucle reste parfaite."));
+  }
   box.append(extraField(app, cam, redraw));
   box.append(aiBlock(app, pid, redraw));
   return box;

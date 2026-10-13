@@ -19,7 +19,17 @@ ORBIT_PROMPT = (
 FROZEN_PROMPT = ORBIT_PROMPT.replace(" In a continuous 360 orbit.", "")
 TAIL = " Then the camera stops. No zoom, no dolly."
 
-AMPLITUDES = {"petit": 40, "moyen": 55, "grand": 70}     # angle ECRIT dans le prompt (H3 en fait moins)
+AMPLITUDES = {"petit": 40, "moyen": 55, "grand": 70}
+
+# Tremble « camera a l'epaule » ajoute au montage (ffmpeg), car H3 ne fait qu'un tremble mou et imprevisible.
+# (deplacement en fraction de l'image, rotation en radians) ; periodique : la boucle reste parfaite.
+SHAKES = {"aucun": (0, 0), "leger": (0.012, 0.004), "moyen": (0.022, 0.008), "fort": (0.036, 0.013)}
+SHAKE_DEFAULT = {"epaule": "fort"}             # sinon : aucun
+
+
+def shake_level(panel):
+    cam = (panel or {}).get("camera") or {}
+    return cam.get("shake") or SHAKE_DEFAULT.get(cam.get("id"), "aucun")     # angle ECRIT dans le prompt (H3 en fait moins)
 
 # ------------------------------------------------------------------ cameras
 # kind : "frozen" = temps fige, la case se pilote au glisser ; "animated" = la scene bouge, lecture auto.
@@ -346,4 +356,5 @@ def public():
     """Ce que l'interface recoit."""
     return {"cameras": CAMERAS, "actions": ACTIONS, "audio": [{k: v for k, v in a.items() if k != "caption"} for a in AUDIO],
             "amplitudes": AMPLITUDES, "fields": {k: {"label": a, "placeholder": b} for k, (a, b) in FIELDS.items()},
-            "voices": VOICES, "emotions": EMOTIONS, "languages": LANGUAGES, "foley": FOLEY}
+            "voices": VOICES, "emotions": EMOTIONS, "languages": LANGUAGES, "foley": FOLEY,
+            "shakes": list(SHAKES), "shake_default": SHAKE_DEFAULT}

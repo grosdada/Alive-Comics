@@ -136,7 +136,7 @@ def apply(pid, plan, want, instruction, order):
             panel["action"] = {"id": act.get("id") if act.get("id") in ACTION_IDS else "fige",
                                "fields": _clean_fields(act.get("fields")),
                                "loop": act.get("loop", True) is not False, "extra": (act.get("extra") or "").strip()}
-            if want["audio"]:
+            if want["audio"] and (panel.get("audio") or {}).get("mode") != "file":   # un son importe n'est jamais remplace
                 a = d.get("audio")
                 old = panel.get("audio") or {}
                 if isinstance(a, dict) and a.get("preset") in AUDIO_IDS:
@@ -145,7 +145,7 @@ def apply(pid, plan, want, instruction, order):
                                       "file": None}
                 else:
                     panel["audio"] = dict(old, mode="none")
-            if want["voice"]:
+            if want["voice"] and (panel.get("voice") or {}).get("mode") != "file":
                 v = d.get("voice")
                 old = panel.get("voice") or {}
                 if isinstance(v, dict) and (v.get("text") or "").strip():
@@ -159,7 +159,7 @@ def apply(pid, plan, want, instruction, order):
                 panel["foley"] = dict(old, on=bool(d.get("foley")), engine=old.get("engine", "h3"))
             panel["ai_note"] = (d.get("explain_fr") or "").strip()
             decided.append(pid_)
-        if want["pageSound"] and isinstance(plan.get("pageSound"), dict) and plan["pageSound"].get("preset") in AUDIO_IDS:
+        if want["pageSound"] and (p.get("pageSound") or {}).get("mode") != "file"                 and isinstance(plan.get("pageSound"), dict) and plan["pageSound"].get("preset") in AUDIO_IDS:
             old = p.get("pageSound") or {}
             p["pageSound"] = {"mode": "generate", "preset": plan["pageSound"]["preset"],
                               "extra": (plan["pageSound"].get("extra") or "").strip(), "seconds": 60,
