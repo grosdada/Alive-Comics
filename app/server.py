@@ -34,6 +34,18 @@ mimetypes.add_type("video/mp4", ".mp4")
 mimetypes.add_type("audio/mpeg", ".mp3")
 
 
+def open_folder(path):
+    """Ouvre un dossier dans l'explorateur du poste (le serveur tourne sur la machine de l'utilisateur)."""
+    path = Path(path)
+    if not path.is_dir():
+        raise FileNotFoundError(str(path))
+    if os.name == "nt":
+        os.startfile(str(path))                      # noqa: S606 - dossier interne a l'application
+    else:
+        import subprocess
+        subprocess.Popen(["open" if sys.platform == "darwin" else "xdg-open", str(path)])
+
+
 class ApiError(Exception):
     def __init__(self, msg, status=400):
         super().__init__(msg)
@@ -335,6 +347,12 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_json(store.mutate(pid, choose))
         if sub == "export" and m == "POST":
             return self.send_json(assemble.build(pid))
+        if sub == "reveal" and m == "POST":
+            folder = store.pdir(pid) / "export"
+            if not (folder / "index.html").exists():
+                assemble.build(pid)
+            open_folder(folder)
+            return self.send_json({"ok": True, "folder": str(folder)})
         if sub == "publish" and m == "POST":
             b = self.jbody()
             p = store.get(pid)
@@ -366,6 +384,9 @@ class Handler(BaseHTTPRequestHandler):
             cover = first["pages"][0]["base"] + "page.jpg"
             res = publish.publish_folder(out, name, book["title"], len(book["pages"]), cover)
             return self.send_json(res)
+        if len(parts) == 3 and parts[2] == "reveal" and m == "POST":
+            open_folder(self.inside(ROOT / "data" / "books", parts[1]))
+            return self.send_json({"ok": True})
         if len(parts) >= 4 and parts[2] == "file" and m in ("GET", "HEAD"):
             return self.send_file(self.inside(ROOT / "data" / "books" / parts[1], "/".join(parts[3:])))
         raise ApiError("route livre inconnue", 404)

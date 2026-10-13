@@ -56,6 +56,7 @@
   <button type="button" id="bw" aria-pressed="false">N&amp;B</button>
   <button type="button" id="snd" aria-pressed="true" hidden>Son</button>
   <button type="button" id="fs" class="wide">Plein écran</button>
+  <button type="button" id="folder" hidden title="Ouvrir le dossier (index.html, vidéos, sons)">📁 Dossier</button>
 </header>
 <main id="main">
   <button type="button" class="side prev" id="sprev" aria-label="Page précédente">‹</button>
@@ -129,6 +130,16 @@
     if (document.fullscreenElement) document.exitFullscreen();
     else if (document.documentElement.requestFullscreen) document.documentElement.requestFullscreen().catch(() => {});
   };
+
+  // servi par l'application Alive-Comics : bouton pour ouvrir le dossier de l'export dans l'explorateur
+  const local = location.pathname.match(/^\/projects\/([a-z0-9-]+)\/export\//) ||
+                location.pathname.match(/^\/api\/books\/([a-z0-9]+)\/file\//);
+  if (local) {
+    $("folder").hidden = false;
+    $("folder").onclick = () => fetch(location.pathname.startsWith("/projects/") ? `/api/projects/${local[1]}/reveal`
+                                                                                 : `/api/books/${local[1]}/reveal`,
+                                      { method: "POST" }).catch(() => {});
+  }
 
   const hint = $("hint");
   hint.textContent = (touch ? "Faites glisser une case pour bouger la caméra · touchez deux fois pour agrandir"

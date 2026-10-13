@@ -162,6 +162,7 @@ class App {
       bar.append(
         h("button.primary", { on: { click: () => this.renderDialog(null) } }, "Générer les cases"),
         h("button", { on: { click: () => this.preview() } }, "Aperçu"),
+        h("button", { title: "Ouvrir le dossier de la page (index.html, vidéos, sons)", on: { click: () => this.revealFolder() } }, "📁 Dossier"),
         h("button", { on: { click: () => this.publishDialog() } }, "Publier"));
     }
     bar.append(h("button.icon", { title: "Réglages", on: { click: () => this.settingsDialog() } }, "⚙"));
@@ -579,6 +580,11 @@ class App {
       for (const r of res.report.filter(x => x.includes("manquant"))) toast(r, "info", 7000);
       window.open(res.url + "?t=" + Date.now(), "_blank");
     } catch (e) { toast(e.message, "error", 9000); }
+  }
+
+  async revealFolder() {
+    try { await this.flushAll(); await post(`projects/${this.project.id}/reveal`); }
+    catch (e) { toast(e.message, "error"); }
   }
 
   publishDialog() {
