@@ -77,3 +77,5 @@ Tous ces réglages restent dans `local_settings.json` (jamais dans le dépôt).
 - `projects/<id>/` : une planche (project.json, images, rendus, export). Pas dans le dépôt.
 - `tools/` : `build_book.py`, `build_shelf.py`, `deploy.py`, `serve_range.py` (en ligne de commande).
 - `ALIVE-COMICS-CONNAISSANCES.html` : tout ce qui a été appris avec H3-Orbital (à lire avant de toucher aux prompts).
+- `docs/PILOTAGE-CLAUDE.html` : piloter l'application par API (pour une instance de Claude qui construit une planche
+  à partir d'un thème, sans l'IA intégrée). Regénéré par `python tools/make_pilot_doc.py`.
