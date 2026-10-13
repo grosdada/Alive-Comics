@@ -71,6 +71,13 @@ def merge_project(server_p, ui_p):
             panel[layer] = cur
         panels[pid] = panel
     out["panels"] = panels
+    # son global : l'import et le moteur l'ecrivent aussi ; « rev » dit qui est le plus recent
+    prev, cur = server_p.get("pageSound") or {}, dict(ui_p.get("pageSound") or {})
+    if (prev.get("rev") or 0) > (cur.get("rev") or 0):
+        out["pageSound"] = prev                       # interface en retard : la version du serveur gagne
+    else:
+        cur["generated"] = prev.get("generated", [])
+        out["pageSound"] = cur
     return out
 
 
@@ -296,6 +303,9 @@ class Handler(BaseHTTPRequestHandler):
             name = q.get("name") or "fichier"
             stamp = time.strftime("%Y%m%d-%H%M%S") + "-" + secrets.token_hex(2)
             rel = store.write_file(pid, "assets", f"{stamp}-{name}", data)
+            if q.get("kind") == "page":
+                store.mutate(pid, lambda p: p.setdefault("pageSound", {}).update(mode="file", file=rel, name=name,
+                                                                                rev=time.time()))
             if q.get("kind") in ("audio", "voice") and q.get("panel"):
                 def setaud(p):
                     aud = p["panels"].setdefault(q["panel"], {}).setdefault(q["kind"], {})
@@ -328,6 +338,9 @@ class Handler(BaseHTTPRequestHandler):
         if sub == "audio" and m == "POST":
             b = self.jbody()
             return self.send_json({"jobs": S.enqueue_audio(pid, parts[3], b.get("machines"), b.get("seed"))})
+        if sub == "pagesound" and m == "POST":
+            b = self.jbody()
+            return self.send_json({"jobs": S.enqueue_audio(pid, "_page", b.get("machines"), b.get("seed"))})
         if sub == "voice" and m == "POST":
             b = self.jbody()
             return self.send_json({"jobs": S.enqueue_voice(pid, parts[3], b.get("machines"), b.get("seed"))})
@@ -338,6 +351,9 @@ class Handler(BaseHTTPRequestHandler):
             b = self.jbody()
 
             def choose(p):
+                if b.get("side") == "P":
+                    p.setdefault("pageSound", {}).update(file=b["file"], rev=time.time())
+                    return
                 panel = p["panels"].setdefault(b["panel"], {})
                 layer = {"A": "audio", "B": "voice", "F": "foley"}.get(b.get("side"))
                 if layer:

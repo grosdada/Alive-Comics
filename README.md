@@ -44,8 +44,13 @@ L'interface s'ouvre sur http://127.0.0.1:8790/. Il faut Python 3.10+ et ffmpeg d
    occupée garde la tâche dans sa file. Suivi dans « Rendus » en bas.
 6. **Variantes** : chaque case garde tous ses rendus. « Autre variante » relance avec une autre graine,
    « Utiliser » choisit la vidéo de la page.
-7. **Aperçu** : assemble la page jouable et l'ouvre. **Publier** : la met en ligne (lien à partager).
-8. **Livres** (page d'accueil) : enchaîner plusieurs planches, aperçu, publication.
+7. **Son global de la page** (réglages de la page, rien de sélectionné) : un son qui joue en continu, quelle que soit
+   la case survolée (fichier ou MiniMax Music). Il baisse quand une case joue ses sons ; les navigateurs le lancent
+   au premier clic dans la page.
+8. **Aperçu** : assemble la page jouable et l'ouvre. Si rien n'a changé depuis le dernier assemblage, la page déjà
+   prête s'ouvre immédiatement ; sinon seul ce qui a changé est refait. **📁 Dossier** ouvre le dossier de la page
+   (index.html, vidéos, sons). **Publier** : la met en ligne (lien à partager).
+9. **Livres** (page d'accueil) : enchaîner plusieurs planches, aperçu, publication.
 
 ## Réglages (⚙)
 

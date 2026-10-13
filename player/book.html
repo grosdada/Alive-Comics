@@ -144,7 +144,8 @@
   const hint = $("hint");
   hint.textContent = (touch ? "Faites glisser une case pour bouger la caméra · touchez deux fois pour agrandir"
                             : "Glissez une case pour bouger la caméra · double-clic pour agrandir")
-                     + (single ? "" : (touch ? " · balayez à côté pour tourner la page" : " · ← → pour tourner la page"));
+                     + (single ? "" : (touch ? " · balayez à côté pour tourner la page" : " · ← → pour tourner la page"))
+                     + (B.pages.some(p => p.data.sound) ? (touch ? " · touchez pour le son" : " · cliquez pour activer le son") : "");
   setTimeout(() => hint.classList.add("off"), 6000);
   document.addEventListener("pointerdown", () => hint.classList.add("off"), { once: true });
 

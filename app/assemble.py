@@ -9,6 +9,7 @@ L'export est un livre d'une page (index.html + book.js) et contient aussi manga_
 pouvoir etre repris tel quel dans un livre de plusieurs pages (tools/build_book.py).
 """
 
+import hashlib
 import json
 import shutil
 import subprocess
@@ -38,7 +39,7 @@ def has_audio(video):
 
 
 # niveaux cibles (LUFS) : la voix devant, l'ambiance derriere, les bruitages entre les deux
-LEVELS = {"audio": -24, "voice": -17, "foley": -21}
+LEVELS = {"audio": -24, "voice": -17, "foley": -21, "page": -23}
 
 
 def normalize(src, dst, layer):
@@ -75,7 +76,41 @@ def _encode(srcs, player, dst):
     return 0
 
 
-def build(pid, log=print):
+def _mtime(f):
+    try:
+        return round(Path(f).stat().st_mtime, 3)
+    except OSError:
+        return None
+
+
+def page_key(p, d):
+    """Empreinte de tout ce qui change la page exportee : si elle n'a pas bouge, l'export existant est bon."""
+    panels = {}
+    for pid_, panel in sorted((p.get("panels") or {}).items()):
+        plan = presets.plan_panel(panel, p.get("style", ""))
+        chosen = panel.get("chosen") or {}
+        layers = {}
+        for layer, keys in (("audio", ("mode", "file", "volume")), ("voice", ("mode", "file", "volume", "loop")),
+                            ("foley", ("on", "engine", "file", "volume"))):
+            cur = panel.get(layer) or {}
+            layers[layer] = {k: cur.get(k) for k in keys}
+            if cur.get("file"):
+                layers[layer]["mtime"] = _mtime(d / cur["file"])
+        panels[pid_] = {"player": plan["player"], "autoplay": plan["autoplay"], "loop": plan["loop"],
+                        "sides": [j["side"] for j in plan["jobs"]],
+                        "chosen": {k: [v, _mtime(d / v)] for k, v in sorted(chosen.items())}, "layers": layers}
+    ps = p.get("pageSound") or {}
+    page_sound = {k: ps.get(k) for k in ("mode", "file", "volume")}
+    if ps.get("file"):
+        page_sound["mtime"] = _mtime(d / ps["file"])
+    blob = {"v": 3, "name": p.get("name"), "geometry": p.get("geometry"), "pageSound": page_sound,
+            "stroke": (p.get("page") or {}).get("strokeWidth"), "panels": panels,
+            "page": [_mtime(d / "page" / n) for n in ("page.jpg", "frames.png")],
+            "player": [_mtime(PLAYER / n) for n in ("book.html", "alive-player.js", "alive-player.css")]}
+    return hashlib.sha1(json.dumps(blob, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+
+
+def build(pid, log=print, force=False):
     p = store.get(pid)
     d = store.pdir(pid)
     geo = p.get("geometry") or {}
@@ -86,6 +121,20 @@ def build(pid, log=print):
     (out / "sons").mkdir(parents=True, exist_ok=True)
     cache_f = out / ".cache.json"
     cache = json.loads(cache_f.read_text(encoding="utf-8")) if cache_f.exists() else {}
+    pkey = page_key(p, d)
+    done = cache.get("_page") or {}
+    if not force and done.get("key") == pkey and (out / "index.html").exists() and done.get("result"):
+        return dict(done["result"], cached=True)          # rien n'a change : la page deja assemblee est bonne
+    sons_cache = cache.setdefault("_sons", {})
+
+    def norm(src, name, layer):
+        """Egalise un son, sauf s'il l'a deja ete a l'identique."""
+        dst = out / "sons" / name
+        sig = f"{src}|{_mtime(src)}|{layer}|{LEVELS[layer]}"
+        if sons_cache.get(name) != sig or not dst.exists():
+            normalize(src, dst, layer)
+            sons_cache[name] = sig
+        return dst
     for name in ("page.jpg", "frames.png"):
         src = d / "page" / name
         if not src.exists():
@@ -122,14 +171,14 @@ def build(pid, log=print):
         if aud.get("mode") in ("file", "generate") and aud.get("file") and (d / aud["file"]).exists():
             src = d / aud["file"]
             name = f"{g['id']}.mp3"
-            normalize(src, out / "sons" / name, "audio")
+            norm(src, name, "audio")
             entry["audio"] = f"sons/{name}"
             entry["audioVol"] = float(aud.get("volume", 0.8))
         voice = panel.get("voice") or {}
         if voice.get("mode") in ("file", "tts", "music") and voice.get("file") and (d / voice["file"]).exists():
             src = d / voice["file"]
             name = f"{g['id']}_voix.mp3"
-            normalize(src, out / "sons" / name, "voice")
+            norm(src, name, "voice")
             entry["voice"] = {"src": f"sons/{name}", "vol": float(voice.get("volume", 1.0)),
                               "loop": bool(voice.get("loop", voice.get("mode") == "music"))}
         foley = panel.get("foley") or {}
@@ -140,18 +189,19 @@ def build(pid, log=print):
                 side = "R" if plan["player"] == "arc" else "V"
                 vid = d / chosen[side] if chosen.get(side) else None
                 if vid and vid.exists() and has_audio(vid):
-                    src = out / "sons" / name
-                    normalize(vid, src, "foley")
+                    src = norm(vid, name, "foley")
                 else:
                     report.append(f"{g['id']} : pas de piste son H3 dans ce rendu (refaire le rendu, ou bruitages cloud)")
             elif foley.get("file") and (d / foley["file"]).exists():
-                src = out / "sons" / name
-                normalize(d / foley["file"], src, "foley")
+                src = norm(d / foley["file"], name, "foley")
             if src:
                 entry["foley"] = {"src": f"sons/{name}", "vol": float(foley.get("volume", 0.9)),
                                   "sync": bool(entry.get("autoplay"))}
         data["panels"].append(entry)
-    cache_f.write_text(json.dumps(cache), encoding="utf-8")
+    ps = p.get("pageSound") or {}
+    if ps.get("mode") in ("file", "generate") and ps.get("file") and (d / ps["file"]).exists():
+        norm(d / ps["file"], "page.mp3", "page")
+        data["sound"] = {"src": "sons/page.mp3", "vol": float(ps.get("volume", 0.7))}
     (out / "manga_data.js").write_text("window.MANGA = " + json.dumps(data, ensure_ascii=False) + ";\n", encoding="utf-8")
     book = {"title": p.get("name", "Planche"), "pages": [{"title": p.get("name", ""), "base": "", "data": data}]}
     (out / "book.js").write_text("window.ALIVE_BOOK = " + json.dumps(book, ensure_ascii=False) + ";\n", encoding="utf-8")
@@ -162,13 +212,17 @@ def build(pid, log=print):
     # ne garder que les videos et sons encore utilises
     used = ({e.get("video") for e in data["panels"]} | {e.get("audio") for e in data["panels"]}
             | {(e.get("voice") or {}).get("src") for e in data["panels"]}
-            | {(e.get("foley") or {}).get("src") for e in data["panels"]})
+            | {(e.get("foley") or {}).get("src") for e in data["panels"]}
+            | {(data.get("sound") or {}).get("src")})
     for sub in ("videos", "sons"):
         for f in (out / sub).iterdir():
             if f"{sub}/{f.name}" not in used:
                 f.unlink()
-    return {"ok": True, "report": report, "url": f"/projects/{pid}/export/index.html",
-            "videos": sum(1 for e in data["panels"] if e.get("video")), "panels": len(data["panels"])}
+    result = {"ok": True, "report": report, "url": f"/projects/{pid}/export/index.html",
+              "videos": sum(1 for e in data["panels"] if e.get("video")), "panels": len(data["panels"])}
+    cache["_page"] = {"key": pkey, "result": result}
+    cache_f.write_text(json.dumps(cache), encoding="utf-8")
+    return dict(result, cached=False)
 
 
 def build_book(book, out, log=print):
@@ -185,6 +239,8 @@ def build_book(book, out, log=print):
         data = json.loads((src / "manga_data.js").read_text(encoding="utf-8").split("=", 1)[1].strip().rstrip(";"))
         files = [data["page"], data["frames"]] + [e[k] for e in data["panels"] for k in ("video", "audio") if e.get(k)]
         files += [e[k]["src"] for e in data["panels"] for k in ("voice", "foley") if e.get(k)]
+        if data.get("sound"):
+            files.append(data["sound"]["src"])
         for rel in files:
             (out / base / rel).parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(src / rel, out / base / rel)

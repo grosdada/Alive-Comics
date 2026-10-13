@@ -200,9 +200,12 @@ class Scheduler:
     def enqueue_audio(self, project_id, panel_id, machines=None, seed=None, layer="audio"):
         """Musique / ambiance MiniMax Music 3 (locale). layer : "audio" (son 1) ou "voice" (son 2)."""
         p = store.get(project_id)
-        aud = (p["panels"].get(panel_id) or {}).get(layer) or {}
+        if panel_id == "_page":                       # son global de la page
+            aud, layer = p.get("pageSound") or {}, "pageSound"
+        else:
+            aud = (p["panels"].get(panel_id) or {}).get(layer) or {}
         caption = aud.get("caption") or presets.audio_caption(aud.get("preset") or "drone_inquietant", aud.get("extra", ""))
-        spec = {"side": "A" if layer == "audio" else "B", "layer": layer, "caption": caption,
+        spec = {"side": {"audio": "A", "voice": "B", "pageSound": "P"}[layer], "layer": layer, "caption": caption,
                 "lyrics": presets.INSTRUMENTAL_LYRICS, "seconds": int(aud.get("seconds") or 30),
                 "seed": int(seed if seed is not None else aud.get("seed") or 20261013)}
         return [self._add(project_id, panel_id, spec["side"], "audio", "local", machines, spec)]
@@ -504,6 +507,12 @@ class Scheduler:
         secs = round(time.time() - (job["started"] or time.time()), 1)
 
         def record(p):
+            if job["panel"] == "_page":                # son global de la page
+                ps = p.setdefault("pageSound", {})
+                ps.setdefault("generated", []).append({"file": rel, "seed": job["spec"].get("seed"), "job": job["id"]})
+                ps["file"] = rel
+                ps["rev"] = time.time()
+                return
             panel = p["panels"].setdefault(job["panel"], {})
             if job["kind"] in ("audio", "voice"):
                 layer = panel.setdefault(job["spec"].get("layer", "audio"), {})

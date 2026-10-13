@@ -410,8 +410,10 @@ class App {
     if (!this.project) return;
     this.project.geometry = this.geometryForSave();
     if (!this._last) this._last = this.snapshot();
+    const sig = this.snapshot();
     try {
       const saved = await put("projects/" + this.project.id, this.project);
+      this._savedSig = sig;
       this.absorb(saved);
       if (first && !saved.thumb) this.pageSoon();
     } catch (e) {
@@ -438,11 +440,18 @@ class App {
       }
     }
     this.project.published = server.published;
+    if (server.pageSound) {
+      const ps = this.project.pageSound = this.project.pageSound || {};
+      if ((server.pageSound.rev || 0) > (ps.rev || 0)) Object.assign(ps, server.pageSound);   // serveur plus recent
+      ps.generated = server.pageSound.generated || [];
+    }
   }
 
-  async uploadPage() {
+  async uploadPage(strict) {
     if (!this.project) return;
-    try { await pageImages(this.project, this.editor.geom); } catch (e) { console.warn(e); }
+    const sig = this.pageSig();
+    try { await pageImages(this.project, this.editor.geom); this._pageSig = sig; }
+    catch (e) { if (strict) throw e; console.warn(e); }
   }
 
   async ensureStart(id) {
@@ -516,6 +525,25 @@ class App {
       } }]);
   }
 
+  pickPageSound() {
+    pickFile("audio/*", async (file) => {
+      try {
+        const res = await upload(`projects/${this.project.id}/upload?kind=page&name=${encodeURIComponent(file.name)}`, file);
+        Object.assign(this.project.pageSound = this.project.pageSound || {}, { mode: "file", file: res.file, name: file.name, rev: Date.now() / 1000 });
+        this.refreshInspector(); this.save();
+        toast("Son global importé.", "ok");
+      } catch (e) { toast(e.message, "error"); }
+    });
+  }
+
+  async generatePageSound() {
+    await this.save();
+    try {
+      await post(`projects/${this.project.id}/pagesound`, { seed: Math.floor(Math.random() * 1e8) });
+      toast("Son global en file (MiniMax Music, sur tes machines).", "ok"); this.drawerOpen = true; this.pollJobs();
+    } catch (e) { toast(e.message, "error", 8000); }
+  }
+
   async generateLayer(id, layer) {
     await this.save();
     try {
@@ -568,7 +596,7 @@ class App {
     const active = this.jobs.filter(j => ["queued", "running"].includes(j.status));
     const recent = this.jobs.filter(j => !["queued", "running"].includes(j.status)).sort((a, b) => (b.finished || 0) - (a.finished || 0)).slice(0, 12);
     const order = Object.fromEntries((this.editor?.geom?.panels || []).map(g => [g.id, g.order]));
-    const row = (j) => h("tr." + j.status, h("td", `Case ${order[j.panel] || j.panel}`), h("td", sideName(j.side)),
+    const row = (j) => h("tr." + j.status, h("td", j.panel === "_page" ? "Page" : `Case ${order[j.panel] || j.panel}`), h("td", sideName(j.side)),
       h("td", statusText(j)), h("td.muted", j.error ? j.error.slice(0, 140) : (j.finished && j.started ? Math.round(j.finished - j.started) + " s" : "")),
       h("td", ["queued", "running"].includes(j.status) ? h("button.mini", { on: { click: () => this.cancelJob(j.id) } }, "Annuler") : null));
     this.drawer.textContent = "";
@@ -583,9 +611,16 @@ class App {
   }
 
   // ---------------------------------------------------------------- apercu et publication
+  // ce qui fait l'image de la page : format, decoupage, images et leur cadrage
+  pageSig() {
+    const P = this.project;
+    return JSON.stringify({ page: P.page, layout: P.layout,
+                            imgs: Object.fromEntries(Object.entries(P.panels).map(([k, v]) => [k, [v.image?.file, v.view]])) });
+  }
+
   async flushAll() {
-    await this.save();
-    await pageImages(this.project, this.editor.geom);
+    if (this.snapshot() !== this._savedSig) await this.save();          // enregistrer seulement si quelque chose a change
+    if (this.pageSig() !== this._pageSig) await this.uploadPage(true);  // image de page renvoyee seulement si elle a change
   }
 
   async preview() {

@@ -302,7 +302,7 @@ export function renderSection(app, pid) {
   return box;
 }
 
-export function sideName(s) { return { L: "Côté gauche", R: "Côté droit", V: "Vidéo", A: "Son 1", B: "Son 2", F: "Bruitages" }[s] || s; }
+export function sideName(s) { return { L: "Côté gauche", R: "Côté droit", V: "Vidéo", A: "Son 1", B: "Son 2", F: "Bruitages", P: "Son global" }[s] || s; }
 
 export function statusText(j) {
   if (j.status === "queued") return j.after?.length ? "attend la vidéo" : "en attente";
@@ -340,5 +340,40 @@ export function pageForm(app) {
   box.append(num("strokeWidth", "Épaisseur des traits", 0, 16), num("gutter", "Gouttière", 0, 80), num("margin", "Marge", 0, 200));
   box.append(field("Ambiance commune (anglais, ajoutée aux plans animés)",
                    textInput(P.style, "e.g. Warm 1970s film look, natural colors", (v) => { P.style = v; app.commitSoon("page"); }, true)));
+  box.append(h("h5", "Son global de la page"), pageSoundForm(app));
+  return box;
+}
+
+// son global : joue en continu sur la page, quelle que soit la case survolee
+function pageSoundForm(app) {
+  const P = app.project;
+  const ps = P.pageSound = P.pageSound || { mode: "none" };
+  const box = h("div.form.layer");
+  const redraw = () => box.replaceWith(pageSoundForm(app));
+  box.append(seg([["none", "Aucun"], ["file", "Fichier"], ["generate", "Générer (MiniMax Music)"]], ps.mode || "none", (m) => {
+    ps.mode = m; ps.rev = Date.now() / 1000; app.commit("page"); redraw();
+  }));
+  if (ps.mode === "file") box.append(h("button", { on: { click: () => app.pickPageSound() } }, icon("audio"), ps.file ? " Remplacer…" : " Importer un son…"));
+  if (ps.mode === "generate") {
+    const def = app.presets.audio.find(a => a.id === (ps.preset || "suspense"));
+    box.append(field("Ambiance", select(app.presets.audio, ps.preset || "suspense", (v) => { ps.preset = v; app.commitSoon("page"); redraw(); })));
+    box.append(field("Précisions (anglais)", textInput(ps.extra, def?.extra_hint || "e.g. a slow, warm 1970s soundtrack",
+                                                        (v) => { ps.extra = v; app.commitSoon("page"); }, true),
+                     h("button.mini", { on: { click: () => app.translateField(ps, "extra", redraw, "music") } }, "✨ en anglais")));
+    const secs = h("input", { type: "number", min: 10, max: 120, step: 5, value: ps.seconds || 60 });
+    secs.addEventListener("change", () => { ps.seconds = +secs.value; app.commitSoon("page"); });
+    box.append(h("div.row", field("Durée (s)", secs), h("button.primary", { on: { click: () => app.generatePageSound() } }, "Générer")));
+  }
+  if (ps.mode && ps.mode !== "none") {
+    box.append(player(app, ps.file));
+    const g = ps.generated || [];
+    if (ps.mode === "generate" && g.length > 1) {
+      box.append(h("div.variants", g.map(x => h("label.variant",
+        h("input", { type: "radio", name: "pagesound", checked: ps.file === x.file, on: { change: () => app.choose("_page", "P", x.file) } }),
+        " graine " + x.seed, h("audio", { controls: true, src: `/projects/${P.id}/${x.file}`, preload: "none" })))));
+    }
+    box.append(volume(ps, 0.7, app),
+               h("p.muted", "Joue en continu sur la page et baisse quand une case joue ses sons. Les navigateurs le lancent au premier clic dans la page."));
+  }
   return box;
 }

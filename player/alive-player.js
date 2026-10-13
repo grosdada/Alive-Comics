@@ -12,6 +12,8 @@
  *     panels: [{ id, rect: [x0,y0,x1,y1], poly?: [[x,y]...], video?, frames, center,
  *                loop?, autoplay?, idle?, audio?, audioVol?,
  *                voice?: {src, vol, loop}, foley?: {src, vol, sync} }] }
+ * sound?: {src, vol} = son global de la page : joue en continu (apres le premier geste, regle des
+ * navigateurs), baisse de moitie pendant qu'un son de case joue, fondu en sortie de page.
  * Sons au survol : audio = ambiance en boucle ; voice = voix off (reprise du debut a chaque survol, ou
  * boucle) ; foley = bruitages, cales sur l'image affichee quand la case joue toute seule.
  *
@@ -53,6 +55,12 @@
     if (M.frames) {
       const fr = node("img", "ac-frames", pageEl);
       fr.src = base + M.frames; fr.alt = ""; fr.draggable = false;
+    }
+    if (M.sound) {
+      const a = new Audio(base + M.sound.src);
+      a.loop = true; a.volume = 0; a.preload = "auto";
+      inst.global = { a, vol: Math.max(0, Math.min(1, M.sound.vol ?? 0.7)), timer: null, mode: "loop" };
+      if (unlocked && soundOn) startGlobal(inst);
     }
     inst.reset = () => resetPage(inst);
     inst.destroy = () => destroyPage(inst);
@@ -229,6 +237,11 @@
       if (st.idle) { st.idle.pause(); st.idle.removeAttribute("src"); st.idle.load(); }
       for (const L of st.layers || []) { clearInterval(L.timer); L.a.pause(); L.a.src = ""; }
     }
+    if (inst.global) {                         // fondu de sortie, sans retenir la page
+      const g = inst.global;
+      fade(g, 0);
+      setTimeout(() => { g.a.pause(); g.a.src = ""; }, 900);
+    }
     inst.pageEl.remove();
     pages.delete(inst);
   }
@@ -246,9 +259,28 @@
     }, 30);
   }
 
+  function startGlobal(inst) {
+    const g = inst.global;
+    if (!g || !soundOn) return;
+    g.a.play().catch(() => {});
+    fade(g, duckedVolume(g));
+  }
+
+  // le son global se fait discret pendant qu'une case joue ses sons
+  function duckedVolume(g) {
+    let busy = false;
+    for (const inst of pages) for (const st of inst.panels) if (st.hover && (st.layers || []).length) busy = true;
+    return busy ? g.vol * 0.45 : g.vol;
+  }
+
+  function reduckAll() {
+    for (const inst of pages) if (inst.global && !inst.global.a.paused) fade(inst.global, duckedVolume(inst.global));
+  }
+
   // allume / eteint les sons d'une case
   function soundOnPanel(st, on) {
     st.hover = on;
+    setTimeout(reduckAll, 0);
     for (const L of st.layers || []) {
       if (on && soundOn) {
         if (L.mode === "once" && (L.a.paused || L.a.ended)) L.a.currentTime = 0;
@@ -290,7 +322,7 @@
   document.addEventListener("pointerdown", () => {
     if (unlocked) return;
     unlocked = true;
-    for (const inst of pages) unlockPage(inst);
+    for (const inst of pages) { unlockPage(inst); startGlobal(inst); }
   }, { capture: true });
 
   // ---------------------------------------------------------------- agrandissement
@@ -333,9 +365,10 @@
   function setSound(on) {
     soundOn = !!on;
     if (!soundOn) for (const inst of pages) for (const st of inst.panels) if (st.hover) soundOnPanel(st, false);
+    for (const inst of pages) if (inst.global) { if (soundOn) startGlobal(inst); else fade(inst.global, 0); }
   }
   function resetAll() { for (const inst of pages) resetPage(inst); }
-  function hasAudio(M) { return M.panels.some(p => p.audio || p.voice || p.foley); }
+  function hasAudio(M) { return !!M.sound || M.panels.some(p => p.audio || p.voice || p.foley); }
 
   window.AlivePlayer = { mount, setBW, setSound, resetAll, hasAudio, isLightboxOpen: () => !!lb.st,
                          _pages: pages };
