@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<title>Alive Comics</title>
+<link rel="stylesheet" href="alive-player.css">
+<style>
+  :root { --bg: #121212; --bar: #1b1b1b; --ink: #ece8e1; --muted: #9a948a; --accent: #f2b45c; --head: 54px; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink);
+               font: 15px/1.4 system-ui, "Segoe UI", Roboto, sans-serif; }
+  body { display: flex; flex-direction: column; overflow: hidden; }
+  header { flex: 0 0 auto; min-height: var(--head); display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px;
+           padding: 8px 16px; background: var(--bar); border-bottom: 1px solid #2a2a2a; }
+  header h1 { margin: 0 6px 0 0; font-size: 16px; font-weight: 650; letter-spacing: .02em; white-space: nowrap;
+              overflow: hidden; text-overflow: ellipsis; max-width: 40vw; }
+  header .where { color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  header .sp { flex: 1; }
+  button { font: inherit; font-size: 13px; color: var(--ink); background: #2b2b2b; border: 1px solid #444;
+           border-radius: 999px; padding: 5px 13px; cursor: pointer; white-space: nowrap; }
+  button:hover:not(:disabled) { border-color: var(--accent); }
+  button:disabled { opacity: .35; cursor: default; }
+  button[aria-pressed="true"] { background: var(--accent); color: #1b150c; border-color: var(--accent); }
+  main { position: relative; flex: 1 1 auto; min-height: 0; display: grid; place-items: center; padding: 10px 12px;
+         touch-action: pan-y; }
+  .ac-page { width: min(calc(100vw - 24px), calc((100vh - var(--head) - 24px) * var(--ac-ratio)));
+             width: min(calc(100vw - 24px), calc((100dvh - var(--head) - 24px) * var(--ac-ratio))); }
+  .ac-page.enter { animation: enter .35s ease-out; }
+  @keyframes enter { from { opacity: 0; transform: translateX(var(--from, 30px)); } to { opacity: 1; transform: none; } }
+  .side { position: absolute; top: 50%; transform: translateY(-50%); z-index: 8; width: 44px; height: 88px; padding: 0;
+          border-radius: 10px; background: rgba(40, 40, 40, .55); font-size: 22px; }
+  .side.prev { left: 8px; } .side.next { right: 8px; }
+  .hint { position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); z-index: 9; max-width: calc(100% - 32px);
+          background: rgba(0, 0, 0, .72); color: #fff; font-size: 13px; padding: 7px 14px; border-radius: 999px;
+          text-align: center; transition: opacity .6s; pointer-events: none; }
+  .hint.off { opacity: 0; }
+  @media (max-width: 700px) {
+    header { padding: 6px 10px; gap: 6px; }
+    header h1 { font-size: 14px; max-width: 34vw; }
+    .side { display: none; }
+    .wide { display: none; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1 id="title">Alive Comics</h1>
+  <span class="where" id="where"></span>
+  <button type="button" id="prev" aria-label="Page précédente">◀</button>
+  <button type="button" id="next" aria-label="Page suivante">▶</button>
+  <span class="sp"></span>
+  <button type="button" id="reset" class="wide">Vue initiale</button>
+  <button type="button" id="bw" aria-pressed="false">N&amp;B</button>
+  <button type="button" id="snd" aria-pressed="true" hidden>Son</button>
+  <button type="button" id="fs" class="wide">Plein écran</button>
+</header>
+<main id="main">
+  <button type="button" class="side prev" id="sprev" aria-label="Page précédente">‹</button>
+  <button type="button" class="side next" id="snext" aria-label="Page suivante">›</button>
+  <div class="hint" id="hint"></div>
+</main>
+
+<script src="alive-player.js"></script>
+<script src="book.js"></script>
+<script>
+(() => {
+  const B = window.ALIVE_BOOK;
+  const main = document.getElementById("main");
+  const $ = (id) => document.getElementById(id);
+  const touch = matchMedia("(pointer: coarse)").matches;
+  let cur = -1, inst = null;
+  document.title = B.title;
+  $("title").textContent = B.title;
+  const single = B.pages.length < 2;
+  for (const id of ["prev", "next", "sprev", "snext"]) $(id).hidden = single;
+
+  function show(i, dir) {
+    i = Math.max(0, Math.min(B.pages.length - 1, i));
+    if (i === cur) return;
+    if (inst) inst.destroy();
+    const pg = B.pages[i];
+    inst = AlivePlayer.mount(main, pg.data, { base: pg.base, alt: pg.title || "" });
+    inst.pageEl.style.setProperty("--from", (dir || 0) * 30 + "px");
+    inst.pageEl.classList.add("enter");
+    main.insertBefore(inst.pageEl, $("sprev"));
+    cur = i;
+    $("where").textContent = single ? (pg.title || "") : `${pg.title ? pg.title + " · " : ""}${i + 1} / ${B.pages.length}`;
+    $("prev").disabled = $("sprev").disabled = i === 0;
+    $("next").disabled = $("snext").disabled = i === B.pages.length - 1;
+    $("snd").hidden = !AlivePlayer.hasAudio(pg.data);
+    if (!single) history.replaceState(null, "", "#" + (i + 1));
+    const nx = B.pages[i + 1];               // precharge l'image de la page suivante
+    if (nx) new Image().src = nx.base + nx.data.page;
+  }
+  const go = (d) => show(cur + d, d);
+  $("prev").onclick = $("sprev").onclick = () => go(-1);
+  $("next").onclick = $("snext").onclick = () => go(1);
+  document.addEventListener("keydown", (e) => {
+    if (AlivePlayer.isLightboxOpen()) return;
+    if (["ArrowRight", "PageDown"].includes(e.key)) go(1);
+    if (["ArrowLeft", "PageUp"].includes(e.key)) go(-1);
+  });
+  // balayage hors des cases pour tourner la page
+  let sw = null;
+  main.addEventListener("pointerdown", (e) => {
+    sw = e.target.closest(".ac-panel, button") ? null : { x: e.clientX, y: e.clientY };
+  });
+  main.addEventListener("pointerup", (e) => {
+    if (!sw) return;
+    const dx = e.clientX - sw.x, dy = e.clientY - sw.y;
+    if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.5) go(dx < 0 ? 1 : -1);
+    sw = null;
+  });
+
+  $("reset").onclick = () => AlivePlayer.resetAll();
+  $("bw").onclick = () => {
+    const on = $("bw").getAttribute("aria-pressed") !== "true";
+    $("bw").setAttribute("aria-pressed", String(on)); AlivePlayer.setBW(on);
+  };
+  $("snd").onclick = () => {
+    const on = $("snd").getAttribute("aria-pressed") !== "true";
+    $("snd").setAttribute("aria-pressed", String(on)); AlivePlayer.setSound(on);
+  };
+  $("fs").onclick = () => {
+    if (document.fullscreenElement) document.exitFullscreen();
+    else if (document.documentElement.requestFullscreen) document.documentElement.requestFullscreen().catch(() => {});
+  };
+
+  const hint = $("hint");
+  hint.textContent = (touch ? "Faites glisser une case pour bouger la caméra · touchez deux fois pour agrandir"
+                            : "Glissez une case pour bouger la caméra · double-clic pour agrandir")
+                     + (single ? "" : (touch ? " · balayez à côté pour tourner la page" : " · ← → pour tourner la page"));
+  setTimeout(() => hint.classList.add("off"), 6000);
+  document.addEventListener("pointerdown", () => hint.classList.add("off"), { once: true });
+
+  const start = parseInt((location.hash || "").slice(1), 10);
+  show(Number.isFinite(start) ? start - 1 : 0, 0);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,866 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Alive-Comics, base de connaissances</title>
+<meta name="description" content="Tout ce qui a été appris dans le fil H3-Orbital (12-13 octobre 2026) : planches de BD vivantes avec MiniMax H3, LoRA 360 Orbit, MiniMax Music 3, workers ComfyUI, lecteur HTML. Point de départ de l'application Alive-Comics.">
+<style>
+  :root {
+    --bg: #f6f3ee; --panel: #ffffff; --ink: #1d1b18; --muted: #6b655c; --line: #e2dccf;
+    --accent: #b5561c; --accent-soft: #f6e3d6; --code-bg: #f0ece4; --ok: #2f7d4a; --warn: #a3471a;
+    --note-bg: #eef3f8; --note-line: #9db6cf;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #141312; --panel: #1c1b19; --ink: #ece8e1; --muted: #9a948a; --line: #34312c;
+      --accent: #f2b45c; --accent-soft: #3a2c19; --code-bg: #24221f; --ok: #6fc28c; --warn: #f08a5d;
+      --note-bg: #1b2430; --note-line: #3f5873;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #141312; --panel: #1c1b19; --ink: #ece8e1; --muted: #9a948a; --line: #34312c;
+    --accent: #f2b45c; --accent-soft: #3a2c19; --code-bg: #24221f; --ok: #6fc28c; --warn: #f08a5d;
+    --note-bg: #1b2430; --note-line: #3f5873;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 16px/1.6 system-ui, "Segoe UI", Roboto, sans-serif; }
+  a { color: var(--accent); }
+  header.top { padding: 28px 16px 18px; border-bottom: 1px solid var(--line); background: var(--panel); }
+  header.top .wrap { max-width: 1280px; margin: 0 auto; }
+  header.top h1 { margin: 0 0 6px; font-size: clamp(26px, 4vw, 38px); letter-spacing: -.01em; }
+  header.top p { margin: 0; color: var(--muted); max-width: 900px; }
+  .tools { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; align-items: center; }
+  .tools input { flex: 1; min-width: 200px; max-width: 420px; font: inherit; padding: 7px 12px; border-radius: 8px;
+                 border: 1px solid var(--line); background: var(--bg); color: var(--ink); }
+  .tools button { font: inherit; font-size: 14px; padding: 7px 14px; border-radius: 999px; cursor: pointer;
+                  border: 1px solid var(--line); background: var(--bg); color: var(--ink); }
+  .tools button:hover { border-color: var(--accent); }
+  .tools .count { color: var(--muted); font-size: 14px; }
+  .layout { display: grid; grid-template-columns: 270px minmax(0, 1fr); gap: 32px; max-width: 1280px;
+            margin: 0 auto; padding: 24px 16px 80px; }
+  nav.toc { position: sticky; top: 16px; align-self: start; max-height: calc(100vh - 32px); overflow: auto;
+            font-size: 14px; padding-right: 6px; }
+  nav.toc ol { margin: 0; padding-left: 22px; }
+  nav.toc li { margin: 3px 0; }
+  nav.toc a { color: var(--ink); text-decoration: none; }
+  nav.toc a:hover, nav.toc a.on { color: var(--accent); }
+  main { min-width: 0; }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 6px 24px 18px;
+            margin: 0 0 22px; }
+  section.hidden { display: none; }
+  h2 { font-size: 24px; margin: 18px 0 10px; scroll-margin-top: 12px; }
+  h2 .n { color: var(--accent); font-variant-numeric: tabular-nums; margin-right: 8px; }
+  h3 { font-size: 18px; margin: 22px 0 8px; }
+  h4 { font-size: 16px; margin: 16px 0 6px; }
+  p, li { max-width: 92ch; }
+  code { font: 13.5px/1.5 ui-monospace, "Cascadia Code", Consolas, monospace; background: var(--code-bg);
+         padding: 1px 5px; border-radius: 4px; overflow-wrap: anywhere; }
+  pre { background: var(--code-bg); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px;
+        overflow-x: auto; font: 13px/1.5 ui-monospace, "Cascadia Code", Consolas, monospace; }
+  pre code { background: none; padding: 0; overflow-wrap: normal; }
+  .tbl { overflow-x: auto; margin: 10px 0 14px; }
+  table { border-collapse: collapse; width: 100%; font-size: 14.5px; }
+  th, td { border: 1px solid var(--line); padding: 6px 9px; text-align: left; vertical-align: top; }
+  th { background: var(--code-bg); font-weight: 600; }
+  .note, .warn, .ok { border-left: 4px solid var(--note-line); background: var(--note-bg); padding: 10px 14px;
+                      border-radius: 6px; margin: 12px 0; }
+  .warn { border-color: var(--warn); background: var(--accent-soft); }
+  .ok { border-color: var(--ok); }
+  .tag { display: inline-block; font-size: 12px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--line);
+         color: var(--muted); margin-right: 4px; white-space: nowrap; }
+  .tag.v { color: var(--ok); border-color: var(--ok); }
+  .tag.x { color: var(--warn); border-color: var(--warn); }
+  .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; }
+  .card { border: 1px solid var(--line); border-radius: 10px; padding: 4px 16px 10px; background: var(--bg); }
+  .card h4 { margin-top: 12px; }
+  details { margin: 8px 0; }
+  summary { cursor: pointer; font-weight: 600; }
+  footer { max-width: 1280px; margin: 0 auto; padding: 0 16px 40px; color: var(--muted); font-size: 14px; }
+  @media (max-width: 900px) {
+    .layout { grid-template-columns: minmax(0, 1fr); gap: 0; }
+    nav.toc { position: static; max-height: none; margin-bottom: 18px; background: var(--panel);
+              border: 1px solid var(--line); border-radius: 12px; padding: 10px 14px; }
+    section { padding: 4px 14px 14px; }
+  }
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="wrap">
+    <h1>Alive-Comics : tout ce qu'on a appris</h1>
+    <p>Base de connaissances tirée du fil de travail <b>H3-Orbital</b> des 12 et 13 octobre 2026, entre David et Claude Code sur HITCHCOCK.
+       Des planches de BD dont chaque case est une vidéo pilotée par le lecteur : la caméra tourne quand on glisse, la case joue seule, boucle au repos ou fait entendre un son au survol.
+       Tout ce qui suit a été mesuré ou vérifié pendant le fil, sauf mention <span class="tag x">non testé</span> ou <span class="tag">proposition</span>.
+       Le document sert de point de départ pour coder l'application <b>Alive-Comics</b> (dépôt <a href="https://github.com/grosdada/Alive-Comics">grosdada/Alive-Comics</a>).</p>
+    <div class="tools">
+      <input id="q" type="search" placeholder="Filtrer les sections (ex. LoRA, VRAM, clip-path, Music 3)…" aria-label="Filtrer les sections">
+      <span class="count" id="count"></span>
+      <button type="button" id="theme">Clair / sombre</button>
+    </div>
+  </div>
+</header>
+
+<div class="layout">
+<nav class="toc" aria-label="Sommaire">
+  <ol>
+    <li><a href="#idee">L'idée en une minute</a></li>
+    <li><a href="#livre">Ce qui existe déjà</a></li>
+    <li><a href="#machines">Machines, réseau, installation</a></li>
+    <li><a href="#modeles">Modèles et fichiers</a></li>
+    <li><a href="#h3">MiniMax H3 : règles du moteur</a></li>
+    <li><a href="#lora">LoRA 360 Orbit</a></li>
+    <li><a href="#noeud">Le nœud H3 Orbital Conditioning</a></li>
+    <li><a href="#mouvements">Catalogue des mouvements</a></li>
+    <li><a href="#prompts">Règles de prompt</a></li>
+    <li><a href="#refs">Fiche perso et vues du décor</a></li>
+    <li><a href="#croquis">Croquis vu de dessus : verdict</a></li>
+    <li><a href="#sens">Sens de la caméra</a></li>
+    <li><a href="#pipeline">Pipeline d'une planche</a></li>
+    <li><a href="#formats">Formats de données</a></li>
+    <li><a href="#lecteur">Le lecteur HTML</a></li>
+    <li><a href="#son">Son : MiniMax Music 3</a></li>
+    <li><a href="#api">API ComfyUI et workers</a></li>
+    <li><a href="#qbuilder">Contrat Q-Builder</a></li>
+    <li><a href="#mesures">Mesures (temps, VRAM)</a></li>
+    <li><a href="#pieges">Pièges et correctifs</a></li>
+    <li><a href="#david">Travailler avec David</a></li>
+    <li><a href="#archi">Architecture proposée pour Alive-Comics</a></li>
+    <li><a href="#fichiers">Index des fichiers sources</a></li>
+  </ol>
+</nav>
+
+<main>
+
+<!-- ============================================================ 1 -->
+<section id="idee">
+<h2><span class="n">1</span>L'idée en une minute</h2>
+<p>Une <b>planche</b> est une image de page (gabarit + images dans les cases). Chaque <b>case</b> devient une vidéo courte générée par
+<b>MiniMax H3</b> (ComfyUI) à partir de l'image de la case. Le <b>lecteur HTML</b> ne « lit » pas les vidéos : il saute à l'image voulue
+(<code>video.currentTime</code>). La position dans la vidéo est donc un paramètre que l'on pilote :</p>
+<ul>
+  <li><b>Temps figé, caméra mobile</b> : la scène est immobile, seule la caméra bouge (arc, orbite, travelling). Glisser la case = déplacer la caméra, avec inertie.</li>
+  <li><b>Plan animé</b> : la scène bouge (danse, doigts qui gigotent). La case joue toute seule (lecture automatique en aller-retour ou en boucle).</li>
+  <li><b>Boucle</b> : quand la première image est aussi la dernière, la vidéo se referme. L'orbite 360 tourne alors sans fin et le plan animé boucle sans couture.</li>
+  <li><b>Son au survol</b> : une ambiance par case (MiniMax Music 3), qui monte en fondu quand la souris entre dans la case.</li>
+  <li><b>Cases de toutes formes</b> : cadres penchés compris (masque <code>clip-path</code> + calque des traits au-dessus des vidéos).</li>
+</ul>
+<p>Les trois planches du fil ont été faites à la main avec des scripts Python (<code>compose → make_scenes → rendus → assemble → viewer</code>).
+<b>L'application Alive-Comics doit automatiser ce pipeline</b> et en faire un outil d'auteur : poser les images, choisir le mouvement de chaque case,
+répartir les rendus sur les 3 PC, choisir les meilleures variantes, ajouter le son, exporter une planche jouable.</p>
+<div class="ok">Retour de David sur la planche 3 : « sur le principe ça marche hyper bien ». Sur la planche 2 : « c'est génial ». Il « adore le format planche ».</div>
+</section>
+
+<!-- ============================================================ 2 -->
+<section id="livre">
+<h2><span class="n">2</span>Ce qui existe déjà</h2>
+<div class="tbl"><table>
+<tr><th>Livrable</th><th>Contenu</th><th>Où</th></tr>
+<tr><td>Méthode d'origine</td><td>Document de départ « manga orbital » (H3 FL2VA + LoRA 360 Orbit)</td><td><code>E:\Data\Downloads\manga-orbital-minimax-h3.html</code>, copie dans <code>E:\H3-Orbital\docs\</code></td></tr>
+<tr><td>Workflows ComfyUI</td><td><code>orbit360</code>, <code>orbit360_ref</code>, <code>h3_orbital</code> (UI + API), générés par <code>tools/build_workflows.py</code></td><td><code>E:\H3-Orbital\workflows\</code> + ComfyUI <code>user/default/workflows/H3-Orbital</code></td></tr>
+<tr><td>Nœud maison</td><td><code>H3OrbitalConditioning</code> (orbite / trajectoire, refs perso + décor, miroir)</td><td><code>E:\H3-Orbital\custom_nodes\comfyui-h3-orbital</code>, installé sur les 3 PC</td></tr>
+<tr><td>Paquet Q-Builder</td><td><code>h3_orbital_build.py</code>, <code>h3_orbital_api.json</code>, <code>INTEGRATION.html</code> (pour Codex), <code>INSTALL_WORKER_CLAUDE.html</code>, <code>install_worker.ps1</code>, <code>install_music3.ps1</code></td><td><code>E:\H3-Orbital\qbuilder\</code> + NAS</td></tr>
+<tr><td>Planche 1</td><td>9 images, page verticale 1536×2982, cases rectangulaires, arcs de 45 à 75°</td><td><code>E:\H3-Orbital\planche1\viewer\index.html</code>, <code>planche1_orbitale.zip</code></td></tr>
+<tr><td>Planche 2</td><td>9 images, page 1536×2796 avec une grande case verticale (tête de mort), travelling avant sur le crâne, arcs verticaux pour les textures</td><td><code>E:\H3-Orbital\planche2\viewer\index.html</code>, <code>planche2_orbitale.zip</code></td></tr>
+<tr><td>Planche 3</td><td>Gabarit de David à cadres penchés (1416×2000, 5 cases), masques, danseurs en grue + danse de la tête, pieds en orbite 360 infinie, masque doré en arc, créature aux doigts qui gigotent en boucle, vaisseau en arc de 70°, sons au survol</td><td><code>E:\H3-Orbital\planche3\viewer\index.html</code>, <code>planche3_orbitale.zip</code> (34,5 Mo), <code>planche3_demo.mp4</code></td></tr>
+<tr><td>Copies NAS</td><td>Paquet + planches 1 à 3</td><td><code>\\192.168.1.44\nas\Stable-diffusion-stuff\ComfyUI-workflows\Workflow-2026\Load-Worlflow\H3-Orbital\</code></td></tr>
+<tr><td>Journal du projet</td><td>État, mesures, constats</td><td><code>E:\H3-Orbital\README.md</code></td></tr>
+</table></div>
+<h3>Contenu de chaque case de la planche 3 (version finale)</h3>
+<div class="tbl"><table>
+<tr><th>Case</th><th>Image</th><th>Mouvement</th><th>Type lecteur</th><th>Fichier retenu</th><th>Son</th></tr>
+<tr><td>p1</td><td>3 hommes en latex rouge, turbans, gants de boxe dorés, hall de manoir</td><td>Plan grue qui monte + danse indienne de la tête (plan animé libre, 124 images)</td><td>seul + autoplay (aller-retour)</td><td><code>p1_free_00001_.mp4</code></td><td>Musique classique indienne traditionnelle (sitar, tabla, tanpura, ghungroo)</td></tr>
+<tr><td>p2</td><td>Pieds et mains</td><td>Orbite 360 complète, LoRA 1.0, 124 images</td><td>loop (tourne sans fin)</td><td><code>p2_orbit_00001_.mp4</code></td><td>Drone inquiétant (bois qui grince)</td></tr>
+<tr><td>p3</td><td>Masque doré</td><td>Arc des deux côtés ; côté gauche refait avec LoRA 0,5 (sinon le masque pivotait au lieu que la caméra tourne)</td><td>arc</td><td>L : <code>p3_Lf_l05</code>, R : <code>p3_R</code></td><td>Drone rituel (gongs, bronze)</td></tr>
+<tr><td>p4</td><td>Créature vue de dos, mains sur le crâne chauve</td><td>Doigts qui gigotent en boucle, sans orbite, léger tremblé de caméra à l'épaule (première = dernière image)</td><td>seul + autoplay + loop (vers l'avant)</td><td><code>p4_doigtsB_boucle_00001_.mp4</code></td><td>Drone organique (souffle humide, cliquetis)</td></tr>
+<tr><td>p5</td><td>Vaisseau-temple dans l'espace</td><td>Un seul demi-arc de 70° vers l'avant au mandala (H3 tourne toujours vers le mandala)</td><td>seul (via <code>choix.json</code>)</td><td><code>p5_Rb_s7_00001_.mp4</code></td><td>Drone cosmique (grondement, coque)</td></tr>
+</table></div>
+</section>
+
+<!-- ============================================================ 3 -->
+<section id="machines">
+<h2><span class="n">3</span>Machines, réseau, installation</h2>
+<div class="tbl"><table>
+<tr><th>Machine</th><th>Adresse ComfyUI</th><th>Matériel / logiciel</th><th>État au 13/10/2026</th></tr>
+<tr><td><b>HITCHCOCK</b> (poste de David, celui de Claude Code)</td><td><code>http://192.168.1.60:8188</code></td><td>RTX 5090 32 Go, 64 Go de RAM, ComfyUI portable <b>0.33.0</b>, torch 2.11 cu128, ffmpeg 7.1. ComfyUI : <code>E:\Comfy-UI\new_ComfyUI_windows_portable_nvidia_cu121_or_cpu\ComfyUI_windows_portable\ComfyUI</code></td><td>Tout installé : H3, LoRA, nœud, Music 3, Flux.2 Dev, SeedVR2 (téléchargé, non testé)</td></tr>
+<tr><td><b>CASSAVETES</b></td><td><code>http://192.168.1.89:8188</code></td><td>ComfyUI portable, lancé avec <code>--windows-standalone-build --use-sage-attention --listen</code>. Passé de 0.32 à 0.33</td><td>Prêt : H3, LoRA, nœud, Music 3</td></tr>
+<tr><td><b>FORD</b></td><td><code>http://192.168.1.92:8188</code></td><td>Comme CASSAVETES</td><td>Prêt : H3, LoRA, nœud, Music 3</td></tr>
+<tr><td>NAS</td><td><code>\\192.168.1.44\nas\…</code></td><td>Stockage partagé</td><td>Reçoit paquets et planches</td></tr>
+</table></div>
+<ul>
+  <li><b>Aucun partage SMB</b> sur .89 et .92 : tout passe par l'API HTTP de ComfyUI (upload, envoi, récupération). C'est aussi ce que doit faire l'application.</li>
+  <li>Redémarrer un ComfyUI à distance : <code>POST /manager/reboot</code> (en-tête <code>Content-Type: application/json</code>), via ComfyUI-Manager.</li>
+  <li>Ajouter un workflow au menu de ComfyUI : déposer le JSON dans <code>ComfyUI/user/default/workflows/&lt;dossier&gt;/</code> (menu Workflows).</li>
+  <li><b>Claude in Chrome</b> refuse <code>127.0.0.1</code> et <code>localhost</code> : utiliser <code>http://192.168.1.60:8188</code>. L'extension n'agit que dans ses propres onglets.</li>
+  <li>Installation d'un worker : <code>install_worker.ps1 -ComfyUI "…\ComfyUI"</code> (LoRA téléchargé avec reprise <code>curl -C -</code>, taille vérifiée, nœud copié), puis <code>install_music3.ps1 -ComfyUI "…"</code> (3 fichiers, 14,3 Go). Les deux scripts ne touchent à rien d'autre. Page d'instructions pour Claude Code sur les autres PC : <code>INSTALL_WORKER_CLAUDE.html</code> (générée par <code>tools/make_worker_page.py</code>, code du nœud embarqué dans une balise <code>&lt;script type="text/plain" id="node-src"&gt;</code>, workflow de test et image en base64).</li>
+  <li>Mettre à jour ComfyUI portable : <code>update\update_comfyui.bat</code> (git : <code>git pull</code> puis <code>pip install -r requirements.txt</code>). Les nœuds MiniMax H3 natifs exigent <b>0.33.0</b> ou plus.</li>
+</ul>
+<pre><code>powershell -ExecutionPolicy Bypass -File install_worker.ps1 -ComfyUI "E:\...\ComfyUI"
+powershell -ExecutionPolicy Bypass -File install_music3.ps1 -ComfyUI "E:\...\ComfyUI"
+python qbuilder\h3_orbital_build.py x.json --preflight --servers http://192.168.1.60:8188,http://192.168.1.89:8188,http://192.168.1.92:8188</code></pre>
+</section>
+
+<!-- ============================================================ 4 -->
+<section id="modeles">
+<h2><span class="n">4</span>Modèles et fichiers</h2>
+<div class="tbl"><table>
+<tr><th>Rôle</th><th>Fichier</th><th>Dossier <code>models/</code></th><th>Taille / source</th></tr>
+<tr><td>H3 vidéo (first/last frame)</td><td><code>minimax_h3_fl2va_pruned_int8_convrot.safetensors</code></td><td>diffusion_models</td><td>déjà présent ; int8_convrot fonctionne en torch 2.11</td></tr>
+<tr><td>H3 référence (variante)</td><td><code>minimax_h3_ref2va_pruned_int8_convrot.safetensors</code></td><td>diffusion_models</td><td>optionnel, non retenu</td></tr>
+<tr><td>Encodeur texte + vision</td><td><code>qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors</code></td><td>text_encoders</td><td>CLIPLoader <code>type: minimax</code></td></tr>
+<tr><td>VAE vidéo</td><td><code>minimax_h3_video_vae_fp16.safetensors</code></td><td>vae</td><td></td></tr>
+<tr><td>VAE audio H3</td><td><code>minimax_h3_audio_vae_fp32.safetensors</code></td><td>vae</td><td>variante ref seulement, pas utilisé</td></tr>
+<tr><td><b>LoRA 360 Orbit</b> (Pablo Dawson)</td><td><code>minimax_h3_flf2v_lora_v1.safetensors</code></td><td>loras</td><td><b>155 111 424 octets</b>, <code>huggingface.co/pablodawson/MiniMax-H3-360-Orbit-LoRA</code> ; « 208 patches attached »</td></tr>
+<tr><td>Music 3 : DiT</td><td><code>minimax_music3_dit_fp16.safetensors</code></td><td>diffusion_models</td><td>4 914 197 682 octets</td></tr>
+<tr><td>Music 3 : encodeur</td><td><code>minimax_music3_text_encoder_pruned_int8_convrot.safetensors</code></td><td>text_encoders</td><td>9 196 611 886 octets</td></tr>
+<tr><td>Music 3 : VAE audio</td><td><code>minimax_music3_dav.safetensors</code></td><td>vae</td><td>216 696 128 octets ; source <code>huggingface.co/Comfy-Org/MiniMax-Music-3/resolve/main/&lt;dossier&gt;/&lt;fichier&gt;</code></td></tr>
+<tr><td>Image de départ (Flux.2 Dev)</td><td><code>flux2_dev_fp8mixed</code>, <code>mistral_3_small_flux2_bf16</code>, <code>flux2-vae</code></td><td>diffusion_models / text_encoders / vae</td><td>sur HITCHCOCK</td></tr>
+<tr><td>Agrandissement vidéo</td><td>SeedVR2 natif 3B int8</td><td>—</td><td><span class="tag x">non testé</span> script <code>tools/upscale.py</code> écrit</td></tr>
+</table></div>
+</section>
+
+<!-- ============================================================ 5 -->
+<section id="h3">
+<h2><span class="n">5</span>MiniMax H3 : règles du moteur</h2>
+<h3>Nœuds natifs (ComfyUI ≥ 0.33)</h3>
+<ul>
+  <li><code>MiniMaxH3ImageToVideo</code> : <code>first_frame</code> (et <code>last_frame</code> en option), <code>width</code>, <code>height</code>, <code>length</code>, prompt.</li>
+  <li><code>MiniMaxH3ReferenceToVideo</code> : références souples <code>&lt;Picture N&gt;</code>.</li>
+  <li><code>MiniMaxH3AddGuide</code> : épingle une image à l'index <code>frame_idx</code> (négatif = compté depuis la fin).</li>
+  <li><code>MiniMaxH3SigmaShift</code>.</li>
+  <li>Pas de template « Multiframe Reference » en 0.33.</li>
+</ul>
+<h3>Contraintes</h3>
+<div class="tbl"><table>
+<tr><th>Paramètre</th><th>Règle</th></tr>
+<tr><td>Longueur</td><td>Forme <b>17k+5</b> à 24 i/s. 73 = 3 s (demi-arc), 124 = 5,2 s (orbite, plan animé). Maximum 345 images (≈ 14,4 s). <b>15 s maximum par rendu, sinon OOM au second chunk</b> (règle non négociable).</td></tr>
+<tr><td>Taille</td><td>Multiples de 32. Surface maximale ≈ 768×1344 (<code>megapixels</code> 0.985 → 1344×768). 0.58 → 1024×576. Planches : ~0,8 Mpx au ratio de la case, côté long ≤ 1344.</td></tr>
+<tr><td>Échantillonnage</td><td><code>KSamplerSelect res_multistep</code>, <code>BasicScheduler simple</code> 28 steps, <code>BasicGuider</code> (<b>pas de CFG ni de prompt négatif</b>), <code>RandomNoise</code> (seed par défaut 904231), <code>SamplerCustomAdvanced</code>, <code>VAEDecode</code>, <code>CreateVideo</code> 24 i/s, <code>SaveVideo</code>.</td></tr>
+<tr><td>Images clés</td><td>Dans <code>MiniMaxH3ImageToVideo</code>, <b><code>first_frame</code> est étirée</b> au format et <b><code>last_frame</code> recadrée au centre</b>. Si l'image n'a pas déjà la taille exacte, première et dernière diffèrent et la boucle ne ferme pas. Toujours pré-dimensionner : <code>ImageScaleToTotalPixels</code> (lanczos, <code>resolution_steps</code> 32) + <code>GetImageSize</code>, et brancher la même image sur les deux entrées.</td></tr>
+<tr><td>VRAM</td><td>124 images à 0,58 Mpx = 32 Go, plafond d'une 5090 (ça passe, sans marge). Chaque référence ajoute environ une image latente.</td></tr>
+</table></div>
+<h3>Comportements observés</h3>
+<ul>
+  <li><b>Volet noir</b> : avec certaines seeds, la caméra passe derrière un objet sombre pour masquer une transition (une vingtaine d'images presque noires). Détecter (<code>dark_frames</code> dans <code>run_test.py</code>) et changer de seed.</li>
+  <li>Les références ne sont pas que de la fidélité : avec 3 vues perso + 4 vues décor, une case 16:9 (perso collé au mur) qui ne faisait que les trois quarts du tour a fait l'orbite complète.</li>
+  <li>Cases sans décor (vaisseau sur fond noir, crevette) : la caméra bouge peu. Relancer avec une autre seed.</li>
+  <li>Orbite 1344×768 en 124 images : tour complet mais <b>vitesse irrégulière</b> (face → dos en 60 images, dos → face en ~12, puis presque immobile). À compenser éventuellement dans le lecteur (re-timing).</li>
+</ul>
+</section>
+
+<!-- ============================================================ 6 -->
+<section id="lora">
+<h2><span class="n">6</span>LoRA 360 Orbit</h2>
+<p>Entraîné sur FL2VA pruned int8_convrot. Prompt de l'auteur, <b>à reprendre mot pour mot</b> (c'est aussi le préambule du nœud maison) :</p>
+<pre><code>One frozen instant. Only the camera moves. In a continuous 360 orbit. Preserve every person and object in exactly the same world position, orientation, shape and pose throughout the shot. Airborne objects remain suspended at the captured height and angle: no wobbling, shaking, spinning, drifting, falling or continued action. Keep faces, hands, clothing, liquids and the background motionless while retaining their natural appearance. Camera parallax is the only source of apparent movement. No cuts, zoom, morphing or added objects.</code></pre>
+<p>Variante « temps figé sans orbite » (mode path) : le même texte sans <code>In a continuous 360 orbit.</code></p>
+<div class="tbl"><table>
+<tr><th>Force</th><th>Effet mesuré</th><th>Usage</th></tr>
+<tr><td><b>1.0</b></td><td>Orbite 360 complète. Avec première = dernière image, la boucle ferme (PSNR 32 à 36 dB). <b>Force le 360° même sans dernière image</b> et ignore une consigne de trajectoire.</td><td>Orbite en boucle (pieds de la planche 3)</td></tr>
+<tr><td><b>0.5</b></td><td>En mode path, aide à obtenir une vraie orbite autour d'un objet rigide. À 0, le masque doré <b>pivotait sur lui-même</b> au lieu que la caméra tourne.</td><td>Objets rigides (masque, statue)</td></tr>
+<tr><td><b>0</b></td><td>H3 suit la trajectoire écrite.</td><td>Arcs, travellings, plans animés</td></tr>
+</table></div>
+</section>
+
+<!-- ============================================================ 7 -->
+<section id="noeud">
+<h2><span class="n">7</span>Le nœud H3 Orbital Conditioning</h2>
+<p><code>custom_nodes/comfyui-h3-orbital/__init__.py</code>, classe <code>H3OrbitalConditioning</code>, catégorie H3-Orbital. Il remplace
+<code>MiniMaxH3ReferenceToVideo</code> + <code>MiniMaxH3AddGuide</code> en un seul nœud. Il nécessite ComfyUI ≥ 0.33 (références et images clés dans la même séquence).
+Empreinte SHA-256 de la version distribuée : <code>655e6ead…9644c</code>.</p>
+<div class="grid2">
+<div class="card"><h4>Entrées</h4><ul>
+<li><code>clip</code>, <code>vae</code></li>
+<li><code>start_image</code> : la case ; sa taille (ramenée à un multiple de 32) fixe celle de la vidéo</li>
+<li><code>mode</code> : <code>orbit</code> (1re = dernière image) ou <code>path</code> (1re image seule)</li>
+<li><code>prompt</code> : texte ajouté à la fin</li>
+<li><code>length</code> : 5 à 361, pas de 17 (défaut 73)</li>
+<li><code>ref_image_size</code> : <code>match</code> | <code>max</code></li>
+<li><code>mirror</code> : retourne toutes les entrées</li>
+<li>optionnels : <code>character_1..4</code>, <code>set_1..4</code>, <code>plan</code></li>
+</ul></div>
+<div class="card"><h4>Sorties</h4><ul>
+<li><code>positive</code> (CONDITIONING) → BasicGuider</li>
+<li><code>latent</code> (LATENT) → SamplerCustomAdvanced</li>
+<li><code>final_prompt</code> (STRING) : le prompt réellement envoyé, à journaliser</li>
+</ul></div>
+</div>
+<h3>Ce qu'il fait</h3>
+<ul>
+  <li>Compose le prompt : préambule (orbit ou figé) + phrases de référence numérotées automatiquement + texte libre. Un emplacement vide ne décale pas les numéros.</li>
+  <li>Références : chaque image est redimensionnée (<code>match</code> = surface de la génération) puis passe à Qwen (<code>ref_items</code>) <b>et</b> au modèle vidéo (<code>ref_blocks</code>, latent VAE).</li>
+  <li>Le <code>plan</code> va dans <code>ref_items</code> seulement (Qwen le voit, le modèle vidéo non). Déconseillé, voir <a href="#croquis">§11</a>.</li>
+  <li>Sans référence, il tokenise comme le nœud natif : <code>images=[first]</code> (path) ou <code>[first, first]</code> (orbit).</li>
+  <li>Images clés : <code>{"resolved_frame_index": 0, "latent": vae.encode(first)}</code>, plus <code>frame_count - 1</code> en mode orbit, via <code>node_helpers.conditioning_set_values(cond, {"minimax_keyframes": …})</code> et <code>{"minimax_refs": ref_blocks}</code>.</li>
+  <li><code>mirror</code> : <code>t.flip(2)</code> sur toutes les entrées (axe W de [B, H, W, C]). Il faut remettre la vidéo à l'endroit après le décodage avec <code>ImageFlip</code> « y-axis: horizontally » (nœud 17 du workflow Q-Builder).</li>
+</ul>
+<h3>Phrases ajoutées par <code>compose_prompt</code></h3>
+<pre><code>The character is the person in &lt;Picture 1&gt;, …, &lt;Picture n&gt; (the same person seen from different sides): keep exactly the same face, hair, outfit and proportions from every angle.
+&lt;Picture a&gt;, …, &lt;Picture b&gt; show the same place from other angles: keep its buildings, walls, doors, furniture and ground consistent all around.
+&lt;Picture k&gt; is a top-down map of this scene seen from above, for reference only: it never appears in the video. On the map the round marker is the character, the arrow is the camera path, START is where the camera begins and END is where it stops.</code></pre>
+</section>
+
+<!-- ============================================================ 8 -->
+<section id="mouvements">
+<h2><span class="n">8</span>Catalogue des mouvements (validés)</h2>
+<p>C'est le vocabulaire de base de l'application : chaque case reçoit un de ces types. Les gabarits de prompt sont ceux qui ont marché.</p>
+<div class="tbl"><table>
+<tr><th>Type</th><th>Graphe</th><th>LoRA</th><th>Images</th><th>Images clés</th><th>Lecteur</th><th>Exemple</th></tr>
+<tr><td><b>A. Orbite 360 en boucle</b></td><td>H3OrbitalConditioning <code>orbit</code></td><td>1.0</td><td>124</td><td>1re = dernière</td><td><code>loop</code> (tourne sans fin)</td><td>pieds P3-p2</td></tr>
+<tr><td><b>B. Arc des deux côtés</b></td><td><code>path</code> ×2 (L et R)</td><td>0</td><td>73 + 73</td><td>1re seule</td><td><code>arc</code> (case au centre)</td><td>planches 1 et 2</td></tr>
+<tr><td><b>C. Arc d'objet rigide</b></td><td><code>path</code></td><td><b>0.5</b></td><td>73</td><td>1re seule</td><td><code>arc</code></td><td>masque P3-p3</td></tr>
+<tr><td><b>D. Arc vertical</b> (textures)</td><td><code>path</code> ×2 (monte / descend)</td><td>0</td><td>73 + 73</td><td>1re seule</td><td><code>arc</code></td><td>tentacules, bulles P2</td></tr>
+<tr><td><b>E. Travelling avant / arrière</b></td><td><code>path</code> ×2</td><td>0</td><td>73 + 73</td><td>1re seule</td><td><code>arc</code></td><td>crâne P2-p2</td></tr>
+<tr><td><b>F. Demi-arc seul</b></td><td><code>path</code> ×1</td><td>0</td><td>73</td><td>1re seule</td><td><code>seul</code> (case au début)</td><td>vaisseau P3-p5</td></tr>
+<tr><td><b>G. Plan animé libre</b></td><td><code>MiniMaxH3ImageToVideo</code> natif</td><td>0</td><td>124</td><td>1re seule</td><td><code>seul</code> + <code>autoplay</code> (aller-retour)</td><td>danseurs P3-p1</td></tr>
+<tr><td><b>H. Boucle animée</b></td><td><code>MiniMaxH3ImageToVideo</code> natif</td><td>0</td><td>124</td><td>1re = dernière</td><td><code>seul</code> + <code>autoplay</code> + <code>loop</code> (vers l'avant)</td><td>doigts P3-p4</td></tr>
+<tr><td><b>I. Boucle au repos</b></td><td>vidéo animée encodée en aller-retour</td><td>—</td><td>—</td><td>—</td><td><code>idle</code> par-dessus l'orbite</td><td>prévu dans le lecteur, non retenu au final</td></tr>
+</table></div>
+
+<h3>Gabarits de prompt</h3>
+<h4>Arc (B) : une destination décrite de chaque côté</h4>
+<pre><code>def arc(subject, short, toward, ending):
+    return (f"The camera moves smoothly along an arc of about 50 degrees around {subject} toward {toward}, always "
+            f"aimed at {short} and keeping the same distance, ending on {ending}. Then the camera stops. No zoom, no dolly.")
+
+arc("the zombie figure", "him", "the side of his face with the round glasses",
+    "a three-quarter view of his face from that side, the glasses in front")
+arc("the zombie figure", "him", "his large ear", "a three-quarter view of his face from the side of his ear")</code></pre>
+<h4>Arc d'objet rigide (C), avec LoRA 0,5</h4>
+<pre><code>The golden mask is a fixed museum object that never moves, turns or tilts. Only the camera moves: it travels smoothly along an arc of about 50 degrees around the mask toward the right of the frame, the side without the ear knob, always aimed at the mask and keeping the same distance, ending on a three-quarter view of the mask's right side. Camera parallax is the only movement. Then the camera stops. No zoom, no dolly.</code></pre>
+<h4>Arc vertical (D)</h4>
+<pre><code>The camera moves smoothly along an arc of about 50 degrees, rising above {subject}, always aimed at its center and keeping the same distance, ending on a high view looking down on it. Then the camera stops. No zoom, no dolly.
+The camera moves smoothly along an arc of about 50 degrees, lowering toward the base of {subject}, always aimed at its center and keeping the same distance, ending on a low grazing view across it. Then the camera stops. No zoom, no dolly.</code></pre>
+<h4>Travelling (E)</h4>
+<pre><code>The camera physically travels forward, a dolly in and not a zoom, into the open mouth toward the large skull, keeping it centered, ending on a close-up of the large skull's face filling most of the frame. Then the camera stops.
+The camera physically travels backward, a dolly out and not a zoom, away from the open mouth, keeping it centered, revealing more of the huge fleshy face covered with eyes around the mouth, ending on a wider view of that face. Then the camera stops.</code></pre>
+<h4>Demi-arc large (F)</h4>
+<pre><code>The camera moves smoothly along a wide arc of about 70 degrees around the temple spaceship toward its front end with the large glowing mandala, always aimed at the ship and keeping the same distance, ending on a three-quarter front view where the mandala end faces the camera. Then the camera stops. No zoom, no dolly.</code></pre>
+<h4>Plan animé libre (G) : grue + action</h4>
+<pre><code>Cinematic crane shot. The camera rises smoothly upward from eye level to a high angle looking down on the three men in shiny red latex suits with turbans, sunglasses and golden boxing gloves, in the bright mansion hallway. While the camera rises, the three men perform a playful Indian classical dance head movement, sliding their heads from side to side in rhythm, in sync, while their bodies and fists stay in place. Warm 1970s film look, natural colors. No cuts.</code></pre>
+<h4>Boucle animée (H) : mouvement fort + tremblé</h4>
+<pre><code>Seen from behind, the creature holds its bald head in its hands and its ten long wrinkled fingers never stop moving: they crawl, drum and wriggle on the skull like spider legs, each finger lifting and tapping down again in a fast rippling wave from the little finger to the index, knuckles bending and stretching, the fingertips sliding a little over the skin. The finger movement is constant, clearly visible and nervous for the whole shot, while the head and shoulders stay in place. Handheld camera with a light, subtle shake, as if held by a nervous operator; no orbit, no pan, no zoom. Dim greenish light, 1970s horror film look. No cuts.</code></pre>
+<p>Variantes A/B/C du même prompt : la <b>B</b> (avec <code>last_frame</code> = <code>first_frame</code>) a été retenue. Indice de mouvement 4,46 contre 1,52 pour la première version (doigts quasi immobiles) ; écart dernière / première image 1,5, donc une boucle invisible.</p>
+<h4>Préréglages de trajectoire (Q-Builder, <code>PATH_PRESETS</code>)</h4>
+<p><code>half-right</code>, <code>half-left</code> (demi-tour jusqu'au dos, la caméra s'arrête), <code>quarter-push-right</code>, <code>quarter-push-left</code> (quart de tour en se rapprochant, finit sur le profil).
+« Droite / gauche » = côté du personnage qui regarde la caméra (son côté droit est à gauche de l'image). Attention : le texte « left / right » est souvent ignoré, voir <a href="#sens">§12</a>.</p>
+</section>
+
+<!-- ============================================================ 9 -->
+<section id="prompts">
+<h2><span class="n">9</span>Règles de prompt (leçons mesurées)</h2>
+<ol>
+  <li><b>Décrire la destination, pas la direction.</b> « ending on a nearly frontal view of his face », « toward the white car », « rising above … ending on a high view looking down ». H3 suit une destination décrite, alors qu'il ignore « left / right ». C'est la seule méthode fiable pour choisir le sens.</li>
+  <li><b>Décrire dès le départ les deux destinations opposées</b> (une par demi-arc). Planche 2 : 8 cases sur 9 justes du premier coup.</li>
+  <li><b>Demander plus d'angle que voulu.</b> « 35° » donne environ 20° ; écrire 50 à 70° pour obtenir 45 à 75°.</li>
+  <li><b>Terminer par « Then the camera stops. No zoom, no dolly. »</b> pour les arcs, sinon la caméra continue ou zoome.</li>
+  <li><b>Travelling : « physically travels forward, a dolly in and not a zoom »</b>, sinon H3 zoome.</li>
+  <li><b>Objet rigide qui pivote au lieu que la caméra tourne</b> : dire que l'objet est fixe (« a fixed museum object that never moves, turns or tilts », « Camera parallax is the only movement ») <b>et</b> mettre le LoRA à 0,5.</li>
+  <li><b>Textures sans « côté »</b> (tentacules, amas de bulles) : arc vertical, vue rasante d'un côté et plongeante de l'autre.</li>
+  <li><b>Plan animé</b> : ne pas mettre le préambule « temps figé » ; prompt libre, mouvement décrit de façon <b>forte, constante et visible</b> (« never stop moving », « constant, clearly visible and nervous for the whole shot »), en disant ce qui reste fixe (« while the head and shoulders stay in place »).</li>
+  <li><b>Tremblé caméra</b> : « Handheld camera with a light, subtle shake, as if held by a nervous operator; no orbit, no pan, no zoom ».</li>
+  <li><b>Boucle</b> : première image = dernière image (même image pré-dimensionnée).</li>
+  <li><b>Ambiance</b> : préciser l'époque et la lumière (« Warm 1970s film look », « Dim greenish light, 1970s horror film look ») et finir par « No cuts. ».</li>
+  <li><b>Sujet nommé précisément</b> (« the main robot in the center », « the temple spaceship ») et rappelé en forme courte (« always aimed at the ship »).</li>
+  <li><b>Quand une scène tourne toujours du même côté</b> (le vaisseau va toujours vers le mandala), on ne force pas : un demi-arc seul, plus large (70°).</li>
+</ol>
+</section>
+
+<!-- ============================================================ 10 -->
+<section id="refs">
+<h2><span class="n">10</span>Fiche perso et vues du décor</h2>
+<ul>
+  <li>Les références sont des <b>images souples</b> : le modèle reprend ce qu'il voit (dos du costume, portes, mobilier) mais garde sa trajectoire. Aucune contrainte géométrique.</li>
+  <li>En <code>ref_image_size = match</code>, chaque référence est réduite à la surface de génération (~0,6 Mpx). Une fiche à 4 vues devient minuscule : <b>découper la fiche</b> (visage, face, profil, dos) en plusieurs images. Idem pour une planche de décor (9 vues découpées en <code>decor_1..9</code>).</li>
+  <li>Ordre : perso d'abord (<code>&lt;Picture 1..n&gt;</code>), décor ensuite. Maximum 4 + 4 dans le nœud.</li>
+  <li>Coût : environ une image latente de plus par référence. 73 images + 3 refs = 31,3 Go.</li>
+  <li><b>Vue imposée</b> (<code>MiniMaxH3AddGuide</code> à l'image N, avec N = angle / 360 × (length − 1)) : reproduite presque telle quelle (26 dB à l'image visée contre 14,8 dB sans), mais seulement si c'est la scène complète vue <i>depuis l'orbite</i> (même hauteur, même distance, même pose).</li>
+</ul>
+<div class="tbl"><table>
+<tr><th>Test (même case, seed 7, 73 images)</th><th>Ressemblance à la vue de dos connue</th><th>Remarque</th></tr>
+<tr><td>A. Rien</td><td>14,8 dB</td><td>Invente une autre pièce ; volet noir images 26-28</td></tr>
+<tr><td>B. Vue de dos imposée à l'image 36</td><td><b>26,0 dB</b></td><td>Dos conforme, le reste inventé ; volet noir conservé</td></tr>
+<tr><td>C. 3 vues en référence</td><td>15,6 dB (angle libre)</td><td>Dos, porte, chaises repris ; <b>pas de volet noir</b></td></tr>
+</table></div>
+<div class="tbl"><table>
+<tr><th>Maharaja dans le hall, 1024×576, 73 images</th><th>Durée</th><th>VRAM</th><th>Résultat</th></tr>
+<tr><td>Image de départ seule</td><td>308 s</td><td>28,9 Go</td><td>Pas de tour complet (perso collé au mur)</td></tr>
+<tr><td>+ 3 vues perso + 4 vues décor</td><td>299 s</td><td>31,5 Go</td><td><b>Tour complet</b>, dos conforme (dôme chromé, turban), décor arrière repris</td></tr>
+<tr><td>Idem en 124 images</td><td>501 s</td><td>31,8 Go</td><td>Plus fluide, vraie parallaxe, boucle 35,8 dB</td></tr>
+</table></div>
+<div class="note"><b>Image de départ générée</b> (<code>tools/make_start.py</code>) : Flux.2 Dev multi-références, <code>ReferenceLatent</code> chaînés (une par référence, après <code>VAEEncode</code> à 1 Mpx), <code>Flux2Scheduler</code>, <code>EmptyFlux2LatentImage</code>, guidance 4, euler, 20 steps. Dans le prompt, les références s'appellent « image 1 », « image 2 »… 1344×768 en 5 min 19 s à froid.</div>
+</section>
+
+<!-- ============================================================ 11 -->
+<section id="croquis">
+<h2><span class="n">11</span>Croquis vu de dessus : verdict</h2>
+<p>Idée testée : dessiner la trajectoire de la caméra sur un plan vu de dessus (<code>tools/make_sketch.py</code>, option <code>--mono</code>) et le donner à H3.</p>
+<div class="tbl"><table>
+<tr><th>Test (1024×576, 73 images, seed 904231)</th><th>Mouvement</th><th>Artefact</th></tr>
+<tr><td>P1 plan en référence + LoRA 1.0</td><td>Tour complet (le LoRA impose le 360°)</td><td>Flèche + START/END dessinés dans l'image</td></tr>
+<tr><td>P2 plan en référence, LoRA 0</td><td>Demi-tour, finit derrière</td><td>La flèche devient un anneau bleu au sol</td></tr>
+<tr><td>P3 texte + LoRA 1.0</td><td>Tour complet, consigne ignorée</td><td>—</td></tr>
+<tr><td>P4 plan vu par Qwen seulement, LoRA 0</td><td>Demi-tour par sa droite, arrêt derrière</td><td>Anneau bleu + point rouge</td></tr>
+<tr><td><b>P5 texte seul, LoRA 0</b></td><td><b>Même trajectoire que P4</b></td><td><b>Aucun</b></td></tr>
+<tr><td>P6 plan neutre gris, Qwen seulement</td><td>Même trajectoire</td><td>Arcs noirs dans l'image</td></tr>
+</table></div>
+<div class="warn"><b>H3 redessine toujours le croquis dans la vidéo</b>, quelle que soit la façon de le lui montrer. Le texte seul donne la même trajectoire, sans artefact.
+Dans l'application, un croquis peut servir d'<b>interface</b> pour choisir la trajectoire, mais on envoie au modèle <b>du texte</b> (préréglage ou destination décrite).</div>
+</section>
+
+<!-- ============================================================ 12 -->
+<section id="sens">
+<h2><span class="n">12</span>Sens de la caméra</h2>
+<ul>
+  <li>« left / right » dans le texte : <b>ignoré</b>. Le sens dépend surtout de la scène.</li>
+  <li><b>Miroir</b> (entrées retournées, puis <code>ImageFlip</code> après le décodage) : n'inverse le sens que pour <b>certaines</b> scènes (dômes, cases 2 et 3 de la planche 1). Pour les autres, les deux demi-arcs partent du même côté.</li>
+  <li><b>Destination décrite</b> : suivie. C'est la méthode à utiliser (planche 2 et suivantes).</li>
+  <li>Si les deux demi-arcs partent quand même du même côté : n'en garder qu'un (<code>"seul"</code> dans <code>choix.json</code>) ou relancer le côté faux avec une autre seed ou un autre réglage de LoRA.</li>
+  <li><b>Contrôle</b> : seule la vérification visuelle est fiable. Pour chaque case, une bande <b>bout gauche | case d'origine | bout droit</b> (<code>_ends.py</code>). Le flux optique et la corrélation de phase se sont révélés <b>non fiables</b> pour juger le sens.</li>
+</ul>
+</section>
+
+<!-- ============================================================ 13 -->
+<section id="pipeline">
+<h2><span class="n">13</span>Pipeline d'une planche (tel qu'il a tourné)</h2>
+<ol>
+<li><b>Sources</b> : images de David dans <code>plancheN/src/</code> (webp, jpg), plus le gabarit pour la planche 3.</li>
+<li><b>Cases</b>
+  <ul>
+    <li>Planches 1 et 2 : rangées de rectangles explicites dans <code>compose.py</code> (page 1536 px de large, marge 24, gouttière 16, bordure 4 ; chaque case = fichier, taille de génération, recadrage source en fractions).</li>
+    <li>Planche 3 : <b>détection automatique</b> des cadres du gabarit (OpenCV) :
+<pre><code>im = cv2.imread("src/gabarit.webp", cv2.IMREAD_GRAYSCALE)
+white = (im &gt; 160).astype(np.uint8)
+n, lab, stats, cent = cv2.connectedComponentsWithStats(white, 4)
+for i in range(1, n):
+    x, y, bw, bh, area = stats[i]
+    if area &lt; 20000: continue
+    if x == 0 or y == 0 or x + bw &gt;= w or y + bh &gt;= h: continue   # fond blanc qui touche le bord
+    mask = (lab == i).astype(np.uint8)
+    cnts, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    c = max(cnts, key=cv2.contourArea)
+    approx = cv2.approxPolyDP(c, 0.01 * cv2.arcLength(c, True), True).reshape(-1, 2)
+    panels.append({"bbox": [x, y, x + bw, y + bh], "poly": approx.tolist(), "area": area})
+panels.sort(key=lambda p: (p["bbox"][1] // 100, p["bbox"][0]))     # ordre de lecture
+# -&gt; _gabarit.json</code></pre></li>
+  </ul></li>
+<li><b>Composition</b> (<code>compose.py</code>)
+  <ul>
+    <li>Taille de génération au ratio du rectangle englobant :
+<pre><code>def gen_size(ratio, mp=0.8, long_max=1344):
+    area = mp * 1024 * 1024
+    w = (area * ratio) ** 0.5; h = w / ratio
+    if max(w, h) &gt; long_max: s = long_max / max(w, h); w, h = w * s, h * s
+    return max(32, round(w / 32) * 32), max(32, round(h / 32) * 32)</code></pre></li>
+    <li><code>cover()</code> : recadrage source (fractions) puis recadrage centré au ratio, LANCZOS → <code>panels/pN.png</code> (l'image envoyée à H3).</li>
+    <li>Masque du polygone élargi (<code>MaxFilter(7)</code>) pour passer sous le trait noir ; image collée dans la page.</li>
+    <li><code>page.png</code> = page × gabarit (multiplication : le noir reste noir).</li>
+    <li><code>frames.png</code> = calque des traits seuls (RGBA noir, alpha = 255 − gris, seuil 40), posé <b>au-dessus</b> des vidéos dans le lecteur.</li>
+    <li><code>layout.json</code> : par case <code>id</code>, <code>src</code>, <code>rect</code>, <code>poly</code>, <code>gen</code>.</li>
+  </ul></li>
+<li><b>Scènes</b> (<code>make_scenes.py</code>) : un JSON par rendu (<code>pN_L</code>, <code>pN_R</code>, <code>p2_orbit</code>…), plus des workflows API complets pour les plans animés (<code>p1_free_api.json</code> : <code>orbit360_api.json</code> modifié, LoRA 0, <code>last_frame</code> supprimé, length 124).</li>
+<li><b>Rendus distribués</b> : <b>un processus par worker</b> (<code>h3_orbital_build.py --server …</code> ou <code>run_free.py</code>). L'option <code>--servers</code> du script répartit en tourniquet mais <b>séquentiellement</b> : pour du vrai parallèle, il faut un processus (ou un thread) par machine. Sorties dans <code>raw/</code>, journal par machine (<code>raw/hitchcock.log</code>, <code>cassavetes.log</code>, <code>ford.log</code>, puis <code>r2_…</code>, <code>r3_…</code> pour les relances).</li>
+<li><b>Contrôle</b> : <code>_ends.py</code> (bout gauche | centre | bout droit par case), <code>_strip.py</code> (bandes d'images). Relancer ce qui est faux (autre seed, LoRA 0,5, destination plus précise, arc plus large).</li>
+<li><b>Choix</b> : <code>choix.json</code> impose un fichier par côté, ou <code>"seul"</code> si les deux demi-arcs partent du même côté. Sinon le dernier fichier correspondant au motif est pris.</li>
+<li><b>Assemblage</b> (<code>assemble.py</code>) : vidéos tout-intra et <code>manga_data.js</code>.
+<pre><code># encodage commun : chaque image est une image clé (saut instantané)
+ENC = -c:v libx264 -preset medium -crf 19 -g 1 -keyint_min 1 -movflags +faststart -an   (24 i/s, yuv420p)
+
+# arc : L inversé + R sans sa 1re image ; la case d'origine est à l'index nL-1
+[0:v]reverse,setpts=PTS-STARTPTS[l];[1:v]trim=start_frame=1,setpts=PTS-STARTPTS[r];[l][r]concat=n=2:v=1:a=0,format=yuv420p
+
+# aller-retour encodé dans la vidéo (pingpong / idle)
+[0:v]split[a][b];[b]reverse,trim=start_frame=1,setpts=PTS-STARTPTS[r];[a][r]concat=n=2:v=1,format=yuv420p</code></pre>
+  Le polygone est élargi de 4 px vers l'extérieur (<code>grow()</code>) pour que la vidéo passe sous le trait. Le son <code>viewer/sons/&lt;id&gt;.mp3</code> est ajouté s'il existe.</li>
+<li><b>Son</b> (<code>make_sons.py</code>) : une ambiance de 30 s par case, voir <a href="#son">§16</a>.</li>
+<li><b>Aperçu</b> (<code>make_demo.py</code>) : MP4 demi-résolution (~12 s, 291 images) où chaque case joue son mouvement dans son cadre, traits par-dessus.</li>
+<li><b>Livraison</b> : <code>LISEZMOI</code>, zip du dossier <code>viewer/</code>, copie sur le NAS. Le lecteur fonctionne en <code>file://</code> (double-clic sur <code>index.html</code>).</li>
+</ol>
+</section>
+
+<!-- ============================================================ 14 -->
+<section id="formats">
+<h2><span class="n">14</span>Formats de données</h2>
+<h3>Scène (entrée de <code>h3_orbital_build.py</code>)</h3>
+<pre><code>{
+ "id": "p3_Lf_l05",                       // obligatoire, sert au nom de sortie
+ "mode": "path",                          // "orbit" (1re = dernière) | "path" (1re seule)
+ "start_image": "../panels/p3.png",       // relatif au fichier scène
+ "character_refs": [], "set_refs": [],    // 0 à 4 chemins chacun
+ "plan": null,                            // déconseillé
+ "path_preset": null,                     // half-right | half-left | quarter-push-right | quarter-push-left
+ "prompt": "…",                           // ajouté au prompt composé par le nœud
+ "mirror": false,
+ "seed": 904231,
+ "length": 73,                            // 17k+5, 22 à 345
+ "megapixels": 0.796875,                  // gw*gh/1048576 ; 0.58 défaut, 0.985 max
+ "lora_strength": 0.5,                    // défaut 1.0 en orbit, 0.0 en path
+ "steps": 28,
+ "output_prefix": "H3-Orbital/planche3/p3_Lf_l05"
+}</code></pre>
+<h3><code>layout.json</code> (sortie de <code>compose.py</code>)</h3>
+<pre><code>{"page": "page.png", "frames": "frames.png", "size": [1416, 2000],
+ "panels": [{"id": "p1", "src": "hommes_rouges.jpg", "rect": [104,116,1312,697],
+             "poly": [[104,116],[104,696],[1311,646],[1311,116]], "gen": [1312, 640]}, …]}</code></pre>
+<h3><code>choix.json</code></h3>
+<pre><code>{"p3": {"L": "raw/p3_Lf_l05_00001_.mp4", "R": "raw/p3_R_00001_.mp4"},
+ "p5": {"seul": "raw/p5_Rb_s7_00001_.mp4"}}          // aussi possible : "pingpong": true, "idle": "raw/…"</code></pre>
+<h3>Configuration des cases (<code>PANELS</code> dans <code>assemble.py</code>)</h3>
+<pre><code>"p1": {"type": "seul", "files": {"V": "p1_free_*.mp4"}, "autoplay": True},
+"p2": {"type": "loop", "files": {"V": "p2_orbit_*.mp4"}},
+"p3": {"type": "arc",  "files": {"L": "p3_L_*.mp4", "R": "p3_R_*.mp4"}},
+"p4": {"type": "seul", "files": {"V": "p4_doigtsB_boucle_*.mp4"}, "autoplay": True, "loop": True},
+"p5": {"type": "arc",  "files": {"L": "p5_L_*.mp4", "R": "p5_R_*.mp4"}},
+# options : "pingpong": True, "idle": "motif_*.mp4"</code></pre>
+<h3><code>manga_data.js</code> (entrée du lecteur)</h3>
+<pre><code>window.MANGA = {
+ "page": "page.jpg", "frames": "frames.png", "size": [1416, 2000], "fps": 24,
+ "panels": [
+  {"id": "p3", "rect": [x0,y0,x1,y1], "poly": [[x,y],…],          // poly élargi de 4 px
+   "video": "videos/p3.mp4", "frames": 145, "center": 72,           // arc : center = nL-1
+   "audio": "sons/p3.mp3"},
+  {"id": "p4", …, "video": "videos/p4.mp4", "frames": 124, "center": 0,
+   "loop": true, "autoplay": true, "audio": "sons/p4.mp3"},
+  {"id": "pX", …, "idle": "videos/pX_idle.mp4"}                    // boucle au repos (option)
+ ]};</code></pre>
+<p>Un fichier <code>.js</code> plutôt qu'un <code>.json</code> : <code>fetch()</code> ne marche pas en <code>file://</code>, une balise <code>&lt;script src&gt;</code> si.</p>
+</section>
+
+<!-- ============================================================ 15 -->
+<section id="lecteur">
+<h2><span class="n">15</span>Le lecteur HTML (<code>viewer/index.html</code>)</h2>
+<p>Un seul fichier HTML + <code>manga_data.js</code> + <code>page.jpg</code> + <code>frames.png</code> + <code>videos/</code> + <code>sons/</code>. Aucune dépendance.</p>
+<h3>Principe</h3>
+<ul>
+  <li>Une case = un <code>div.panel</code> positionné en % de la page (<code>rect</code>), découpé par <code>clip-path: polygon(…)</code> (<code>poly</code> ramené au rectangle). <code>frames.png</code> au-dessus (z-index 5) cache les bords.</li>
+  <li>Un contrôleur par case : <code>pos</code> (index d'image, flottant), <code>vel</code>, <code>drag</code>, <code>anim</code>, liste de vidéos à tenir à jour (vignette + agrandissement).</li>
+  <li><b>Saut d'image</b> : <code>video.currentTime = (idx + 0.5) / fps</code>. Un drapeau <code>busy</code> évite d'empiler les sauts ; à <code>seeked</code>, on relance vers la position courante (rattrapage). Vidéos <b>tout-intra</b> (<code>-g 1</code>) obligatoires pour un saut instantané.</li>
+  <li><b>Glisser</b> : toute la largeur de la case = tout l'arc. <code>setPointerCapture</code> dans un try/catch. Rendu immédiat au <code>pointermove</code>.</li>
+  <li><b>Inertie</b> : vitesse mesurée sur les 6 derniers points, plafonnée à (frames − 1) / 1,1 par seconde, décroissance <code>vel *= exp(-3.2·dt)</code>, arrêt sous 0,5 image/s ou aux bouts.</li>
+  <li><b>Bornes</b> : <code>clamp</code> aux bouts pour un arc ; <code>wrap</code> (modulo <code>frames − 1</code>) pour une boucle, qui tourne sans fin.</li>
+  <li><b>Lecture automatique</b> : avance de <code>fps·dt</code>, vers l'avant si <code>loop</code>, sinon en aller-retour. Elle reprend <b>4 s</b> après le dernier geste.</li>
+  <li><b>Boucle au repos</b> (<code>idle</code>) : seconde vidéo en lecture normale par-dessus ; masquée au premier contact, puis retour au centre et relance après 4 s.</li>
+  <li><b>Vue initiale</b> : animation de 600 ms (ease-out cubique) vers <code>center</code>, par le chemin le plus court pour une boucle.</li>
+  <li><b>Noir &amp; blanc</b> : <code>filter: grayscale(1) contrast(1.12)</code> sur la page.</li>
+  <li><b>Agrandissement</b> au double-clic : seconde vidéo pilotée par le même contrôleur ; Échap ou clic à côté pour fermer.</li>
+  <li><b>Son au survol</b> : <code>new Audio(mp3)</code>, <code>loop</code>, fondu par pas de 0,08 toutes les 30 ms à <code>pointerenter</code> / <code>pointerleave</code> ; bouton « Son » pour tout couper. Le navigateur exige <b>un premier clic dans la page</b> avant tout son.</li>
+  <li>Jauge de position en bas de la case au survol ; badge « chargement… » jusqu'au premier <code>seeked</code>.</li>
+  <li><code>window.__orbit</code> expose les contrôleurs pour le débogage.</li>
+</ul>
+<h3>Points à connaître</h3>
+<ul>
+  <li><code>python -m http.server</code> ne gère pas les requêtes <b>Range</b> : Chrome ne peut plus sauter dans la vidéo. Utiliser <code>tools/serve_range.py &lt;dossier&gt; [port]</code> ou le <code>file://</code>.</li>
+  <li><code>requestAnimationFrame</code> est suspendu quand l'onglet ou le panneau de navigateur est masqué : un test automatisé peut croire que « rien ne bouge ». Ce n'est pas un bug du lecteur.</li>
+  <li>Avec un pointeur synthétique, <code>setPointerCapture</code> lève une exception : d'où le try/catch.</li>
+</ul>
+</section>
+
+<!-- ============================================================ 16 -->
+<section id="son">
+<h2><span class="n">16</span>Son : MiniMax Music 3</h2>
+<p>Template officiel <code>audio_minimax_music_3</code>, aplati au format API dans <code>make_sons.py</code> :</p>
+<pre><code>CLIPLoader(minimax_music3_text_encoder_pruned_int8_convrot, type=minimax)
+  → MiniMaxMusic3TextEncode(caption, lyrics, seed, max_duration=30, cfg_scale=1.7, top_k=50)
+      ├─ sortie 0 → KSampler.positive ; ConditioningZeroOut → KSampler.negative
+      └─ sortie 1 (secondes) → EmptyMiniMaxMusic3LatentAudio(batch 1)
+UNETLoader(minimax_music3_dit_fp16) → KSampler(30 steps, cfg 1.7, euler, simple, denoise 1)
+  → VAEDecodeAudio(minimax_music3_dav) → SaveAudioAdvanced(format mp3, format.quality V0)</code></pre>
+<ul>
+  <li><b>Caption en trois blocs</b> séparés par une ligne vide : <code>Global Metadata: …</code> / <code>Vocal Details: …</code> / <code>Arrangement: …</code>.</li>
+  <li><b>Instrumental</b> : lyrics <code>[Intro]\n\n[Instrumental]\n\n[Outro]</code> et « Vocal Details: No vocals at all, fully instrumental. »</li>
+  <li>Pour qu'une ambiance boucle : « no melody, no beat, no drums, made to loop seamlessly: a slowly evolving texture with no clear beginning or end ».</li>
+  <li>Exclure explicitement ce qu'on ne veut pas (« No drum kit, no bass guitar, no synthesizer, no funk, no electronic sound, nothing modern »).</li>
+  <li>Durée : 2 à 6 min par son de 30 s (≈ 137 s à chaud sur HITCHCOCK, jusqu'à 635 s au premier chargement). Niveau moyen obtenu : −18 à −24 dB.</li>
+  <li>Récupération : sortie <code>.mp3</code> sous <code>outputs[…].audio</code> (ou <code>images</code>), téléchargée via <code>/view</code> vers <code>viewer/sons/&lt;id&gt;.mp3</code>.</li>
+</ul>
+<details><summary>Captions utilisées (v2, demandées par David : drones inquiétants partout, sauf les danseurs en musique indienne traditionnelle)</summary>
+<pre><code>p1 (danseurs)
+Global Metadata: Traditional Indian classical music, Hindustani style, lively dance piece in teental, around 120 BPM, raga Yaman in a bright mood. Joyful, playful and swaying, perfect for a side-to-side Indian head wobble dance, made to loop. Fully acoustic, warm traditional recording, no modern production.
+
+Vocal Details: No vocals at all, fully instrumental. Only the rhythmic spoken syllables (bols) of a kathak dancer now and then.
+
+Arrangement: tanpura drone as the constant bed, sitar playing the main melody with meend slides, tabla keeping a steady lively teental cycle with crisp tihais, harmonium doubling the phrases, a bansuri flute answering, ghungroo ankle bells jingling on the beat. No drum kit, no bass guitar, no synthesizer, no funk, no electronic sound, nothing modern.
+
+p2 (pieds)
+Global Metadata: Unsettling dark ambient drone, horror atmosphere. Free tempo, atonal, centered on a low D. Dark ambient drone, no melody, no beat, no drums, made to loop seamlessly: a slowly evolving texture with no clear beginning or end. Intimate and creepy, like something turning slowly in an empty room.
+Vocal Details: No vocals at all, fully instrumental.
+Arrangement: deep sustained bowed bass drone, slow detuned beating between two low tones, distant creaking wood and faint scraping, a thin high whistling harmonic that comes and goes, soft breath-like noise. Constant uneasy tension, no resolution.
+
+p3 (masque) : ritual dark ambient, ancient tomb, low C sharp, cold metallic and sacred ; distant guttural throat-singing ; bronze and gong overtones, bowed metal, slow ominous swells, struck bell decaying forever.
+p4 (créature) : organic horror drone, very low register, visceral, wet, claustrophobic ; faint wet breathing ; sub-bass throbbing like a heartbeat, dissonant low string clusters, wet squelching, insect-like clicking, eerie high hiss.
+p5 (vaisseau) : cosmic dark ambient, deep space horror, extremely low ; distant ghostly choir-like hum ; infrasonic rumble, metallic hull groans, radio static, long dissonant synth swells.</code></pre></details>
+<div class="note">Rejeté par David : une version « funk moderne » des danseurs. Il veut de la musique indienne traditionnelle, acoustique.</div>
+</section>
+
+<!-- ============================================================ 17 -->
+<section id="api">
+<h2><span class="n">17</span>API ComfyUI et workers</h2>
+<div class="tbl"><table>
+<tr><th>Appel</th><th>Usage</th><th>À savoir</th></tr>
+<tr><td><code>GET /system_stats</code></td><td>Version, VRAM</td><td><code>system.comfyui_version</code> ≥ 0.33.0 exigé</td></tr>
+<tr><td><code>GET /object_info/&lt;Nœud&gt;</code></td><td>Le nœud existe ? Le fichier modèle est-il dans la liste ?</td><td><code>info[node]["input"]["required"][champ][0]</code> = liste des fichiers</td></tr>
+<tr><td><code>POST /upload/image</code></td><td>Envoyer une image (multipart : <code>image</code>, <code>type=input</code>, <code>subfolder</code>, <code>overwrite=true</code>)</td><td>Réponse <code>{name, subfolder}</code> → mettre <code>"subfolder/name"</code> tel quel dans <code>LoadImage.image</code></td></tr>
+<tr><td><code>POST /prompt</code></td><td><code>{"prompt": workflow_api, "client_id": uuid}</code></td><td>Renvoie <code>prompt_id</code></td></tr>
+<tr><td><code>GET /history/&lt;id&gt;</code></td><td>Attente (sondage toutes les 4 s)</td><td><code>status.completed</code> ; en erreur, <code>status_str == "error"</code> et messages <code>execution_error</code></td></tr>
+<tr><td><code>GET /view?filename=&amp;subfolder=&amp;type=output</code></td><td>Télécharger la sortie</td><td>La vidéo <code>SaveVideo</code> apparaît sous <code>outputs["16"].images</code> avec <code>animated: [true]</code></td></tr>
+<tr><td><code>POST /manager/reboot</code></td><td>Redémarrer ComfyUI</td><td>Content-Type JSON</td></tr>
+</table></div>
+<ul>
+  <li><b>Preflight</b> (<code>preflight(server)</code>) : version, nœuds requis (<code>H3OrbitalConditioning, ImageFlip, LoraLoaderModelOnly, UNETLoader, CLIPLoader, VAELoader, ImageScaleToTotalPixels, SamplerCustomAdvanced, BasicGuider, BasicScheduler, KSamplerSelect, RandomNoise, VAEDecode, CreateVideo, SaveVideo, LoadImage</code>) et fichiers (fl2va, LoRA, qwen3vl, VAE vidéo). Liste vide = prêt.</li>
+  <li>Sous-dossier d'upload par projet (<code>h3orbital/planche3</code>) pour ne pas mélanger les entrées.</li>
+  <li>Les modèles restent chargés entre deux rendus du même type : regrouper les rendus H3 d'un côté et Music 3 de l'autre sur une machine évite des rechargements de plusieurs minutes.</li>
+  <li>Bibliothèque standard Python uniquement (<code>urllib</code>) dans <code>h3_orbital_build.py</code> : rien à installer côté client.</li>
+</ul>
+</section>
+
+<!-- ============================================================ 18 -->
+<section id="qbuilder">
+<h2><span class="n">18</span>Contrat Q-Builder (<code>h3_orbital_api.json</code>)</h2>
+<p>Les numéros de nœuds sont le contrat avec l'application Workflows Q-Builder (et donc réutilisables par Alive-Comics) : <b>ne pas les renuméroter</b>.</p>
+<div class="tbl"><table>
+<tr><th>ID</th><th>Nœud</th><th>Rôle</th></tr>
+<tr><td>1</td><td>LoadImage</td><td>La case</td></tr>
+<tr><td>2</td><td>ImageScaleToTotalPixels</td><td><code>megapixels</code>, <code>resolution_steps</code> 32</td></tr>
+<tr><td>4</td><td>UNETLoader</td><td>fl2va pruned int8_convrot</td></tr>
+<tr><td>5</td><td>LoraLoaderModelOnly</td><td><code>strength_model</code> (LoRA 360)</td></tr>
+<tr><td>6</td><td>CLIPLoader</td><td>qwen3vl, type minimax</td></tr>
+<tr><td>7</td><td>VAELoader</td><td>VAE vidéo fp16</td></tr>
+<tr><td>8</td><td>H3OrbitalConditioning</td><td>mode, prompt, length, mirror, refs</td></tr>
+<tr><td>9</td><td>RandomNoise</td><td>seed</td></tr>
+<tr><td>10</td><td>KSamplerSelect</td><td>res_multistep</td></tr>
+<tr><td>11</td><td>BasicScheduler</td><td>simple, steps</td></tr>
+<tr><td>12</td><td>BasicGuider</td><td></td></tr>
+<tr><td>13</td><td>SamplerCustomAdvanced</td><td></td></tr>
+<tr><td>14</td><td>VAEDecode</td><td></td></tr>
+<tr><td>15</td><td>CreateVideo</td><td>24 i/s</td></tr>
+<tr><td>16</td><td>SaveVideo</td><td><code>filename_prefix</code></td></tr>
+<tr><td>17</td><td>ImageFlip</td><td>Ajouté seulement si <code>mirror</code></td></tr>
+<tr><td>21-24</td><td>LoadImage</td><td>Vues perso → <code>character_1..4</code> (supprimés si vides)</td></tr>
+<tr><td>31-34</td><td>LoadImage</td><td>Vues décor → <code>set_1..4</code></td></tr>
+<tr><td>40</td><td>LoadImage</td><td>Plan → <code>plan</code></td></tr>
+</table></div>
+<p>Workflow des plans animés (G, H) : <code>orbit360_api.json</code> (nœud 8 = <code>MiniMaxH3ImageToVideo</code>), LoRA à 0, <code>first_frame</code> seul (G) ou <code>first_frame</code> = <code>last_frame</code> (H), length 124.</p>
+<p>Q-Builder : dossier de travail <code>LTX Prompt Builder DEV\</code> (dépôt git), copie propre <code>Workflows Q-builder\</code>, dépôt public <a href="https://github.com/grosdada/Workflows-Q-Builder">grosdada/Workflows-Q-Builder</a> (source du bouton Update). Trois moteurs (LTX, MiniMax H3 Director, H3 T2V), prompts via OpenAI / Anthropic / Google, interface FR-EN, thème clair-sombre. Ne jamais publier <code>local_settings.json</code>. Piège : l'archive zip de GitHub ignore <code>eol</code> du <code>.gitattributes</code>, la mise à jour force donc les fins de ligne Windows des <code>.bat</code>.</p>
+</section>
+
+<!-- ============================================================ 19 -->
+<section id="mesures">
+<h2><span class="n">19</span>Mesures (temps, VRAM)</h2>
+<div class="tbl"><table>
+<tr><th>Rendu</th><th>Taille, images</th><th>Durée</th><th>VRAM max</th><th>Remarque</th></tr>
+<tr><td>Orbite 360 (scaphandrier)</td><td>640×960, 73</td><td>321 s dont ~2 min de chargement à froid, 6,8 s/step</td><td>28,0 Go</td><td>Boucle 32,0 dB</td></tr>
+<tr><td>Orbite 360</td><td>640×960, 124</td><td>393 s</td><td><b>32,0 Go</b> (plafond)</td><td>Boucle 32,5 dB</td></tr>
+<tr><td>Orbite + 3 refs</td><td>640×960, 73</td><td>211 s (à chaud)</td><td>31,1 Go</td><td></td></tr>
+<tr><td>Hall, sans refs</td><td>1024×576, 73</td><td>308 s</td><td>28,9 Go</td><td>Pas de tour complet</td></tr>
+<tr><td>Hall, 3 + 4 refs</td><td>1024×576, 73</td><td>299 s</td><td>31,5 Go</td><td>Tour complet</td></tr>
+<tr><td>Hall, 3 + 4 refs</td><td>1024×576, 124</td><td>501 s</td><td>31,8 Go</td><td>Boucle 35,8 dB</td></tr>
+<tr><td>Dômes HD, 4 + 3 refs</td><td>1344×768, 124</td><td>908 s</td><td>28,7 Go</td><td>Boucle 35,6 dB, vitesse irrégulière</td></tr>
+<tr><td>Demi-arc de planche</td><td>~0,8 Mpx, 73</td><td>~4,5 min</td><td>—</td><td>20 rendus pour la planche 2</td></tr>
+<tr><td>Plan animé / boucle animée</td><td>~0,8 Mpx, 124</td><td>269 à 651 s selon la machine et le chargement</td><td>—</td><td>doigts A/B/C sur les 3 PC en parallèle</td></tr>
+<tr><td>Image de départ Flux.2 Dev</td><td>1344×768</td><td>5 min 19 s à froid</td><td>—</td><td></td></tr>
+<tr><td>Son Music 3</td><td>30 s, mp3 V0</td><td>125 à 635 s (≈ 137 s à chaud)</td><td>—</td><td></td></tr>
+</table></div>
+<p class="note">Les pics de VRAM dépendent aussi du déchargement automatique de ComfyUI (1344×768 avec 7 refs a pris moins que 640×960 sans ref). Ne pas en tirer une règle linéaire ; garder 124 images comme plafond pratique et tester avant d'empiler les références.</p>
+</section>
+
+<!-- ============================================================ 20 -->
+<section id="pieges">
+<h2><span class="n">20</span>Pièges et correctifs</h2>
+<div class="tbl"><table>
+<tr><th>Symptôme</th><th>Cause</th><th>Correctif</th></tr>
+<tr><td>La boucle ne ferme pas</td><td>first_frame étirée, last_frame recadrée</td><td>Pré-dimensionner l'image (multiples de 32) et brancher la même sur les deux entrées</td></tr>
+<tr><td>Une vingtaine d'images noires</td><td>« Volet noir » de certaines seeds</td><td>Autre seed (détection <code>dark_frames</code>)</td></tr>
+<tr><td>Les deux demi-arcs vont du même côté</td><td>Le texte left/right est ignoré, le miroir ne marche que parfois</td><td>Destination décrite ; sinon <code>"seul"</code></td></tr>
+<tr><td>L'objet pivote au lieu que la caméra tourne</td><td>LoRA à 0</td><td>LoRA 0,5 + « fixed object that never moves »</td></tr>
+<tr><td>Orbite 360 non voulue</td><td>LoRA à 1.0</td><td>LoRA 0 en mode path</td></tr>
+<tr><td>Le croquis apparaît dans la vidéo</td><td>H3 redessine tout ce qu'on lui montre</td><td>Texte seul</td></tr>
+<tr><td>Angle trop faible</td><td>H3 fait ~60 % de l'angle demandé</td><td>Demander 50 à 70°</td></tr>
+<tr><td>Doigts quasi immobiles</td><td>Prompt de mouvement trop faible</td><td>Mouvement constant, fort, détaillé ; 1re = dernière pour boucler</td></tr>
+<tr><td>Zoom au lieu d'un travelling</td><td>—</td><td>« physically travels forward, a dolly in and not a zoom »</td></tr>
+<tr><td>Le lecteur ne saute pas dans la vidéo</td><td><code>http.server</code> sans Range ; ou vidéo non tout-intra</td><td><code>serve_range.py</code> ou <code>file://</code> ; encoder avec <code>-g 1</code></td></tr>
+<tr><td>Une boucle saute à une image impossible (184)</td><td>Rattrapage sans <code>wrap</code></td><td><code>seek(rec, wrap(Math.round(st.pos), st))</code> dans <code>seeked</code> et <code>loadedmetadata</code></td></tr>
+<tr><td>Erreur au glisser simulé</td><td><code>setPointerCapture</code> avec un pointeur synthétique</td><td>try/catch</td></tr>
+<tr><td>« Rien ne bouge » en test automatique</td><td><code>requestAnimationFrame</code> suspendu (panneau masqué)</td><td>Rien : artefact de test</td></tr>
+<tr><td>Pas de son</td><td>Politique autoplay du navigateur</td><td>Un premier clic dans la page</td></tr>
+<tr><td>Script coupé en plein travail</td><td><code>| head</code> ferme le pipe</td><td>Ne pas tronquer la sortie d'un script long ; journal dans un fichier</td></tr>
+<tr><td>Journal vide pendant le rendu</td><td>Tampon de sortie Python</td><td><code>print(…, flush=True)</code> ou <code>python -u</code></td></tr>
+<tr><td>SyntaxError après remplacement par heredoc</td><td>Vrais retours à la ligne insérés dans une chaîne</td><td>Constante <code>SEP = "\n\n"</code>, fichier réécrit d'un bloc</td></tr>
+<tr><td>Rendus « en parallèle » qui s'enchaînent</td><td><code>--servers</code> répartit mais attend chaque rendu</td><td>Un processus (ou un thread) par worker</td></tr>
+<tr><td>OOM</td><td>&gt; 15 s, ou trop de refs en 124 images</td><td>Respecter 17k+5 ≤ 345 et la surface max</td></tr>
+<tr><td>Chrome refuse la page ComfyUI</td><td>Claude in Chrome bloque localhost</td><td>Adresse réseau 192.168.1.60:8188</td></tr>
+</table></div>
+</section>
+
+<!-- ============================================================ 21 -->
+<section id="david">
+<h2><span class="n">21</span>Travailler avec David</h2>
+<ul>
+  <li><b>Tout est autorisé</b> : ne jamais bloquer sur une question ni demander de confirmation. Trancher, livrer complet, signaler les hypothèses à la fin. Il s'absente souvent (« je vais me coucher, prépare la planche pour mon réveil »).</li>
+  <li>Répondre en <b>français</b>.</li>
+  <li>Qualité : <b>« pas en basse def, en bonne def »</b>. Il aime le <b>16:9</b> et le <b>format planche</b>.</li>
+  <li>Arcs : <b>45 à 75°</b>, pas de 360° partout ; le 360 est réservé aux cases qui s'y prêtent (les pieds).</li>
+  <li>Sons : drones inquiétants ; musique indienne traditionnelle pour les danseurs, <b>pas de version funk moderne</b>.</li>
+  <li>Utiliser les 3 PC (CASSAVETES et FORD) pour aller plus vite ; quand ils sont occupés (installation), « fais tout sur HITCHCOCK ».</li>
+  <li>Ne jamais casser une installation qui fonctionne ; scripts d'installation qui ne touchent qu'à ce qu'ils ajoutent.</li>
+  <li>Q-Builder : après chaque modification de l'app, commit + push, puis reconstruire le dossier propre. Pour Alive-Comics, commit/push quand il le demande.</li>
+  <li>Il donne des pages HTML à Codex et aux Claude Code des autres PC : les documents d'intégration doivent être autonomes (chemins, commandes, contrats, tests).</li>
+</ul>
+</section>
+
+<!-- ============================================================ 22 -->
+<section id="archi">
+<h2><span class="n">22</span>Architecture proposée pour Alive-Comics <span class="tag">proposition</span></h2>
+<p>But : faire en quelques clics ce qui a demandé une quinzaine de scripts par planche. Les choix techniques suivent ce qui a déjà marché : Python côté machine (PIL, OpenCV, ffmpeg, urllib), HTML/JS sans dépendance côté lecteur, ComfyUI par HTTP.</p>
+
+<h3>Modules</h3>
+<div class="grid2">
+<div class="card"><h4>1. Planche</h4><ul>
+<li>Import d'un gabarit (détection OpenCV des cadres, polygones penchés compris) ou grille de rectangles (rangées, marges, gouttières).</li>
+<li>Glisser une image dans une case ; recadrage interactif (<code>cover</code>, fractions source).</li>
+<li>Calcul automatique de la taille de génération (<code>gen_size</code>, ~0,8 Mpx, côté long ≤ 1344, multiples de 32).</li>
+<li>Sorties : <code>page.png</code>, <code>frames.png</code>, <code>panels/</code>, <code>layout.json</code>.</li>
+</ul></div>
+<div class="card"><h4>2. Case : mouvement</h4><ul>
+<li>Choix du type dans le catalogue (A à I).</li>
+<li>Champs guidés : sujet, forme courte, destination côté 1 / côté 2, angle (pré-majoré), ambiance ; le prompt est généré par les gabarits du §8 et reste modifiable.</li>
+<li>Option : description de l'image par un LLM (comme Q-Builder) pour pré-remplir sujet et destinations.</li>
+<li>Refs perso / décor (4 + 4), seed, longueur (17k+5), LoRA (préréglé selon le type).</li>
+<li>Un croquis vu de dessus possible comme <i>interface</i>, traduit en texte.</li>
+</ul></div>
+<div class="card"><h4>3. Rendus</h4><ul>
+<li>Liste des workers + preflight (version, nœuds, fichiers).</li>
+<li>File d'attente avec un fil par worker (vrai parallèle), reprise après coupure, journal (seed, prompt final, temps, machine).</li>
+<li>Upload dans un sous-dossier par projet ; récupération par <code>/view</code>.</li>
+<li>Regroupement par type de modèle (H3 / Music 3) pour éviter les rechargements.</li>
+<li>Garde-fous : 15 s max, surface max, 124 images avec refs.</li>
+</ul></div>
+<div class="card"><h4>4. Revue</h4><ul>
+<li>Triptyque bout gauche | centre | bout droit pour chaque rendu (la seule mesure fiable du sens).</li>
+<li>Détection des volets noirs et de la fermeture de boucle (PSNR 1re / dernière).</li>
+<li>Variantes côte à côte, choix d'un fichier par côté ou « seul » (remplace <code>choix.json</code>).</li>
+<li>Bouton « relancer » avec suggestions : autre seed, LoRA 0,5, destination plus précise, angle plus large.</li>
+</ul></div>
+<div class="card"><h4>5. Son</h4><ul>
+<li>Constructeur de caption en 3 blocs (Global Metadata / Vocal Details / Arrangement) avec préréglages : drone inquiétant, rituel, cosmique, organique, musique traditionnelle…</li>
+<li>Instrumental par défaut, durée 30 s, aperçu, normalisation du niveau.</li>
+</ul></div>
+<div class="card"><h4>6. Assemblage et export</h4><ul>
+<li>ffmpeg : arcs (reverse + concat), pingpong, idle, tout-intra <code>-g 1</code>.</li>
+<li><code>manga_data.js</code> + lecteur ; aperçu intégré.</li>
+<li>Export : dossier <code>viewer/</code> autonome (zip), MP4 d'aperçu, copie NAS.</li>
+<li>Plus tard : plusieurs planches (album), bulles et texte en calque au-dessus des vidéos.</li>
+</ul></div>
+</div>
+
+<h3>Format de projet</h3>
+<pre><code>projets/&lt;nom&gt;/
+  project.json         # planche, cases, réglages, choix, sons (source unique de vérité)
+  src/                 # images importées, gabarit
+  panels/  page.png  frames.png  layout.json
+  renders/&lt;case&gt;/      # toutes les variantes + journal.jsonl (seed, prompt final, machine, durée)
+  viewer/              # export jouable (index.html, manga_data.js, videos/, sons/)</code></pre>
+<pre><code>// project.json (esquisse)
+{
+ "name": "planche3", "page": {"size": [1416, 2000], "template": "src/gabarit.webp"},
+ "workers": ["http://192.168.1.60:8188", "http://192.168.1.89:8188", "http://192.168.1.92:8188"],
+ "panels": [{
+   "id": "p3", "rect": [...], "poly": [...], "image": "src/masque_or.webp", "crop": [0, 0.30, 1, 0.78], "gen": [1088, 768],
+   "motion": {"type": "arc", "subject": "the golden mask", "short": "the mask",
+              "sides": [{"toward": "...", "ending": "...", "lora": 0.5}, {"toward": "...", "ending": "..."}],
+              "angle": 50, "length": 73, "seed": 904231},
+   "renders": [{"side": "L", "file": "renders/p3/p3_Lf_l05.mp4", "seed": 904231, "machine": "FORD", "s": 270}],
+   "chosen": {"L": "renders/p3/p3_Lf_l05.mp4", "R": "renders/p3/p3_R.mp4"},
+   "sound": {"preset": "drone-rituel", "caption": "...", "file": "sons/p3.mp3"}
+ }]
+}</code></pre>
+
+<h3>Pile technique suggérée</h3>
+<ul>
+  <li><b>Serveur local Python</b> (lancé par un <code>.bat</code>, comme Q-Builder) : API du projet, file de rendus multi-workers, appels ffmpeg, OpenCV et PIL. Le module <code>h3_orbital_build.py</code> se réutilise tel quel.</li>
+  <li><b>Interface web</b> HTML/JS (sans framework lourd au départ) : éditeur de planche (canvas, polygones), inspecteur de case, file, revue, lecteur intégré.</li>
+  <li><b>Lecteur</b> : reprendre <code>planche3/viewer/index.html</code>, qui gère déjà toutes les fonctions.</li>
+  <li>Mise à jour par bouton Update depuis le dépôt GitHub (même principe que Q-Builder) ; réglages machine dans un <code>local_settings.json</code> hors dépôt.</li>
+</ul>
+
+<h3>Feuille de route</h3>
+<ol>
+  <li><b>v0.1</b> : projet + planche (grille et gabarit détecté) + cases + rendus distribués + assemblage + lecteur. Reproduire la planche 3 de bout en bout.</li>
+  <li><b>v0.2</b> : revue (triptyques, variantes, relances guidées), journal, reprise.</li>
+  <li><b>v0.3</b> : sons Music 3 avec préréglages.</li>
+  <li><b>v0.4</b> : aide LLM aux prompts, bulles et texte en calque, albums de plusieurs planches, re-timing des orbites à vitesse irrégulière, agrandissement SeedVR2 (à tester).</li>
+</ol>
+<div class="warn"><b>Risques connus</b> : sens de caméra imprévisible (prévoir des variantes et la revue dès la v0.1), VRAM au plafond en 124 images, workers occupés ou éteints (preflight + file), temps de rendu (4 à 15 min par vidéo, 20 rendus par planche).</div>
+</section>
+
+<!-- ============================================================ 23 -->
+<section id="fichiers">
+<h2><span class="n">23</span>Index des fichiers sources (<code>E:\H3-Orbital</code>)</h2>
+<div class="tbl"><table>
+<tr><th>Fichier</th><th>Rôle</th></tr>
+<tr><td><code>README.md</code></td><td>Journal du projet, mesures, constats</td></tr>
+<tr><td><code>custom_nodes/comfyui-h3-orbital/__init__.py</code></td><td>Nœud H3OrbitalConditioning</td></tr>
+<tr><td><code>workflows/</code></td><td>orbit360, orbit360_ref, h3_orbital (UI + API)</td></tr>
+<tr><td><code>tools/build_workflows.py</code></td><td>Génère les workflows (source unique) ; <code>--install</code> les copie dans ComfyUI</td></tr>
+<tr><td><code>tools/run_test.py</code></td><td>Un rendu de test : <code>--ref</code>, <code>--decor</code>, <code>--sketch</code>, <code>--path-text</code>, <code>--no-last</code>, <code>--lora</code>, <code>--mp</code>, <code>--guide img@frame</code> ; mesure PSNR, dark_frames, VRAM</td></tr>
+<tr><td><code>tools/make_start.py</code></td><td>Image de départ Flux.2 Dev multi-références</td></tr>
+<tr><td><code>tools/make_sketch.py</code></td><td>Plan vu de dessus (<code>--path</code>, <code>--mono</code>)</td></tr>
+<tr><td><code>tools/serve_range.py</code></td><td>Serveur statique avec Range</td></tr>
+<tr><td><code>tools/upscale.py</code></td><td>SeedVR2 (non testé)</td></tr>
+<tr><td><code>tools/make_worker_page.py</code></td><td>Génère INSTALL_WORKER_CLAUDE.html</td></tr>
+<tr><td><code>qbuilder/h3_orbital_build.py</code></td><td>Scène → workflow, upload, preflight, envoi, copie (CLI : <code>--dry-run</code>, <code>--server</code>, <code>--servers</code>, <code>--subfolder</code>, <code>--copy-results</code>, <code>--preflight</code>)</td></tr>
+<tr><td><code>qbuilder/h3_orbital_api.json</code></td><td>Workflow API (IDs = contrat)</td></tr>
+<tr><td><code>qbuilder/INTEGRATION.html</code></td><td>Pour Codex (intégration Q-Builder)</td></tr>
+<tr><td><code>qbuilder/install_worker.ps1</code>, <code>install_music3.ps1</code></td><td>Installation des workers</td></tr>
+<tr><td><code>planche1|2|3/compose.py</code></td><td>Page + cases (+ masques et <code>frames.png</code> pour la 3)</td></tr>
+<tr><td><code>planche*/make_scenes.py</code></td><td>Scènes et prompts</td></tr>
+<tr><td><code>planche3/run_free.py</code></td><td>Envoi d'un workflow API complet (plans animés)</td></tr>
+<tr><td><code>planche3/make_sons.py</code></td><td>Sons Music 3</td></tr>
+<tr><td><code>planche*/assemble.py</code></td><td>Vidéos du lecteur + <code>manga_data.js</code></td></tr>
+<tr><td><code>planche*/_ends.py</code>, <code>_strip.py</code></td><td>Contrôle visuel du sens</td></tr>
+<tr><td><code>planche*/make_demo.py</code></td><td>MP4 d'aperçu</td></tr>
+<tr><td><code>planche*/viewer/</code></td><td>Lecteur livré (index.html, manga_data.js, page.jpg, frames.png, videos/, sons/)</td></tr>
+</table></div>
+</section>
+
+</main>
+</div>
+<footer>Rédigé par Claude Code le 13 octobre 2026, à partir du fil H3-Orbital (E:\H3-Orbital) et de la mémoire du projet. Les chiffres sont ceux mesurés pendant le fil.</footer>
+
+<script>
+(() => {
+  const q = document.getElementById("q"), count = document.getElementById("count");
+  const sections = [...document.querySelectorAll("main section")];
+  const links = [...document.querySelectorAll("nav.toc a")];
+  function filter() {
+    const t = q.value.trim().toLowerCase();
+    let n = 0;
+    for (const s of sections) {
+      const hit = !t || s.textContent.toLowerCase().includes(t);
+      s.classList.toggle("hidden", !hit);
+      if (hit) n++;
+      const l = links.find(a => a.getAttribute("href") === "#" + s.id);
+      if (l) l.parentElement.style.display = hit ? "" : "none";
+    }
+    count.textContent = t ? n + " section(s)" : "";
+  }
+  q.addEventListener("input", filter);
+  // section visible surlignée dans le sommaire
+  const obs = new IntersectionObserver((entries) => {
+    for (const e of entries) if (e.isIntersecting) {
+      links.forEach(a => a.classList.toggle("on", a.getAttribute("href") === "#" + e.target.id));
+    }
+  }, { rootMargin: "0px 0px -70% 0px" });
+  sections.forEach(s => obs.observe(s));
+  const root = document.documentElement;
+  try { const th = localStorage.getItem("ac-theme"); if (th) root.dataset.theme = th; } catch (_) {}
+  document.getElementById("theme").addEventListener("click", () => {
+    const dark = root.dataset.theme ? root.dataset.theme === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+    root.dataset.theme = dark ? "light" : "dark";
+    try { localStorage.setItem("ac-theme", root.dataset.theme); } catch (_) {}
+  });
+})();
+</script>
+</body>
+</html>

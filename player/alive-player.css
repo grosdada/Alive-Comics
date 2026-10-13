@@ -1,0 +1,27 @@
+/* Alive-Comics : lecteur de pages animees (cases video pilotees image par image). */
+.ac-page { position: relative; margin: 0 auto; background: #fff; user-select: none; -webkit-user-select: none;
+           box-shadow: 0 10px 40px rgba(0, 0, 0, .55); }
+.ac-page.bw { filter: grayscale(1) contrast(1.12); }
+.ac-page > img { display: block; width: 100%; height: 100%; pointer-events: none; }
+.ac-page > img.ac-frames { position: absolute; inset: 0; z-index: 5; }       /* traits des cadres au-dessus des videos */
+.ac-panel { position: absolute; overflow: hidden; cursor: ew-resize; touch-action: pan-y; }
+.ac-panel.static { cursor: default; }
+.ac-panel video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: fill; opacity: 0;
+                  transition: opacity .25s; pointer-events: none; }
+.ac-panel video.ready { opacity: 1; }
+.ac-panel video.idle { opacity: 0; }
+.ac-panel video.idle.ready.on { opacity: 1; }
+.ac-panel .ac-gauge { position: absolute; left: 12%; right: 12%; bottom: 18px; height: 3px; border-radius: 3px;
+                      background: rgba(255, 255, 255, .28); opacity: 0; transition: opacity .3s; pointer-events: none; z-index: 6; }
+.ac-panel .ac-gauge i { position: absolute; top: -3px; width: 9px; height: 9px; margin-left: -4.5px; border-radius: 50%;
+                        background: #f2b45c; }
+.ac-panel:hover .ac-gauge, .ac-panel.active .ac-gauge { opacity: 1; }
+.ac-panel .ac-wait { position: absolute; right: 8px; top: 8px; font: 11px/1.4 system-ui, sans-serif; color: #fff;
+                     background: rgba(0, 0, 0, .55); padding: 2px 7px; border-radius: 999px; pointer-events: none; z-index: 6; }
+.ac-lightbox { position: fixed; inset: 0; z-index: 50; background: rgba(8, 8, 8, .94); display: none;
+               align-items: center; justify-content: center; flex-direction: column; gap: 12px; padding: 16px; }
+.ac-lightbox.open { display: flex; }
+.ac-lightbox .ac-stage { position: relative; cursor: ew-resize; touch-action: none; max-width: 100%; }
+.ac-lightbox video { display: block; max-width: calc(100vw - 32px); max-height: calc(100vh - 90px); }
+.ac-lightbox .bw video { filter: grayscale(1) contrast(1.12); }
+.ac-lightbox p { margin: 0; color: #9a948a; font: 13px/1.4 system-ui, sans-serif; }

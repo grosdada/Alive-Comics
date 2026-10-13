@@ -1,0 +1,265 @@
+"""Vocabulaire d'Alive-Comics : mouvements de camera, actions, ambiances sonores.
+
+Source unique : l'interface recoit ces listes par /api/presets, le moteur s'en sert pour ecrire
+les prompts et choisir le graphe. Les textes viennent des essais H3-Orbital (planches 1 a 3,
+octobre 2026) : destinations decrites plutot que gauche/droite, angles majores (H3 en fait ~60 %),
+« Then the camera stops. No zoom, no dolly. », dolly « and not a zoom », LoRA 0,5 pour un objet
+rigide, mouvement fort et constant pour une boucle animee.
+"""
+
+# Prompt de l'auteur du LoRA 360 Orbit (Pablo Dawson), mot pour mot.
+ORBIT_PROMPT = (
+    "One frozen instant. Only the camera moves. In a continuous 360 orbit. Preserve every person and "
+    "object in exactly the same world position, orientation, shape and pose throughout the shot. Airborne "
+    "objects remain suspended at the captured height and angle: no wobbling, shaking, spinning, drifting, "
+    "falling or continued action. Keep faces, hands, clothing, liquids and the background motionless while "
+    "retaining their natural appearance. Camera parallax is the only source of apparent movement. No cuts, "
+    "zoom, morphing or added objects."
+)
+FROZEN_PROMPT = ORBIT_PROMPT.replace(" In a continuous 360 orbit.", "")
+TAIL = " Then the camera stops. No zoom, no dolly."
+
+AMPLITUDES = {"petit": 40, "moyen": 55, "grand": 70}     # angle ECRIT dans le prompt (H3 en fait moins)
+
+# ------------------------------------------------------------------ cameras
+# kind : "frozen" = temps fige, la case se pilote au glisser ; "animated" = la scene bouge, lecture auto.
+# fields : champs a remplir (anglais de preference ; l'IA peut les proposer).
+CAMERAS = [
+    {"id": "fixe", "label": "Caméra fixe", "kind": "animated", "fields": [],
+     "hint": "La caméra ne bouge pas. Choisis une action pour animer la case (sinon elle reste une image)."},
+    {"id": "orbit360", "label": "Orbite 360° en boucle", "kind": "frozen", "fields": ["subject"],
+     "hint": "Tour complet autour du sujet, scène figée. Au glisser, la case tourne sans fin."},
+    {"id": "arc", "label": "Arc gauche ↔ droite", "kind": "frozen", "fields": ["subject", "left", "right"],
+     "options": ["amplitude", "rigid"],
+     "hint": "Deux demi-arcs, la case au milieu. Décris ce qu'on voit à la fin de chaque côté."},
+    {"id": "demi_arc", "label": "Demi-arc d'un seul côté", "kind": "frozen", "fields": ["subject", "ending"],
+     "options": ["amplitude", "rigid"],
+     "hint": "Un seul arc, plus large. Utile quand H3 tourne toujours du même côté."},
+    {"id": "vertical", "label": "Plongée ↕ contre-plongée", "kind": "frozen", "fields": ["subject"],
+     "options": ["amplitude"],
+     "hint": "Arc vertical : vue rasante d'un côté, vue plongeante de l'autre. Idéal pour les textures."},
+    {"id": "travelling", "label": "Travelling avant ↔ arrière", "kind": "frozen", "fields": ["subject", "close", "wide"],
+     "hint": "La caméra avance vers le sujet d'un côté et recule de l'autre (un vrai travelling, pas un zoom)."},
+    {"id": "grue", "label": "Grue qui monte", "kind": "animated", "fields": ["subject"],
+     "hint": "La caméra monte et finit en plongée. Se combine avec une action."},
+    {"id": "avancee", "label": "Lente avancée", "kind": "animated", "fields": ["subject"],
+     "hint": "La caméra s'approche doucement du sujet. Se combine avec une action."},
+    {"id": "epaule", "label": "Caméra à l'épaule", "kind": "animated", "fields": [],
+     "hint": "Léger tremblé, sans déplacement. Se combine avec une action."},
+    {"id": "custom", "label": "Texte libre…", "kind": "animated", "fields": ["text"],
+     "hint": "Décris toi-même le mouvement de caméra (en anglais de préférence)."},
+]
+
+# ------------------------------------------------------------------ actions
+# loop : la video se referme (1re image = derniere) et tourne vers l'avant ; sinon aller-retour.
+ACTIONS = [
+    {"id": "fige", "label": "Temps figé", "loop": False, "fields": [],
+     "hint": "Rien ne bouge dans la scène, seule la caméra se déplace."},
+    {"id": "vie", "label": "Vie subtile en boucle", "loop": True, "fields": ["subject"],
+     "hint": "Respiration, clignements, cheveux et vêtements qui bougent à peine."},
+    {"id": "nerveux", "label": "Mouvement nerveux en boucle", "loop": True, "fields": ["subject", "detail"],
+     "hint": "Un détail qui gigote sans arrêt (doigts, tentacules…). Précise lequel dans « détail »."},
+    {"id": "danse", "label": "Danse / mouvement rythmé", "loop": False, "fields": ["subject", "detail"],
+     "hint": "Les personnages dansent en rythme, sur place."},
+    {"id": "marche", "label": "Marche", "loop": False, "fields": ["subject"],
+     "hint": "Le personnage avance en marchant."},
+    {"id": "parole", "label": "Parle / expression", "loop": False, "fields": ["subject"],
+     "hint": "Le personnage parle avec expression, petits gestes."},
+    {"id": "elements", "label": "Éléments en boucle", "loop": True, "fields": ["detail"],
+     "hint": "Vent, fumée, eau, feu, lumière qui bougent en continu ; les personnages restent presque immobiles."},
+    {"id": "custom", "label": "Texte libre…", "loop": False, "fields": ["text"], "options": ["loop"],
+     "hint": "Décris toi-même l'action (en anglais de préférence). Coche « en boucle » si elle doit se refermer."},
+]
+
+# ------------------------------------------------------------------ sons
+AUDIO = [
+    {"id": "drone_inquietant", "label": "Drone inquiétant",
+     "caption": "Global Metadata: Unsettling dark ambient drone, horror atmosphere. Free tempo, atonal, low register. "
+                "{drone} {extra}\n\nVocal Details: No vocals at all, fully instrumental.\n\nArrangement: deep sustained "
+                "bowed bass drone, slow detuned beating between two low tones, distant creaking and faint scraping, a "
+                "thin high whistling harmonic that comes and goes. Constant uneasy tension, no resolution."},
+    {"id": "drone_cosmique", "label": "Drone cosmique",
+     "caption": "Global Metadata: Unsettling cosmic dark ambient drone, deep space. Free tempo, atonal, extremely low "
+                "register. {drone} {extra}\n\nVocal Details: No vocals at all, fully instrumental.\n\nArrangement: an "
+                "immense infrasonic rumble, slow metallic groans, distant radio static, long dissonant synth swells, "
+                "deep reverberant emptiness. Constant dread, no resolution."},
+    {"id": "drone_rituel", "label": "Drone rituel",
+     "caption": "Global Metadata: Unsettling ritual dark ambient drone, ancient tomb atmosphere. Free tempo, atonal. "
+                "{drone} {extra}\n\nVocal Details: No vocals at all, fully instrumental. Only a very distant low "
+                "throat-singing drone buried in the mix.\n\nArrangement: long resonating bronze and gong overtones, "
+                "bowed metal shimmering, slow ominous swells, a struck bell decaying forever. Constant dread."},
+    {"id": "drone_organique", "label": "Drone organique",
+     "caption": "Global Metadata: Unsettling organic horror drone, very low register. {drone} {extra}\n\nVocal Details: "
+                "No vocals at all, fully instrumental. Only faint wet breathing textures.\n\nArrangement: sub-bass drone "
+                "that throbs slowly like a heartbeat, dissonant low string clusters, wet squelching textures, faint "
+                "insect-like clicking, an eerie high hiss. Constant creeping tension."},
+    {"id": "ambiance_nature", "label": "Ambiance nature",
+     "caption": "Global Metadata: Calm natural field-recording ambience, no music. {extra} Made to loop seamlessly.\n\n"
+                "Vocal Details: No vocals at all.\n\nArrangement: soft wind in the leaves, distant birds, light insects, "
+                "a gentle stream. No melody, no beat."},
+    {"id": "ambiance_ville", "label": "Ambiance ville la nuit",
+     "caption": "Global Metadata: Night city ambience, cinematic, no melody. {extra} Made to loop seamlessly.\n\n"
+                "Vocal Details: No vocals at all.\n\nArrangement: distant traffic hum, far sirens, rain on the pavement, "
+                "a low synth pad very far in the background."},
+    {"id": "musique_trad", "label": "Musique traditionnelle",
+     "caption": "Global Metadata: Traditional acoustic music, {extra}. Warm traditional recording, made to loop, no "
+                "modern production.\n\nVocal Details: No vocals at all, fully instrumental.\n\nArrangement: traditional "
+                "instruments only. No drum kit, no bass guitar, no synthesizer, no funk, no electronic sound, nothing modern.",
+     "extra_hint": "Précise le style (ex. Hindustani classical, raga Yaman, tabla et sitar)."},
+    {"id": "suspense", "label": "Suspense orchestral",
+     "caption": "Global Metadata: Cinematic orchestral suspense underscore, slow, tense. {extra}\n\nVocal Details: No "
+                "vocals at all, fully instrumental.\n\nArrangement: low tremolo strings, sparse piano notes, soft timpani "
+                "rolls, rising swells without resolution."},
+    {"id": "custom", "label": "Texte libre…", "caption": "{extra}",
+     "extra_hint": "Décris la musique en anglais : style, instruments, ambiance. L'IA peut l'écrire pour toi."},
+]
+DRONE = ("Dark ambient drone, no melody, no beat, no drums, made to loop seamlessly: a slowly evolving texture "
+         "with no clear beginning or end.")
+INSTRUMENTAL_LYRICS = "[Intro]\n\n[Instrumental]\n\n[Outro]"
+
+LENGTH_ARC = 73       # 3 s par demi-arc
+LENGTH_LONG = 124     # 5,2 s : orbite, plans animes
+
+
+def _get(lst, pid):
+    for x in lst:
+        if x["id"] == pid:
+            return x
+    raise KeyError(pid)
+
+
+def camera(cid):
+    return _get(CAMERAS, cid)
+
+
+def action(aid):
+    return _get(ACTIONS, aid)
+
+
+def compatible(cam_id, act_id):
+    """(ok, message). Une camera pilotee au glisser impose le temps fige."""
+    cam = camera(cam_id)
+    if cam["kind"] == "frozen" and act_id != "fige":
+        return False, "Avec une caméra pilotée au glisser, la scène est figée : l'action est ignorée."
+    return True, ""
+
+
+def _f(fields, key, default):
+    v = (fields or {}).get(key) or ""
+    return v.strip() or default
+
+
+def _arc(subject, short, toward, ending, angle, rigid):
+    body = (f"moves smoothly along an arc of about {angle} degrees around {subject} toward {toward}, always aimed at "
+            f"{short} and keeping the same distance, ending on {ending}.")
+    if rigid:
+        return (f"{subject[0].upper() + subject[1:]} is a fixed object that never moves, turns or tilts. Only the camera "
+                f"{body.replace('moves smoothly', 'travels smoothly')} Camera parallax is the only movement.{TAIL}")
+    return f"The camera {body}{TAIL}"
+
+
+def plan_panel(panel, project_style=""):
+    """Decrit les rendus d'une case : [{side, engine, mode, prompt, lora, length, loop_keyframe}], type lecteur.
+
+    panel : {"camera": {"id", "fields", "amplitude", "rigid"}, "action": {"id", "fields", "loop"}}
+    Retour : {"player": "arc"|"loop"|"seul"|"static", "autoplay": bool, "loop": bool, "jobs": [...]} .
+    Les prompts « frozen » ne contiennent PAS le preambule temps fige : le noeud H3 Orbital l'ajoute
+    (et h3.full_prompt() l'ajoute pour fal).
+    """
+    cam = panel.get("camera") or {"id": "fixe"}
+    act = panel.get("action") or {"id": "fige"}
+    cf, af = cam.get("fields") or {}, act.get("fields") or {}
+    cid, aid = cam.get("id", "fixe"), act.get("id", "fige")
+    subject = _f(cf, "subject", _f(af, "subject", "the main subject"))
+    short = "it" if subject == "the main subject" else subject.replace("the ", "", 1) if False else subject
+    angle = AMPLITUDES.get(cam.get("amplitude") or "moyen", 55)
+    rigid = bool(cam.get("rigid"))
+    lora = 0.5 if rigid else 0.0
+    kind = camera(cid)["kind"]
+
+    if kind == "frozen":
+        if cid == "orbit360":
+            extra = f"The camera orbits around {subject}." if cf.get("subject") else ""
+            return {"player": "loop", "autoplay": False, "loop": True,
+                    "jobs": [{"side": "V", "mode": "orbit", "prompt": extra, "lora": 1.0, "length": LENGTH_LONG,
+                              "last_is_first": True}]}
+        if cid == "arc":
+            left = _f(cf, "left", "a three-quarter view of the subject seen from the left side of the frame")
+            right = _f(cf, "right", "a three-quarter view of the subject seen from the right side of the frame")
+            return {"player": "arc", "autoplay": False, "loop": False, "jobs": [
+                {"side": "L", "mode": "path", "lora": lora, "length": LENGTH_ARC,
+                 "prompt": _arc(subject, short, "the left of the frame", left, angle, rigid)},
+                {"side": "R", "mode": "path", "lora": lora, "length": LENGTH_ARC,
+                 "prompt": _arc(subject, short, "the right of the frame", right, angle, rigid)}]}
+        if cid == "demi_arc":
+            ending = _f(cf, "ending", "a three-quarter view of the subject from its side")
+            wide = max(angle, 70) if (cam.get("amplitude") or "grand") == "grand" else angle
+            return {"player": "seul", "autoplay": False, "loop": False, "jobs": [
+                {"side": "V", "mode": "path", "lora": lora, "length": LENGTH_ARC,
+                 "prompt": _arc(subject, short, "its side", ending, wide, rigid).replace("an arc of", "a wide arc of")}]}
+        if cid == "vertical":
+            up = (f"The camera moves smoothly along an arc of about {angle} degrees, rising above {subject}, always aimed "
+                  f"at its center and keeping the same distance, ending on a high view looking down on it.{TAIL}")
+            down = (f"The camera moves smoothly along an arc of about {angle} degrees, lowering toward the base of "
+                    f"{subject}, always aimed at its center and keeping the same distance, ending on a low grazing view "
+                    f"across it.{TAIL}")
+            return {"player": "arc", "autoplay": False, "loop": False, "jobs": [
+                {"side": "L", "mode": "path", "lora": 0.0, "length": LENGTH_ARC, "prompt": down},
+                {"side": "R", "mode": "path", "lora": 0.0, "length": LENGTH_ARC, "prompt": up}]}
+        if cid == "travelling":
+            close = _f(cf, "close", f"a close-up of {subject} filling most of the frame")
+            wide = _f(cf, "wide", f"a wider view revealing more of the surroundings of {subject}")
+            fwd = (f"The camera physically travels forward, a dolly in and not a zoom, toward {subject}, keeping it "
+                   f"centered, ending on {close}. Then the camera stops.")
+            back = (f"The camera physically travels backward, a dolly out and not a zoom, away from {subject}, keeping "
+                    f"it centered, ending on {wide}. Then the camera stops.")
+            return {"player": "arc", "autoplay": False, "loop": False, "jobs": [
+                {"side": "L", "mode": "path", "lora": 0.0, "length": LENGTH_ARC, "prompt": back},
+                {"side": "R", "mode": "path", "lora": 0.0, "length": LENGTH_ARC, "prompt": fwd}]}
+
+    # ---- plans animes : la scene bouge, lecture automatique
+    act_def = action(aid)
+    loop = bool(act.get("loop")) if aid == "custom" else act_def["loop"]
+    asub = _f(af, "subject", subject)
+    detail = _f(af, "detail", "")
+    action_text = {
+        "fige": "",
+        "vie": (f"{asub} stays in place, alive and natural: slow breathing, blinking eyes, tiny movements of the hair "
+                f"and clothes. The movement is gentle and continuous for the whole shot."),
+        "nerveux": (f"{detail or 'part of ' + asub} never stops moving: it crawls, wriggles and twitches constantly in a "
+                    f"fast rippling motion, clearly visible and nervous for the whole shot, while the rest of {asub} "
+                    f"stays in place."),
+        "danse": (f"{asub} perform{'s' if not asub.endswith('s') else ''} a playful rhythmic dance in place"
+                  f"{', ' + detail if detail else ''}, in sync and in rhythm for the whole shot."),
+        "marche": f"{asub} walks forward naturally, with natural arm swing and weight shifts.",
+        "parole": f"{asub} talks expressively, mouth moving, with small natural head and hand gestures.",
+        "elements": (f"{detail or 'The wind, smoke, water and light'} in the scene keep moving gently and continuously "
+                     f"for the whole shot, while the characters stay almost still."),
+        "custom": _f(af, "text", ""),
+    }[aid]
+    if action_text:
+        action_text = action_text[0].upper() + action_text[1:]
+    cam_text = {
+        "fixe": "Static camera, locked off, no camera movement.",
+        "grue": (f"Cinematic crane shot. The camera rises smoothly upward from eye level to a high angle looking down "
+                 f"on {subject}."),
+        "avancee": f"The camera slowly and physically travels forward toward {subject}, a dolly in and not a zoom.",
+        "epaule": "Handheld camera with a light, subtle shake, as if held by a nervous operator; no orbit, no pan, no zoom.",
+        "custom": _f(cf, "text", ""),
+    }.get(cid, "")
+    if cid == "fixe" and not action_text:
+        return {"player": "static", "autoplay": False, "loop": False, "jobs": []}
+    text = " ".join(t for t in (cam_text, action_text, project_style.strip(), "No cuts.") if t)
+    return {"player": "seul", "autoplay": True, "loop": loop, "jobs": [
+        {"side": "V", "mode": "animated", "lora": 0.0, "length": LENGTH_LONG, "prompt": text, "last_is_first": loop}]}
+
+
+def audio_caption(preset_id, extra=""):
+    a = _get(AUDIO, preset_id)
+    return a["caption"].replace("{drone}", DRONE).replace("{extra}", (extra or "").strip()).replace("  ", " ").strip()
+
+
+def public():
+    """Ce que l'interface recoit."""
+    return {"cameras": CAMERAS, "actions": ACTIONS, "audio": [{k: v for k, v in a.items() if k != "caption"} for a in AUDIO],
+            "amplitudes": AMPLITUDES}

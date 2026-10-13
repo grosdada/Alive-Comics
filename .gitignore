@@ -1,0 +1,11 @@
+# reglages et cles propres a chaque poste
+local_settings.json
+*.key
+# productions (lourdes) : projets, rendus, exports
+dist/
+projects/
+renders/
+__pycache__/
+*.pyc
+.venv/
+.claude/settings.local.json
