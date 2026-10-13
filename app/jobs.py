@@ -295,6 +295,10 @@ class Scheduler:
                     continue
                 if j["machines"] and w["name"] not in j["machines"]:
                     continue
+                if w["name"] in (j.get("avoid") or []) and any(          # relance : une autre machine si possible
+                        o is not w and o["enabled"] and (o["pf"] or {}).get("video") and o["name"] not in j["avoid"]
+                        for o in self.workers.values()):
+                    continue
                 if (j["kind"] == "video" and not pf.get("video")) or (j["kind"] == "audio" and not pf.get("music")):
                     continue
                 if pf.get("load", 0) > 0 and any(
@@ -385,9 +389,18 @@ class Scheduler:
                 if job:
                     self.cancel_flags.discard(job["id"])
 
+    TRANSIENT = ("Fault failed", "out of memory", "CUDA error", "allocation", "Allocation on device")
+
     def _fail(self, job, exc):
+        """Erreur passagere de la machine (memoire video…) : une relance, de preference ailleurs ; sinon erreur."""
         try:
-            self._set(job, status="error", error=str(exc)[:1500], finished=time.time())
+            msg = str(exc)
+            if job["kind"] in ("video", "audio") and job.get("worker") not in (None, "fal")                     and int(job.get("attempts") or 0) < 1 and any(t.lower() in msg.lower() for t in self.TRANSIENT):
+                self._set(job, status="queued", attempts=int(job.get("attempts") or 0) + 1, handle=None,
+                          avoid=(job.get("avoid") or []) + [job["worker"]], worker=None, started=None,
+                          progress="relance (erreur passagère : " + msg[:80] + ")")
+                return
+            self._set(job, status="error", error=msg[:1500], finished=time.time())
         except Exception:                     # noqa: BLE001
             traceback.print_exc()
 
