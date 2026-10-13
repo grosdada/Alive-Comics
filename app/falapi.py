@@ -12,6 +12,7 @@ import base64
 import io
 import json
 import math
+import re
 import time
 import urllib.error
 import urllib.request
@@ -33,7 +34,13 @@ def _req(url, key, payload=None, method=None, timeout=60):
         with urllib.request.urlopen(req, timeout=timeout) as r:
             return json.loads(r.read().decode("utf-8") or "null")
     except urllib.error.HTTPError as e:
-        raise FalError("fal %s : %s" % (e.code, e.read().decode("utf-8", "replace")[:1200]))
+        body = e.read().decode("utf-8", "replace")
+        if "content_policy_violation" in body:
+            cats = sorted(set(re.findall(r'"categories":\s*\[([^\]]*)\]', body)))
+            raise FalError("fal a refusé la demande : son filtre de contenu a jugé la description ou l'image sensible"
+                           + (f" ({', '.join(c.replace(chr(34), '') for c in cats)})" if cats else "")
+                           + ". Reformule la description, ou laisse-la vide.")
+        raise FalError("fal %s : %s" % (e.code, body[:1200]))
 
 
 def data_uri(path):

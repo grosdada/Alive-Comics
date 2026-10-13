@@ -37,6 +37,16 @@ def has_audio(video):
     return bool(out.strip())
 
 
+# niveaux cibles (LUFS) : la voix devant, l'ambiance derriere, les bruitages entre les deux
+LEVELS = {"audio": -24, "voice": -17, "foley": -21}
+
+
+def normalize(src, dst, layer):
+    """Copie un son en mp3 au niveau cible de sa couche (les curseurs de volume restent comparables)."""
+    ffmpeg(["-i", str(src), "-vn", "-af", f"loudnorm=I={LEVELS[layer]}:TP=-1.5:LRA=11", "-ar", "44100",
+            "-c:a", "libmp3lame", "-q:a", "2", str(dst)])
+
+
 def ffmpeg(args):
     r = subprocess.run(["ffmpeg", "-v", "error", "-y", *args], capture_output=True, text=True, **NOFLASH)
     if r.returncode:
@@ -111,15 +121,15 @@ def build(pid, log=print):
         aud = panel.get("audio") or {}
         if aud.get("mode") in ("file", "generate") and aud.get("file") and (d / aud["file"]).exists():
             src = d / aud["file"]
-            name = f"{g['id']}{src.suffix.lower()}"
-            shutil.copy2(src, out / "sons" / name)
+            name = f"{g['id']}.mp3"
+            normalize(src, out / "sons" / name, "audio")
             entry["audio"] = f"sons/{name}"
             entry["audioVol"] = float(aud.get("volume", 0.8))
         voice = panel.get("voice") or {}
         if voice.get("mode") in ("file", "tts", "music") and voice.get("file") and (d / voice["file"]).exists():
             src = d / voice["file"]
-            name = f"{g['id']}_voix{src.suffix.lower()}"
-            shutil.copy2(src, out / "sons" / name)
+            name = f"{g['id']}_voix.mp3"
+            normalize(src, out / "sons" / name, "voice")
             entry["voice"] = {"src": f"sons/{name}", "vol": float(voice.get("volume", 1.0)),
                               "loop": bool(voice.get("loop", voice.get("mode") == "music"))}
         foley = panel.get("foley") or {}
@@ -131,12 +141,12 @@ def build(pid, log=print):
                 vid = d / chosen[side] if chosen.get(side) else None
                 if vid and vid.exists() and has_audio(vid):
                     src = out / "sons" / name
-                    ffmpeg(["-i", str(vid), "-vn", "-c:a", "libmp3lame", "-q:a", "2", str(src)])
+                    normalize(vid, src, "foley")
                 else:
                     report.append(f"{g['id']} : pas de piste son H3 dans ce rendu (refaire le rendu, ou bruitages cloud)")
             elif foley.get("file") and (d / foley["file"]).exists():
                 src = out / "sons" / name
-                shutil.copy2(d / foley["file"], src)
+                normalize(d / foley["file"], src, "foley")
             if src:
                 entry["foley"] = {"src": f"sons/{name}", "vol": float(foley.get("volume", 0.9)),
                                   "sync": bool(entry.get("autoplay"))}

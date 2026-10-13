@@ -813,6 +813,15 @@ p5 (vaisseau) : cosmic dark ambient, deep space horror, extremely low ; distant 
   <li>Premier livre en ligne : <code>https://alive-comics.placenta.tv/essais/</code> (planches 1 à 3), accueil = liste des livres.</li>
   <li>Demande de David : <b>tête de lecture cachée</b> dans le lecteur publié (option <code>gauge</code> ou <code>?gauge</code> pour la revoir).</li>
 </ul>
+<h3>Son : ce qu'on a appris le 13 octobre au soir</h3>
+<ul>
+  <li><b>H3 génère vidéo + audio</b> (latent « AV » : vidéo [B,24,T,H/16,W/16] + audio [B,32,2,T]). Le modèle officiel décode l'audio avec <code>VAELoader minimax_h3_audio_vae_fp32</code> + <code>VAEDecodeAudio</code> sur la sortie du sampler, puis <code>CreateVideo(images, audio)</code>. Nos graphes jetaient cette piste : elle est maintenant gardée (AAC 32 kHz stéréo), y compris avec le nœud H3 Orbital. C'est le <b>foley natif</b> : local, gratuit, synchronisé. Plutôt faible (≈ -33 dB sur une danse) : normaliser.</li>
+  <li><b>Voix off</b> : <code>fal-ai/minimax/speech-02-hd</code> (<code>text</code>, <code>voice_setting{voice_id, speed, emotion}</code>, <code>language_boost: "French"</code>, <code>output_format: "url"</code>) → ~8 s en quelques secondes. Aucun TTS local sur les workers (seulement des nœuds API ElevenLabs / HeyGen payants).</li>
+  <li><b>Foley sur vidéo finie</b> : <code>fal-ai/hunyuan-video-foley</code> (<code>video_url</code>, <code>text_prompt</code>) ≈ 140 s, ou <code>fal-ai/mmaudio-v2</code> (<code>video_url</code>, <code>prompt</code>, <code>duration</code>). Vidéo envoyée par le stockage fal (<code>rest.alpha.fal.ai/storage/upload/initiate</code>). La réponse est une vidéo : on n'en garde que l'audio. Niveau fort (≈ -9 dB).</li>
+  <li><b>Filtre de contenu de fal</b> : « fingers sliding on bare feet » refusé (catégorie sexual). Le message est maintenant traduit dans l'appli ; reformuler ou laisser la description vide.</li>
+  <li>Assemblage : chaque couche est normalisée (loudnorm : ambiance -24, bruitages -21, voix -17 LUFS) ; le lecteur joue 3 couches par case (ambiance en boucle, voix depuis le début à chaque survol, bruitages calés sur l'image affichée).</li>
+  <li><b>Action + mouvement de caméra</b> : un seul plan animé (I2V natif, LoRA 0 ; orbite à 0,6, expérimental) ; testé : arc autour des danseurs pendant la danse, boucle propre.</li>
+</ul>
 <h3>Application v0.1 (dépôt grosdada/Alive-Comics)</h3>
 <ul>
   <li>Serveur Python sans dépendance (comme Q-Builder), port 8790 ; interface web en modules JS sans compilation.</li>
