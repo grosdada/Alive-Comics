@@ -123,8 +123,9 @@ class Handler(BaseHTTPRequestHandler):
                 left -= len(chunk)
 
     def body(self):
-        n = int(self.headers.get("Content-Length") or 0)
-        return self.rfile.read(n) if n else b""
+        # le corps est lu UNE fois des l'arrivee de la requete (route) : sinon, en keep-alive, des octets non lus
+        # se collent a la requete suivante (« {}GET ... » -> erreur 501)
+        return getattr(self, "_raw", b"")
 
     def jbody(self):
         raw = self.body()
@@ -147,6 +148,8 @@ class Handler(BaseHTTPRequestHandler):
         self.route("DELETE")
 
     def route(self, method):
+        n = int(self.headers.get("Content-Length") or 0)
+        self._raw = self.rfile.read(n) if n else b""
         url = urlparse(self.path)
         path = unquote(url.path)
         q = {k: v[0] for k, v in parse_qs(url.query).items()}
