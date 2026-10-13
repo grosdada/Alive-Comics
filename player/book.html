@@ -87,7 +87,8 @@
     inst.pageEl.classList.add("enter");
     main.insertBefore(inst.pageEl, $("sprev"));
     cur = i;
-    $("where").textContent = single ? (pg.title || "") : `${pg.title ? pg.title + " · " : ""}${i + 1} / ${B.pages.length}`;
+    $("where").textContent = single ? (pg.title && pg.title !== B.title ? pg.title : "")
+                                    : `${pg.title ? pg.title + " · " : ""}${i + 1} / ${B.pages.length}`;
     $("prev").disabled = $("sprev").disabled = i === 0;
     $("next").disabled = $("snext").disabled = i === B.pages.length - 1;
     $("snd").hidden = !AlivePlayer.hasAudio(pg.data);
