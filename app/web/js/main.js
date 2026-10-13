@@ -151,6 +151,9 @@ class App {
     this.drawer = h("div.drawer");
     this.root.append(h("div.work", this.left, this.center, this.right), this.drawer);
     this.editor = new Editor(this.center, this);
+    this.director = h("div.director");
+    this.root.append(this.director);
+    this.renderDirector();
     this.editor.render();
     this.renderLeft();
     this.refreshInspector();
@@ -459,6 +462,65 @@ class App {
     const res = await startImage(this.project, geo);
     if (res?.changed) await this.save();
     return res;
+  }
+
+  // ---------------------------------------------------------------- realisateur IA
+  renderDirector() {
+    const P = this.project, el = this.director;
+    if (!el) return;
+    let open = false;
+    try { open = localStorage.getItem("ac-director") === "1"; } catch (_) { /* */ }
+    el.textContent = "";
+    el.classList.toggle("open", open);
+    const toggle = (v) => { try { localStorage.setItem("ac-director", v ? "1" : "0"); } catch (_) { /* */ } this.renderDirector(); };
+    if (!open) {
+      el.append(h("button.director-pill", { on: { click: () => toggle(true) } }, "🎬 Réalisateur IA"));
+      return;
+    }
+    const dir = P.direction || {};
+    const opts = Object.assign({ audio: true, pageSound: true, voice: false, foley: true, render: false }, dir.options || {});
+    const ta = h("textarea", { rows: 4, placeholder: "Ex. : une ambiance de film noir des années 70, la caméra tourne lentement autour des personnages, "
+                                              + "sons inquiétants, une voix off raconte une enquête…" });
+    ta.value = dir.instruction || "";
+    const cb = (k, label) => {
+      const c = h("input", { type: "checkbox" }); c.checked = !!opts[k];
+      c.addEventListener("change", () => { opts[k] = c.checked; });
+      return h("label.check", c, " " + label);
+    };
+    const go = h("button.primary", { on: { click: () => this.runDirector(ta.value, opts) } }, "✨ L'IA décide tout");
+    el.append(
+      h("div.pop-head", h("b", "🎬 Réalisateur IA"), h("button.icon", { title: "Réduire", on: { click: () => toggle(false) } }, "–")),
+      h("p.muted", "Tes images restent. L'IA regarde toute la page et règle le reste : caméras, actions, textes, sons."),
+      ta,
+      h("div.checks2", cb("audio", "Ambiance par case"), cb("pageSound", "Son global de la page"), cb("foley", "Bruitages (H3)"),
+        cb("voice", "Voix off qui raconte (fal)"), cb("render", "Lancer les rendus ensuite")),
+      go,
+      dir.summary ? h("p.ai-explain", dir.summary) : null);
+  }
+
+  async runDirector(instruction, opts) {
+    const P = this.project;
+    const geo = compute(P.page, P.layout).panels.filter(g => P.panels[g.id]?.image);
+    if (!geo.length) return toast("Pose d'abord des images dans les cases.", "error");
+    const veil = h("div.veil", h("div", h("b", "🎬 L'IA regarde les " + geo.length + " cases…"),
+                                 h("p.muted", "Elle règle caméras, actions, textes et sons (30 s à 2 min).")));
+    document.body.append(veil);
+    try {
+      for (const g of geo) await this.ensureStart(g.id);
+      await this.flushAll();
+      const res = await post(`projects/${P.id}/direct`, { instruction, options: opts });
+      await this.open(P.id);                     // recharge la planche avec les decisions de l'IA
+      this.selected = null; this.refreshInspector();
+      toast(`L'IA a réglé ${res.panels.length} cases en ${res.seconds} s. ${res.summary || ""}`, "ok", 12000);
+      if (opts.render) {
+        const ready = this.workers.filter(w => w.enabled && w.pf?.video).map(w => w.name);
+        const r = await post(`projects/${P.id}/render`, { panels: res.panels, target: "local", machines: ready });
+        for (const e of r.errors) toast(e, "error", 8000);
+        toast(`${r.jobs.length} rendu(s) lancés sur tes machines.`, "ok");
+        this.drawerOpen = true; this.pollJobs();
+      }
+    } catch (e) { toast("Réalisateur IA : " + e.message, "error", 10000); }
+    finally { veil.remove(); }
   }
 
   // ---------------------------------------------------------------- rendus

@@ -22,7 +22,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
-from . import assemble, falapi, jobs, llm, presets, publish, settings, store
+from . import assemble, director, falapi, jobs, llm, presets, publish, settings, store
 
 ROOT = Path(__file__).resolve().parent.parent
 WEB = ROOT / "app" / "web"
@@ -338,6 +338,9 @@ class Handler(BaseHTTPRequestHandler):
         if sub == "audio" and m == "POST":
             b = self.jbody()
             return self.send_json({"jobs": S.enqueue_audio(pid, parts[3], b.get("machines"), b.get("seed"))})
+        if sub == "direct" and m == "POST":             # realisateur IA : l'IA regle toute la page
+            b = self.jbody()
+            return self.send_json(director.direct(pid, b.get("instruction", ""), b.get("options") or {}))
         if sub == "pagesound" and m == "POST":
             b = self.jbody()
             return self.send_json({"jobs": S.enqueue_audio(pid, "_page", b.get("machines"), b.get("seed"))})

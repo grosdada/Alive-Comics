@@ -38,8 +38,14 @@ def available():
     return {p: bool(cfg[p].get("key")) for p in ("anthropic", "openai", "google", "deepseek")}
 
 
-def chat(prompt, image=None, system="", provider=None, max_tokens=1200):
-    """image : chemin d'un PNG/JPEG ou None. Renvoie le texte."""
+def _img(data):
+    """(base64, mime) d'un chemin ou d'octets."""
+    raw = Path(data).read_bytes() if not isinstance(data, (bytes, bytearray)) else bytes(data)
+    return base64.b64encode(raw).decode(), ("image/png" if raw[:4] == b"\x89PNG" else "image/jpeg")
+
+
+def chat(prompt, image=None, system="", provider=None, max_tokens=1200, images=None, timeout=120):
+    """image : un chemin d'image ; images : [(etiquette, chemin ou octets), ...] (plusieurs images). Renvoie le texte."""
     cfg = settings.load()["llm"]
     provider = provider or cfg.get("provider") or "anthropic"
     pc = cfg.get(provider) or {}
@@ -48,36 +54,49 @@ def chat(prompt, image=None, system="", provider=None, max_tokens=1200):
         if not others:
             raise LLMError("aucune clé d'IA : en ajouter une dans Réglages › Intelligence")
         provider, pc = others[0], cfg[others[0]]
-    b64 = mime = None
+    imgs = [(label, *_img(data)) for label, data in (images or [])]
     if image:
-        raw = Path(image).read_bytes()
-        b64 = base64.b64encode(raw).decode()
-        mime = "image/png" if raw[:4] == b"\x89PNG" else "image/jpeg"
+        imgs.append(("", *_img(image)))
     if provider == "anthropic":
-        content = ([{"type": "image", "source": {"type": "base64", "media_type": mime, "data": b64}}] if b64 else [])
+        content = []
+        for label, b64, mime in imgs:
+            if label:
+                content.append({"type": "text", "text": label})
+            content.append({"type": "image", "source": {"type": "base64", "media_type": mime, "data": b64}})
         content.append({"type": "text", "text": prompt})
         body = {"model": pc["model"], "max_tokens": max_tokens, "messages": [{"role": "user", "content": content}]}
         if system:
             body["system"] = system
         res = _post("https://api.anthropic.com/v1/messages",
-                    {"x-api-key": pc["key"], "anthropic-version": "2023-06-01"}, body)
+                    {"x-api-key": pc["key"], "anthropic-version": "2023-06-01"}, body, timeout=timeout)
         return "".join(b.get("text", "") for b in res.get("content", []))
     if provider in ("openai", "deepseek"):
         url = "https://api.openai.com/v1/chat/completions" if provider == "openai" else "https://api.deepseek.com/chat/completions"
-        if b64 and provider == "openai":
-            content = [{"type": "text", "text": prompt}, {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}}]
+        if imgs and provider == "openai":
+            content = []
+            for label, b64, mime in imgs:
+                if label:
+                    content.append({"type": "text", "text": label})
+                content.append({"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}})
+            content.append({"type": "text", "text": prompt})
         else:
-            content = prompt + ("\n\n(Image non transmise : ce modèle ne lit que du texte.)" if b64 else "")
+            content = prompt + ("\n\n(Images non transmises : ce modèle ne lit que du texte.)" if imgs else "")
         msgs = ([{"role": "system", "content": system}] if system else []) + [{"role": "user", "content": content}]
-        res = _post(url, {"Authorization": "Bearer " + pc["key"]}, {"model": pc["model"], "messages": msgs})
+        body = {"model": pc["model"], "messages": msgs}
+        res = _post(url, {"Authorization": "Bearer " + pc["key"]}, body, timeout=timeout)
         return res["choices"][0]["message"]["content"]
     if provider == "google":
-        parts = ([{"inline_data": {"mime_type": mime, "data": b64}}] if b64 else []) + [{"text": prompt}]
+        parts = []
+        for label, b64, mime in imgs:
+            if label:
+                parts.append({"text": label})
+            parts.append({"inline_data": {"mime_type": mime, "data": b64}})
+        parts.append({"text": prompt})
         body = {"contents": [{"role": "user", "parts": parts}]}
         if system:
             body["system_instruction"] = {"parts": [{"text": system}]}
         res = _post(f"https://generativelanguage.googleapis.com/v1beta/models/{pc['model']}:generateContent",
-                    {"x-goog-api-key": pc["key"]}, body)
+                    {"x-goog-api-key": pc["key"]}, body, timeout=timeout)
         return "".join(p.get("text", "") for p in res["candidates"][0]["content"]["parts"])
     raise LLMError("fournisseur inconnu : " + provider)
 

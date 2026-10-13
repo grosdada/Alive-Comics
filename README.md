@@ -39,6 +39,11 @@ L'interface s'ouvre sur http://127.0.0.1:8790/. Il faut Python 3.10+ et ffmpeg d
      Un volume par couche.
    « ✨ Écrire les textes avec l'IA » regarde l'image et remplit les champs de la case ; son explication reste
    affichée sous le bouton. Chaque caméra et action a aussi des « Précisions » libres.
+4 bis. **Réalisateur IA** (fenêtre « 🎬 Réalisateur IA » en bas à droite) : pose tes images, écris une instruction
+   globale (ambiance, histoire, style de caméra, sons…), et l'IA regarde toute la page pour régler le reste de chaque
+   case : caméra, action, textes, ambiance sonore, voix off qui raconte (option, fal), bruitages, son global et
+   ambiance commune. Les images ne sont pas touchées ; tout reste modifiable ensuite. Option « Lancer les rendus
+   ensuite » pour enchaîner sur tes machines.
 5. **Générer les cases** : choisir les cases, puis où calculer : tes machines ComfyUI, le cloud fal, ou mixte
    (fal prend ce que tes machines n'ont pas pris après 2 min). Les rendus se répartissent seuls ; une machine
    occupée garde la tâche dans sa file. Suivi dans « Rendus » en bas.
