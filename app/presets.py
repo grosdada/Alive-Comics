@@ -26,7 +26,7 @@ AMPLITUDES = {"petit": 40, "moyen": 55, "grand": 70}
 # v2 (14/10, retour de David) : la v1 (3,6 % + saccades rapides) faisait « faux tremble 2D ». Derive lente et douce,
 # a peine de rotation : on doit sentir l'operateur, pas voir l'image bouger.
 SHAKES = {"aucun": (0, 0), "leger": (0.004, 0.0008), "moyen": (0.008, 0.0016), "fort": (0.013, 0.0025)}
-SHAKE_VERSION = 2
+SHAKE_VERSION = 3
 SHAKE_DEFAULT = {"epaule": "moyen"}            # sinon : aucun
 
 

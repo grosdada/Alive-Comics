@@ -67,21 +67,24 @@ def grow(poly, px):
 
 
 def shake_filter(level, w, h, n):
-    """Tremble periodique (sommes de sinus a frequences entieres sur n images) : rotation + recadrage, puis
-    retour a la taille d'origine. La derniere image rejoint la premiere : les boucles restent parfaites."""
+    """Tremble periodique (sommes de sinus a frequences entieres sur n images) : recadrage a position
+    FRACTIONNAIRE (filtre perspective, interpolation cubique : pas de pas de pixel, donc pas de saccade) et
+    rotation, puis retour a la taille d'origine. La derniere image rejoint la premiere : boucles parfaites.
+    v3 (retour de David) : amplitude inchangee mais derive plus lente (1 a 3 cycles par boucle seulement)."""
     amp, rot = presets.SHAKES.get(level, (0, 0))
     if not amp:
         return None
     z = 1 - 2 * (amp * 1.15 + rot * 0.6)
-    cw, ch = int(w * z) // 2 * 2, int(h * z) // 2 * 2
+    cw, ch = w * z, h * z
     two_pi_n = f"2*PI*n/{n}"
-    # derive lente (1 a 2 cycles par boucle) + leger flottement (4 a 6) : pas de saccade rapide
-    x = (f"({w}-{cw})/2+{amp * w:.2f}*(0.62*sin(1*{two_pi_n}+0.7)+0.28*sin(2*{two_pi_n}+2.1)"
-         f"+0.10*sin(5*{two_pi_n}+4.0))")
-    y = (f"({h}-{ch})/2+{amp * h:.2f}*(0.62*sin(1*{two_pi_n}+1.9)+0.28*sin(3*{two_pi_n}+0.4)"
-         f"+0.10*sin(6*{two_pi_n}+3.1))")
-    a = f"{rot}*(0.7*sin(1*{two_pi_n}+0.5)+0.3*sin(3*{two_pi_n}+1.9))"
-    return f"rotate=a='{a}':c=black,crop=w={cw}:h={ch}:x='{x}':y='{y}',scale={w}:{h}:flags=lanczos"
+    two_pi_in = f"2*PI*in/{n}"           # le filtre perspective numerote les images « in », pas « n »
+    dx = (f"{amp * w:.3f}*(0.62*sin(1*{two_pi_in}+0.7)+0.28*sin(2*{two_pi_in}+2.1)+0.10*sin(3*{two_pi_in}+4.0))")
+    dy = (f"{amp * h:.3f}*(0.62*sin(1*{two_pi_in}+1.9)+0.28*sin(2*{two_pi_in}+0.4)+0.10*sin(3*{two_pi_in}+3.1))")
+    x0, y0 = f"({w}-{cw:.3f})/2+{dx}", f"({h}-{ch:.3f})/2+{dy}"
+    a = f"{rot}*(0.7*sin(1*{two_pi_n}+0.5)+0.3*sin(2*{two_pi_n}+1.9))"
+    persp = (f"perspective=x0='{x0}':y0='{y0}':x1='{x0}+{cw:.3f}':y1='{y0}':x2='{x0}':y2='{y0}+{ch:.3f}':"
+             f"x3='{x0}+{cw:.3f}':y3='{y0}+{ch:.3f}':interpolation=cubic:eval=frame")
+    return f"rotate=a='{a}':c=black:bilinear=1,{persp}"
 
 
 def _size(video):
