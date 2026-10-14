@@ -448,13 +448,24 @@ class Scheduler:
 
     def _wait_comfy(self, job):
         h = job["handle"]
-        t0 = time.time()
+        t0 = last_ok = time.time()
         while True:
             if job["id"] in self.cancel_flags:
                 comfy.cancel(h["server"], h["prompt_id"])
                 self._set(job, status="cancelled", finished=time.time())
                 return
-            entry = comfy.poll(h["server"], h["prompt_id"])
+            try:
+                entry = comfy.poll(h["server"], h["prompt_id"])
+                last_ok = time.time()
+            except comfy.ComfyError:
+                raise
+            except (OSError, ValueError) as exc:
+                # la machine ne repond pas un moment (GPU au maximum, reseau) : le rendu continue la-bas, on reessaie
+                if time.time() - last_ok > 900:
+                    raise comfy.ComfyError("la machine ne répond plus depuis 15 min : " + str(exc)[:200]) from exc
+                self._set(job, progress="machine occupée, nouvel essai…")
+                time.sleep(POLL_COMFY * 2)
+                continue
             if entry:
                 break
             self._set(job, progress="calcul %d s" % (time.time() - t0)) if int(time.time() - t0) % 20 < POLL_COMFY else None
