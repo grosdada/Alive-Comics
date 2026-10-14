@@ -129,7 +129,7 @@ def page_key(p, d):
             if cur.get("file"):
                 layers[layer]["mtime"] = _mtime(d / cur["file"])
         panels[pid_] = {"player": plan["player"], "autoplay": plan["autoplay"], "loop": plan["loop"],
-                        "shake": presets.shake_level(panel),
+                        "shake": f"{presets.shake_level(panel)}:v{presets.SHAKE_VERSION}",
                         "sides": [j["side"] for j in plan["jobs"]],
                         "chosen": {k: [v, _mtime(d / v)] for k, v in sorted(chosen.items())}, "layers": layers}
     ps = p.get("pageSound") or {}
