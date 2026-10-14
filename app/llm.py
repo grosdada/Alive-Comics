@@ -189,8 +189,23 @@ def list_models(provider):
     raise LLMError("fournisseur inconnu : " + provider)
 
 
+EDIT_SYSTEM = SYSTEM.replace(" Answer with JSON only.", "")
+
+
+def rewrite_prompt(prompt, instruction, image=None):
+    """Mode edition : integre une consigne de l'auteur (souvent en francais) au prompt qui a produit la video."""
+    ask = ("This prompt produced the current video of a comic panel (its start image is attached):\n\n"
+           f"{prompt}\n\nThe author wants this change: {instruction}\n\n"
+           "Rewrite the prompt to include the change and keep everything else that is not contradicted (subject, camera, "
+           "ending, loop or stillness instructions, final 'No cuts.'). English, about the same length. "
+           "Answer with the prompt text only, no quotes, no comment.")
+    out = chat(ask, image=image, system=EDIT_SYSTEM, max_tokens=700)
+    return out.strip().strip('"').strip()
+
+
 def translate(text, purpose="video"):
-    what = "a camera/action prompt for an image-to-video model" if purpose == "video" else "a music caption"
+    what = {"video": "a camera/action prompt for an image-to-video model",
+            "foley": "a short description of sound effects for a video-to-audio model"}.get(purpose, "a music caption")
     out = chat(f"Rewrite this as {what}, in clear concise English, keeping every idea. Text only, no quotes:\n\n{text}",
                max_tokens=600)
     return out.strip().strip('"')

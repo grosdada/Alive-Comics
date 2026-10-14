@@ -27,13 +27,32 @@ AMPLITUDES = {"petit": 40, "moyen": 55, "grand": 70}     # angle ECRIT dans le p
 # a peine de rotation : on doit sentir l'operateur, pas voir l'image bouger. v3 (autre session, 80553bd) : recadrage
 # a position fractionnaire (filtre perspective) et derive plus lente, voir assemble.shake_filter.
 SHAKES = {"aucun": (0, 0), "leger": (0.004, 0.0008), "moyen": (0.008, 0.0016), "fort": (0.013, 0.0025)}
-SHAKE_VERSION = 3
+SHAKE_VERSION = 4                              # 4 : applique par le lecteur (voir shake_params)
 SHAKE_DEFAULT = {"epaule": "moyen"}            # sinon : aucun
 
 
 def shake_level(panel):
     cam = (panel or {}).get("camera") or {}
     return cam.get("shake") or SHAKE_DEFAULT.get(cam.get("id"), "aucun")
+
+
+# v4 (15/10, mode edition) : le tremble n'est plus integre a la video, c'est le lecteur qui l'applique en direct
+# (transformation CSS a position fractionnaire, comme la v3) : reglable dans l'apercu sans re-encoder.
+# Parametres du lecteur : size = amplitude en % de la case, freq = frequence principale en Hz (la v3 faisait
+# 1 a 3 cycles par boucle de 5 s, soit ~0,2 Hz), rot = rotation en degres, seed = phases.
+SHAKE_FREQ = 0.2
+
+
+def shake_params(panel, pid=""):
+    """Tremble du lecteur pour une case : celui regle a la main (edit.shake), sinon le niveau du preset."""
+    own = ((panel or {}).get("edit") or {}).get("shake")
+    if isinstance(own, dict):
+        return own if float(own.get("size") or 0) > 0 or float(own.get("rot") or 0) > 0 else None
+    amp, rot = SHAKES.get(shake_level(panel), (0, 0))
+    if not amp:
+        return None
+    seed = sum(ord(c) * (i + 1) for i, c in enumerate(pid)) % 997
+    return {"size": round(amp * 100, 3), "freq": SHAKE_FREQ, "rot": round(rot * 57.29578, 3), "seed": seed}
 
 # ------------------------------------------------------------------ cameras
 # kind : "frozen" = temps fige, la case se pilote au glisser ; "animated" = la scene bouge, lecture auto.
@@ -223,6 +242,11 @@ def plan_panel(panel, project_style=""):
                 j["prompt"] = (base[:-len("No cuts.")].strip() + " " + extra + " No cuts.").strip()
             else:
                 j["prompt"] = (base + " " + extra).strip()
+    # prompt reecrit depuis l'apercu (bouton « Regenerer » du mode edition) : remplace celui des menus
+    over = (panel or {}).get("prompt_override") or {}
+    for j in res["jobs"]:
+        if (over.get(j["side"]) or "").strip():
+            j["prompt"] = over[j["side"]].strip()
     return res
 
 

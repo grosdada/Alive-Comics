@@ -55,6 +55,19 @@ L'interface s'ouvre sur http://127.0.0.1:8790/. Il faut Python 3.10+ et ffmpeg d
 8. **Aperçu** : assemble la page jouable et l'ouvre. Si rien n'a changé depuis le dernier assemblage, la page déjà
    prête s'ouvre immédiatement ; sinon seul ce qui a changé est refait. **📁 Dossier** ouvre le dossier de la page
    (index.html, vidéos, sons). **Publier** : la met en ligne (lien à partager).
+8 bis. **✏️ Éditer** (dans l'aperçu d'une page ou d'un livre, seulement depuis l'application) : clic sur une case,
+   un popup de retouche s'ouvre avec la case en grand. Tout se voit en direct et s'enregistre tout seul, sans
+   recalculer la vidéo :
+   - **Boucle** : timeline avec la courbe de mouvement (rouge = temps mort), poignées de début et de fin,
+     « ✂ Couper les temps morts », fondu au raccord, image de départ, sens (boucle / aller-retour), vitesse ;
+   - **Tremblé** : taille, fréquence, rotation, graine (« ⏸ Figer l'image » : le tremblé continue sur l'image fixe) ;
+   - **Couleur** (saturation, luminosité, contraste, température, teinte ; « Appliquer à toute la page ») et **Cadrage** ;
+   - **Son** : volume de chaque couche, régénérer avec une consigne, **ajouter un son** par-dessus, volume (ou
+     import) de la musique de la page ;
+   - **Régénérer** : consigne en français (l'IA réécrit le prompt H3), « même graine » pour ne changer qu'un détail,
+     versions déjà calculées.
+   Le tremblé caméra est appliqué par le lecteur (plus incrusté dans la vidéo). Pour mettre les retouches en ligne :
+   republier la page ou le livre.
 9. **Livres** (page d'accueil) : enchaîner plusieurs planches, aperçu, publication.
 
 ## Réglages (⚙)

@@ -286,6 +286,15 @@ export function renderSection(app, pid) {
     }
   });
   box.append(prev);
+  // prompt reecrit dans l'apercu (mode edition, bouton « Regenerer ») : il remplace celui des menus
+  const over = Object.entries(panel.prompt_override || {}).filter(([, t]) => t);
+  if (over.length) {
+    box.append(h("div.form",
+      h("p.note", "✏️ Prompt réécrit depuis l'aperçu (mode édition) : il remplace celui des menus pour les prochains rendus."),
+      over.map(([s, t]) => h("details.prompt-preview", h("summary", sideName(s)), h("pre", t))),
+      h("button.mini", { on: { click: () => { panel.prompt_override = null; app.commitSoon("panel"); app.refreshInspector(); } } },
+        "Revenir au prompt des menus")));
+  }
   const jobs = app.jobs.filter(j => j.project === app.project.id && j.panel === pid && ["queued", "running", "error"].includes(j.status));
   for (const j of jobs) {
     box.append(h("div.jobline." + j.status, `${sideName(j.side)} : ${statusText(j)}`,

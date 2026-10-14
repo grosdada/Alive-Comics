@@ -52,6 +52,17 @@ layouts = table(["preset", "découpage"], [[code(k), E(v[0])] for k, v in geomet
 formats = table(["format", "nom", "vertical (l × h)", "horizontal"], [
     [code(k), E(v[2]), f"{v[0]} × {v[1]}", f"{v[1]} × {v[0]}"] for k, v in geometry.FORMATS.items()])
 
+retouches = table(["Clé de edit", "Valeur", "Effet"], [
+    ["shake", "{size: % de la case, freq: Hz, rot: degrés, seed}", "tremblé caméra (sans lui : celui du preset, epaule = moyen). size 0 = aucun"],
+    ["grade", "{sat, bright, contrast (1 = neutre), temp -1..1, hue degrés}", "couleurs de la case"],
+    ["frame", "{zoom ≥ 1, x, y de -1 à 1}", "recadrage dans la case (cacher un bord, un défaut)"],
+    ["range", "[début, fin] en images", "points de boucle : couper un temps mort au début ou à la fin"],
+    ["xfade", "nombre d'images (0 à 24)", "fondu au point de boucle (raccord invisible après une coupe)"],
+    ["speed", "0,25 à 2", "vitesse de lecture"],
+    ["bounce", "true / false", "aller-retour ou boucle vers l'avant"],
+    ["start", "image", "image de départ et de « Vue initiale »"],
+])
+
 PAGE = f"""<!doctype html>
 <html lang="fr">
 <head>
@@ -102,6 +113,7 @@ et des chemins de fichiers (images, sons).</p>
 <li><a href="#recette">La recette, du thème à la page</a></li>
 <li><a href="#enchainer">Plusieurs pages à la suite</a></li>
 <li><a href="#verifier">Vérifier et corriger les rendus</a></li>
+<li><a href="#retouches">Retouches sans régénérer</a></li>
 <li><a href="#publier">Exporter, publier, livres</a></li>
 <li><a href="#pieges">Pièges connus</a></li>
 <li><a href="#exemple">Script complet d'exemple</a></li>
@@ -297,6 +309,18 @@ GET  /api/jobs?project=&lt;id&gt;              [{{id, panel, side, kind, status:
 POST /api/jobs/&lt;job&gt;/cancel            annuler
 POST /api/projects/&lt;id&gt;/choose {{"panel": "p3", "side": "V|L|R", "file": "renders/p3/…mp4"}}   choisir une variante
         (sons : side "A" son 1, "B" son 2, "F" bruitages ; son global : panel "_page", side "P")</code></pre>
+<h3>Retouches (mode édition, voir 9 bis)</h3>
+<pre><code>POST /api/projects/&lt;id&gt;/edit/&lt;case&gt; {{"edit": {{…}}, "volumes": {{"audio": 0.6, "voice": 1, "foley": 0.8}},
+                                    "extra": [{{"file", "volume", "loop"}}], "pageVolume": 0.5}}
+        enregistre (cles fournies seulement ; "edit" remplace l'objet entier) puis remet l'export a jour (rapide)
+        -> {{"page": donnees de la page exportee, "encoded": [cases re-encodees], "project": {{…}}}}
+        case "_" : seulement la page (pageVolume) ou juste remettre l'export a jour
+POST /api/projects/&lt;id&gt;/panels/&lt;case&gt;/sound?layer=extra&name=x.mp3    son AJOUTE (par-dessus les autres)
+POST /api/projects/&lt;id&gt;/regen/&lt;case&gt; {{"instruction": "en francais", "prompts": {{"V": "anglais"}}?, "sameSeed": true,
+                                     "target": "local"}}   regenerer la video (l'IA integree reecrit le prompt si
+        "instruction" ; sinon "prompts" tel quel) -> {{"jobs", "prompts", "seed"}} ; le prompt est garde
+        dans panel.prompt_override (il remplace celui des menus pour cette case)
+POST /api/projects/&lt;id&gt;/regensound/&lt;case&gt; {{"layer": "audio|voice|foley|page", "text": "…", "sameSeed": false}}</code></pre>
 <h3>Exporter, publier</h3>
 <pre><code>POST /api/projects/&lt;id&gt;/export     -> {{"url": "/projects/&lt;id&gt;/export/index.html", "report": [...], "cached": bool}}
         page jouable dans projects/&lt;id&gt;/export/ (index.html, videos/, sons/) ; instantane si rien n'a change
@@ -372,6 +396,22 @@ mouvement continu et visible (le preset {code("vie")} le fait depuis le 14/10/20
 </ul></li>
 <li><b>Relancer</b> : {code('POST /panels/<case> {"seed": <graine+1>}')} puis {code("/render")} sur cette case ; ou
 {code('"seeds": {"p3": 12345}')} dans {code("/render")}. Choisir ensuite la meilleure variante avec {code("/choose")}.</li>
+</ul></section>
+
+<section id="retouches"><h2><span class="n">9 bis</span>Retouches sans régénérer (mode édition)</h2>
+<p>David retouche les cases dans l'aperçu (bouton « ✏️ Éditer » de la page exportée, servie par l'application). Tout ce qui
+suit est appliqué <b>par le lecteur, en direct</b> : aucun ré-encodage, réversible. Tu peux le régler aussi par
+{code("POST /api/projects/<id>/edit/<case>")} avec {code('{"edit": {...}}')} (l'objet remplace l'ancien : relis
+{code("panels[case].edit")} d'abord et renvoie-le complété).</p>
+{retouches}
+<ul>
+<li>Repères du tremblé : léger {{size 0.4, freq 0.2, rot 0.046}}, moyen {{0.8, 0.2, 0.092}}, fort {{1.3, 0.2, 0.143}},
+nerveux {{0.9, 1.1, 0.2}}. Le tremblé avance avec l'image (il se fige quand la case se fige).</li>
+<li>Depuis le 15/10/2026, le tremblé n'est plus incrusté dans la vidéo à l'export : les vidéos sont ré-encodées une fois sans
+lui, puis le lecteur l'applique.</li>
+<li>Un temps mort (image immobile) en fin de vidéo casse la boucle : {code("range")} + {code("xfade")} 6 le corrige sans rendu.</li>
+<li>Sons : {code("volumes")} règle les couches existantes, {code("/sound?layer=extra")} ajoute un son par-dessus, {code("pageVolume")}
+règle la musique de la page.</li>
 </ul></section>
 
 <section id="publier"><h2><span class="n">10</span>Exporter, publier, livres</h2>

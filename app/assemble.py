@@ -7,12 +7,17 @@ Types de case (presets.plan_panel) :
   static pas de video
 L'export est un livre d'une page (index.html + book.js) et contient aussi manga_data.js, pour
 pouvoir etre repris tel quel dans un livre de plusieurs pages (tools/build_book.py).
+
+Retouches du mode edition (panel["edit"]) : tremble, couleurs, cadrage, points de boucle, vitesse... sont
+appliques par le lecteur (entry["fx"]), sans re-encoder la video.
 """
 
 import hashlib
 import json
 import shutil
 import subprocess
+import threading
+from collections import defaultdict
 from pathlib import Path
 
 from . import presets, store
@@ -23,6 +28,7 @@ FPS = 24
 ENC = ["-c:v", "libx264", "-preset", "medium", "-crf", "19", "-g", "1", "-keyint_min", "1",
        "-pix_fmt", "yuv420p", "-movflags", "+faststart", "-an"]
 NOFLASH = {"creationflags": 0x08000000} if hasattr(subprocess, "CREATE_NO_WINDOW") else {}
+_LOCKS = defaultdict(threading.Lock)        # un seul assemblage a la fois par planche (retouches rapprochees)
 
 
 def frames(video):
@@ -39,7 +45,7 @@ def has_audio(video):
 
 
 # niveaux cibles (LUFS) : la voix devant, l'ambiance derriere, les bruitages entre les deux
-LEVELS = {"audio": -24, "voice": -17, "foley": -21, "page": -23}
+LEVELS = {"audio": -24, "voice": -17, "foley": -21, "page": -23, "extra": -20}
 
 
 def normalize(src, dst, layer):
@@ -70,7 +76,9 @@ def shake_filter(level, w, h, n):
     """Tremble periodique (sommes de sinus a frequences entieres sur n images) : recadrage a position
     FRACTIONNAIRE (filtre perspective, interpolation cubique : pas de pas de pixel, donc pas de saccade) et
     rotation, puis retour a la taille d'origine. La derniere image rejoint la premiere : boucles parfaites.
-    v3 (retour de David) : amplitude inchangee mais derive plus lente (1 a 3 cycles par boucle seulement)."""
+    v3 (retour de David) : amplitude inchangee mais derive plus lente (1 a 3 cycles par boucle seulement).
+    Depuis la v4 le montage ne l'utilise plus : le lecteur applique le tremble en direct (presets.shake_params),
+    reglable dans le mode edition. Garde pour un futur export video « tout integre »."""
     amp, rot = presets.SHAKES.get(level, (0, 0))
     if not amp:
         return None
@@ -115,6 +123,20 @@ def _mtime(f):
         return None
 
 
+def player_fx(panel, pid, plan):
+    """Effets appliques par le lecteur : tremble (preset ou reglage), et retouches du mode edition."""
+    e = panel.get("edit") or {}
+    fx = {}
+    if plan["autoplay"] or isinstance(e.get("shake"), dict):        # sans lecture auto : tremble seulement s'il est regle
+        sh = presets.shake_params(panel, pid)
+        if sh:
+            fx["shake"] = sh
+    for k in ("grade", "frame", "range", "xfade", "speed", "bounce", "start"):
+        if e.get(k) not in (None, {}, []):
+            fx[k] = e[k]
+    return fx
+
+
 def page_key(p, d):
     """Empreinte de tout ce qui change la page exportee : si elle n'a pas bouge, l'export existant est bon."""
     panels = {}
@@ -128,15 +150,17 @@ def page_key(p, d):
             layers[layer] = {k: cur.get(k) for k in keys}
             if cur.get("file"):
                 layers[layer]["mtime"] = _mtime(d / cur["file"])
+        extra = [[x.get("file"), x.get("volume"), x.get("loop"), _mtime(d / x["file"]) if x.get("file") else None]
+                 for x in panel.get("extraSounds") or []]
         panels[pid_] = {"player": plan["player"], "autoplay": plan["autoplay"], "loop": plan["loop"],
-                        "shake": f"{presets.shake_level(panel)}:v{presets.SHAKE_VERSION}",
+                        "fx": player_fx(panel, pid_, plan), "extra": extra,
                         "sides": [j["side"] for j in plan["jobs"]],
                         "chosen": {k: [v, _mtime(d / v)] for k, v in sorted(chosen.items())}, "layers": layers}
     ps = p.get("pageSound") or {}
     page_sound = {k: ps.get(k) for k in ("mode", "file", "volume")}
     if ps.get("file"):
         page_sound["mtime"] = _mtime(d / ps["file"])
-    blob = {"v": 3, "name": p.get("name"), "geometry": p.get("geometry"), "pageSound": page_sound,
+    blob = {"v": 4, "name": p.get("name"), "geometry": p.get("geometry"), "pageSound": page_sound,
             "stroke": (p.get("page") or {}).get("strokeWidth"), "panels": panels,
             "page": [_mtime(d / "page" / n) for n in ("page.jpg", "frames.png")],
             "player": [_mtime(PLAYER / n) for n in ("book.html", "alive-player.js", "alive-player.css")]}
@@ -144,6 +168,11 @@ def page_key(p, d):
 
 
 def build(pid, log=print, force=False):
+    with _LOCKS[pid]:
+        return _build(pid, log, force)
+
+
+def _build(pid, log=print, force=False):
     p = store.get(pid)
     d = store.pdir(pid)
     geo = p.get("geometry") or {}
@@ -175,7 +204,7 @@ def build(pid, log=print, force=False):
         shutil.copy2(src, out / name)
     stroke = float((p.get("page") or {}).get("strokeWidth", 4))
     data = {"page": "page.jpg", "frames": "frames.png", "size": geo["size"], "fps": FPS, "panels": []}
-    report = []
+    report, encoded = [], []
     for g in geo["panels"]:
         panel = p["panels"].get(g["id"]) or {}
         plan = presets.plan_panel(panel, p.get("style", ""))
@@ -186,18 +215,23 @@ def build(pid, log=print, force=False):
         srcs = {s: d / chosen[s] for s in need if chosen.get(s) and (d / chosen[s]).exists()}
         if plan["player"] != "static" and need and len(srcs) == len(need):
             dst = out / "videos" / f"{g['id']}.mp4"
-            shake = presets.shake_level(panel) if plan["autoplay"] else "aucun"
-            key = json.dumps({"player": plan["player"], "shake": shake, "shake_v": presets.SHAKE_VERSION,
+            # tremble : dans le lecteur depuis la v4, plus jamais dans la video. Cle au format d'avant (« aucun »,
+            # v3) : les videos qui n'avaient pas de tremble gardent leur cache, seules les autres sont re-encodees.
+            key = json.dumps({"player": plan["player"], "shake": "aucun", "shake_v": 3,
                               "src": {s: [str(f), f.stat().st_mtime] for s, f in srcs.items()}})
             if cache.get(g["id"], {}).get("key") == key and dst.exists():
                 center, n = cache[g["id"]]["center"], cache[g["id"]]["frames"]
             else:
                 log(f"{g['id']} : encodage ({plan['player']})")
-                center = _encode(srcs, plan["player"], dst, shake)
+                center = _encode(srcs, plan["player"], dst)
                 n = frames(dst)
                 cache[g["id"]] = {"key": key, "center": center, "frames": n}
+                encoded.append(g["id"])
             entry.update(video=f"videos/{dst.name}", frames=n, center=center,
                          loop=plan["loop"] or plan["player"] == "loop", autoplay=plan["autoplay"])
+            fx = player_fx(panel, g["id"], plan)
+            if fx:
+                entry["fx"] = fx
             report.append(f"{g['id']} {plan['player']} {n} images")
         elif plan["player"] != "static" and need:
             report.append(f"{g['id']} : rendu manquant ({', '.join(s for s in need if s not in srcs)})")
@@ -232,13 +266,22 @@ def build(pid, log=print, force=False):
             if src:
                 entry["foley"] = {"src": f"sons/{name}", "vol": float(foley.get("volume", 0.9)),
                                   "sync": bool(entry.get("autoplay"))}
+        more = []                                    # sons ajoutes en plus (mode edition)
+        for i, x in enumerate(panel.get("extraSounds") or []):
+            if x.get("file") and (d / x["file"]).exists():
+                name = f"{g['id']}_plus{i + 1}.mp3"
+                norm(d / x["file"], name, "extra")
+                more.append({"src": f"sons/{name}", "vol": float(x.get("volume", 0.8)), "loop": bool(x.get("loop", True))})
+        if more:
+            entry["more"] = more
         data["panels"].append(entry)
     ps = p.get("pageSound") or {}
     if ps.get("mode") in ("file", "generate") and ps.get("file") and (d / ps["file"]).exists():
         norm(d / ps["file"], "page.mp3", "page")
         data["sound"] = {"src": "sons/page.mp3", "vol": float(ps.get("volume", 0.7))}
     (out / "manga_data.js").write_text("window.MANGA = " + json.dumps(data, ensure_ascii=False) + ";\n", encoding="utf-8")
-    book = {"title": p.get("name", "Planche"), "pages": [{"title": p.get("name", ""), "base": "", "data": data}]}
+    book = {"title": p.get("name", "Planche"), "pages": [{"title": p.get("name", ""), "base": "", "project": pid,
+                                                           "data": data}]}
     (out / "book.js").write_text("window.ALIVE_BOOK = " + json.dumps(book, ensure_ascii=False) + ";\n", encoding="utf-8")
     shutil.copy2(PLAYER / "book.html", out / "index.html")
     for f in ("alive-player.js", "alive-player.css"):
@@ -248,6 +291,7 @@ def build(pid, log=print, force=False):
     used = ({e.get("video") for e in data["panels"]} | {e.get("audio") for e in data["panels"]}
             | {(e.get("voice") or {}).get("src") for e in data["panels"]}
             | {(e.get("foley") or {}).get("src") for e in data["panels"]}
+            | {x["src"] for e in data["panels"] for x in e.get("more") or []}
             | {(data.get("sound") or {}).get("src")})
     for sub in ("videos", "sons"):
         for f in (out / sub).iterdir():
@@ -257,7 +301,52 @@ def build(pid, log=print, force=False):
               "videos": sum(1 for e in data["panels"] if e.get("video")), "panels": len(data["panels"])}
     cache["_page"] = {"key": pkey, "result": result}
     cache_f.write_text(json.dumps(cache), encoding="utf-8")
-    return dict(result, cached=False)
+    return dict(result, cached=False, encoded=encoded)
+
+
+def read_data(folder):
+    """Donnees d'une page assemblee (manga_data.js)."""
+    raw = (Path(folder) / "manga_data.js").read_text(encoding="utf-8")
+    return json.loads(raw.split("=", 1)[1].strip().rstrip(";"))
+
+
+def data_files(data):
+    """Fichiers dont une page a besoin (relatifs a son dossier)."""
+    files = [data["page"], data["frames"]] + [e[k] for e in data["panels"] for k in ("video", "audio") if e.get(k)]
+    files += [e[k]["src"] for e in data["panels"] for k in ("voice", "foley") if e.get(k)]
+    files += [x["src"] for e in data["panels"] for x in e.get("more") or []]
+    if data.get("sound"):
+        files.append(data["sound"]["src"])
+    return files
+
+
+def sync_book_page(book, pid):
+    """Reporte une planche retouchee dans le livre deja assemble (data/books/<id>), sans tout reconstruire :
+    copie les fichiers qui ont change et remplace les donnees de la page dans book.js. -> donnees, ou None."""
+    out = ROOT / "data" / "books" / book["id"]
+    bj = out / "book.js"
+    if not bj.exists():
+        return None
+    B = json.loads(bj.read_text(encoding="utf-8").split("=", 1)[1].strip().rstrip(";"))
+    src = store.pdir(pid) / "export"
+    data = read_data(src)
+    hit = None
+    for i, pg in enumerate(B["pages"]):
+        owner = pg.get("project") or (book["pages"][i] if i < len(book.get("pages") or []) else None)
+        if owner != pid:
+            continue
+        for rel in data_files(data):
+            a, b = src / rel, out / pg["base"] / rel
+            if not b.exists() or a.stat().st_size != b.stat().st_size or a.stat().st_mtime > b.stat().st_mtime:
+                b.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(a, b)
+        pg["data"], pg["project"], hit = data, pid, data
+    if hit is not None:
+        bj.write_text("window.ALIVE_BOOK = " + json.dumps(B, ensure_ascii=False) + ";\n", encoding="utf-8")
+        for f in ("alive-player.js", "alive-player.css"):
+            shutil.copy2(PLAYER / f, out / f)
+        shutil.copy2(PLAYER / "book.html", out / "index.html")
+    return hit
 
 
 def build_book(book, out, log=print):
@@ -271,15 +360,11 @@ def build_book(book, out, log=print):
         build(pid, log)
         src = store.pdir(pid) / "export"
         base = f"pages/{i + 1:02d}-{store.slug(store.get(pid).get('name', pid))}/"
-        data = json.loads((src / "manga_data.js").read_text(encoding="utf-8").split("=", 1)[1].strip().rstrip(";"))
-        files = [data["page"], data["frames"]] + [e[k] for e in data["panels"] for k in ("video", "audio") if e.get(k)]
-        files += [e[k]["src"] for e in data["panels"] for k in ("voice", "foley") if e.get(k)]
-        if data.get("sound"):
-            files.append(data["sound"]["src"])
-        for rel in files:
+        data = read_data(src)
+        for rel in data_files(data):
             (out / base / rel).parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(src / rel, out / base / rel)
-        pages.append({"title": store.get(pid).get("name", ""), "base": base, "data": data})
+        pages.append({"title": store.get(pid).get("name", ""), "base": base, "project": pid, "data": data})
     (out / "book.js").write_text("window.ALIVE_BOOK = " + json.dumps({"title": book["title"], "pages": pages},
                                                                        ensure_ascii=False) + ";\n", encoding="utf-8")
     shutil.copy2(PLAYER / "book.html", out / "index.html")

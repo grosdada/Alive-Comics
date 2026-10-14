@@ -60,6 +60,7 @@
   <button type="button" id="unlock" hidden>🔊 Activer le son</button>
   <button type="button" id="fs" class="wide">Plein écran</button>
   <button type="button" id="folder" hidden title="Ouvrir le dossier (index.html, vidéos, sons)">📁 Dossier</button>
+  <button type="button" id="edit" hidden aria-pressed="false" title="Retoucher les cases : tremblé, boucle, couleurs, sons, régénérer">✏️ Éditer</button>
 </header>
 <main id="main">
   <button type="button" class="side prev" id="sprev" aria-label="Page précédente">‹</button>
@@ -86,7 +87,8 @@
     if (i === cur) return;
     if (inst) inst.destroy();
     const pg = B.pages[i];
-    inst = AlivePlayer.mount(main, pg.data, { base: pg.base, alt: pg.title || "", gauge: !!B.gauge || /[?&]gauge\b/.test(location.search) });
+    inst = AlivePlayer.mount(main, pg.data, { base: pg.base, alt: pg.title || "", stamp: pg.stamp || "",
+                                              gauge: !!B.gauge || /[?&]gauge\b/.test(location.search) });
     inst.pageEl.style.setProperty("--from", (dir || 0) * 30 + "px");
     inst.pageEl.classList.add("enter");
     main.insertBefore(inst.pageEl, $("sprev"));
@@ -100,19 +102,20 @@
     if (!single) history.replaceState(null, "", "#" + (i + 1));
     const nx = B.pages[i + 1];               // precharge l'image de la page suivante
     if (nx) new Image().src = nx.base + nx.data.page;
+    document.dispatchEvent(new CustomEvent("alive-page", { detail: { index: i } }));
   }
   const go = (d) => show(cur + d, d);
   $("prev").onclick = $("sprev").onclick = () => go(-1);
   $("next").onclick = $("snext").onclick = () => go(1);
   document.addEventListener("keydown", (e) => {
-    if (AlivePlayer.isLightboxOpen()) return;
+    if (AlivePlayer.isLightboxOpen() || e.target.closest("input, textarea, select, [contenteditable]")) return;
     if (["ArrowRight", "PageDown"].includes(e.key)) go(1);
     if (["ArrowLeft", "PageUp"].includes(e.key)) go(-1);
   });
   // balayage hors des cases pour tourner la page
   let sw = null;
   main.addEventListener("pointerdown", (e) => {
-    sw = e.target.closest(".ac-panel, button") ? null : { x: e.clientX, y: e.clientY };
+    sw = e.target.closest(".ac-panel, button, .ae-pop") ? null : { x: e.clientX, y: e.clientY };
   });
   main.addEventListener("pointerup", (e) => {
     if (!sw) return;
@@ -140,12 +143,25 @@
 
   // servi par l'application Alive-Comics : bouton pour ouvrir le dossier de l'export dans l'explorateur
   const local = location.pathname.match(/^\/projects\/([a-z0-9-]+)\/export\//) ||
-                location.pathname.match(/^\/api\/books\/([a-z0-9]+)\/file\//);
+                location.pathname.match(/^\/api\/books\/([a-z0-9-]+)\/file\//);
   if (local) {
     $("folder").hidden = false;
     $("folder").onclick = () => fetch(location.pathname.startsWith("/projects/") ? `/api/projects/${local[1]}/reveal`
                                                                                  : `/api/books/${local[1]}/reveal`,
                                       { method: "POST" }).catch(() => {});
+    // mode edition : retouches des cases (lecteur + popup), seulement dans l'application
+    window.AliveBookCtl = {
+      B, kind: location.pathname.startsWith("/projects/") ? "project" : "book", id: local[1],
+      cur: () => cur, inst: () => inst, button: $("edit"),
+      remount(stamp) { const i = cur; if (stamp) B.pages[i].stamp = stamp; cur = -1; show(i, 0); },
+    };
+    const css = document.createElement("link");
+    css.rel = "stylesheet"; css.href = "/player/alive-edit.css";
+    document.head.appendChild(css);
+    const js = document.createElement("script");
+    js.src = "/player/alive-edit.js";
+    js.onload = () => { $("edit").hidden = false; };
+    document.head.appendChild(js);
   }
 
   const hint = $("hint");

@@ -22,7 +22,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
-from . import assemble, compose, director, falapi, geometry, jobs, llm, presets, publish, settings, store
+from . import assemble, compose, director, edit, falapi, geometry, jobs, llm, presets, publish, settings, store
 
 ROOT = Path(__file__).resolve().parent.parent
 WEB = ROOT / "app" / "web"
@@ -62,6 +62,9 @@ def merge_project(server_p, ui_p):
         panel = dict(panel)
         panel["renders"] = old.get("renders", [])
         panel["chosen"] = old.get("chosen", {})
+        for k in ("edit", "extraSounds", "prompt_override"):      # ecrits par le mode edition de l'apercu
+            if k not in panel and k in old:
+                panel[k] = old[k]
         for layer in ("audio", "voice", "foley"):
             cur = dict(panel.get(layer) or {})
             prev = old.get(layer) or {}
@@ -401,8 +404,11 @@ class Handler(BaseHTTPRequestHandler):
                 store.mutate(pid, setimg)
                 return self.send_json({"file": rel, "w": w, "h": hh})
             layer = q.get("layer", "audio")
-            if layer not in ("audio", "voice"):
-                raise ApiError("layer : audio ou voice")
+            if layer not in ("audio", "voice", "extra"):
+                raise ApiError("layer : audio, voice ou extra (son ajouté en plus)")
+            if layer == "extra":
+                p = store.mutate(pid, lambda pp: edit.add_extra_sound(pp, parts[3], rel, name))
+                return self.send_json({"file": rel, "layer": layer, "extra": p["panels"][parts[3]]["extraSounds"]})
 
             def setsnd(p):
                 panel = p["panels"].get(parts[3])
@@ -445,6 +451,20 @@ class Handler(BaseHTTPRequestHandler):
         if sub == "audio" and m == "POST":
             b = self.jbody()
             return self.send_json({"jobs": S.enqueue_audio(pid, parts[3], b.get("machines"), b.get("seed"))})
+        if sub == "edit" and len(parts) == 4 and m == "POST":     # mode edition de l'apercu : retouches d'une case
+            b = self.jbody()
+            edit.apply(pid, parts[3], b)
+            res = assemble.build(pid)                   # rapide : les retouches ne re-encodent rien
+            book = next((x for x in self.books_list() if x["id"] == b.get("book")), None) if b.get("book") else None
+            if book:
+                assemble.sync_book_page(book, pid)
+            return self.send_json({"ok": True, "page": assemble.read_data(store.pdir(pid) / "export"),
+                                   "encoded": res.get("encoded", []), "report": res.get("report", []),
+                                   "project": store.get(pid)})
+        if sub == "regen" and len(parts) == 4 and m == "POST":    # regenerer la video d'une case (consigne, graine)
+            return self.send_json(edit.regen(pid, parts[3], self.jbody()))
+        if sub == "regensound" and len(parts) == 4 and m == "POST":
+            return self.send_json(edit.regen_sound(pid, parts[3], self.jbody()))
         if sub == "direct" and m == "POST":             # realisateur IA : l'IA regle toute la page
             b = self.jbody()
             return self.send_json(director.direct(pid, b.get("instruction", ""), b.get("options") or {}))
@@ -491,8 +511,12 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_json(dict(res, report=rep["report"]))
         raise ApiError("route projet inconnue", 404)
 
+    @staticmethod
+    def books_list():
+        return json.loads(BOOKS.read_text(encoding="utf-8")) if BOOKS.exists() else []
+
     def books(self, m, parts, q):
-        books = json.loads(BOOKS.read_text(encoding="utf-8")) if BOOKS.exists() else []
+        books = self.books_list()
         if len(parts) == 1:
             if m == "GET":
                 return self.send_json(books)
