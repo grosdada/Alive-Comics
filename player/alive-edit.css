@@ -101,3 +101,7 @@ a.ae-nav:hover { border-color: #f2b45c; }
 .ae-modal b { font-size: 15px; }
 .ae-modal ul { margin: 0; padding-left: 20px; color: #f2b45c; }
 .ae-pop .ae-blk select, .ae-pop .ae-row select { max-width: 150px; }
+/* voix off : le MP3 de David, en tete de l'onglet Son */
+.ae-snd.ae-voice { border-color: rgba(242, 180, 92, .55); }
+.ae-snd.over, .ae-drop.ae-voice.over { border-color: #f2b45c; background: rgba(242, 180, 92, .08); }
+.ae-drop.ae-voice { border-color: rgba(242, 180, 92, .6); color: #f2d3a2; }

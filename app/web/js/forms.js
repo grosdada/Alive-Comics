@@ -199,12 +199,13 @@ function layerTwo(app, pid) {
   const v = panel.voice = panel.voice || { mode: "none" };
   const box = h("div.form.layer");
   const redraw = () => box.replaceWith(layerTwo(app, pid));
-  box.append(seg([["none", "Aucun"], ["file", "Fichier"], ["tts", "Voix off (IA)"], ["music", "Musique"]], v.mode, (m) => {
+  box.append(seg([["none", "Aucun"], ["file", "Voix off (MP3)"], ["tts", "Voix IA (fal)"], ["music", "Musique"]], v.mode, (m) => {
     v.mode = m;
     if (m === "music" && v.loop === undefined) v.loop = true;
     app.commitSoon("panel"); redraw(); app.editor.renderOverlay();
   }));
-  if (v.mode === "file") box.append(h("button", { on: { click: () => app.pickAudio(pid, "voice") } }, icon("audio"), v.file ? " Remplacer…" : " Importer un son…"));
+  if (v.mode === "file") box.append(h("button", { on: { click: () => app.pickAudio(pid, "voice") } }, icon("audio"),
+                                      v.file ? " Charger une autre voix off…" : " Charger la voix off (MP3)…"));
   if (v.mode === "tts") {
     const txt = textInput(v.text, "Le texte dit par la voix off…", (x) => { v.text = x; app.commitSoon("panel"); }, true);
     box.append(field("Texte", txt, h("button.mini", { on: { click: async (e) => {

@@ -108,7 +108,7 @@
   $("prev").onclick = $("sprev").onclick = () => go(-1);
   $("next").onclick = $("snext").onclick = () => go(1);
   document.addEventListener("keydown", (e) => {
-    if (AlivePlayer.isLightboxOpen() || e.target.closest("input, textarea, select, [contenteditable]")) return;
+    if (AlivePlayer.isLightboxOpen() || (e.target.closest && e.target.closest("input, textarea, select, [contenteditable]"))) return;
     if (["ArrowRight", "PageDown"].includes(e.key)) go(1);
     if (["ArrowLeft", "PageUp"].includes(e.key)) go(-1);
   });

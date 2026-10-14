@@ -947,12 +947,11 @@
   }
 
   // envoi d'un son : s'il sert deja dans une planche, alerte avec les references ; deja importe = reutilise
-  function confirmBox(title, lines, okLabel) {
+  function confirmBox(title, lines, okLabel, note) {
     return new Promise((done) => {
       const back = h("div.ae-modal-back");
       const end = (v) => { back.remove(); done(v); };
-      back.append(h("div.ae-modal", h("b", title), h("ul", lines.map(l => h("li", l))),
-        h("p.ae-note", "S'il est utilisé quand même, le fichier déjà importé est repris : il n'est pas copié une deuxième fois."),
+      back.append(h("div.ae-modal", h("b", title), h("ul", lines.map(l => h("li", l))), note ? h("p.ae-note", note) : null,
         h("div.ae-row", h("span.ae-sp"), h("button.ae-btn", { on: { click: () => end(false) } }, "Annuler"),
           h("button.ae-btn.ae-main", { on: { click: () => end(true) } }, okLabel || "Utiliser quand même"))));
       back.addEventListener("pointerdown", (e) => { if (e.target === back) end(false); });
@@ -965,7 +964,10 @@
       let j = {};
       try { j = await r.json(); } catch (_) { /* reponse vide */ }
       if (r.status === 409 && j.used && !force) {
-        if (!(await confirmBox("Ce son est déjà utilisé", j.used.map(u => u.where)))) throw new Error("import annulé");
+        if (!(await confirmBox("Ce son est déjà utilisé", j.used.map(u => u.where), null,
+                               "S'il est utilisé quand même, le fichier déjà importé est repris : il n'est pas copié une deuxième fois."))) {
+          throw new Error("import annulé");
+        }
         return go(true);
       }
       if (!r.ok) throw new Error(j.error || "envoi refusé");
@@ -1031,6 +1033,9 @@
     return h("div.ae-blk", ta, h("div.ae-row", voice, emo, lang), h("div.ae-row", go), out);
   }
 
+  // nom lisible d'un son importe : « assets/20261014-213603-cd31-maxime-33.mp3 » -> « maxime-33.mp3 »
+  const niceName = (o) => (o && (o.name || (o.file || "").split("/").pop().replace(/^\d{8}-\d{6}-[0-9a-f]{4}-/, ""))) || "";
+
   function tabSound(box) {
     const c = cur, st = c.st, p = st.p, panel = c.panel || {}, pg = C.B.pages[c.i];
     const vol = (key, get, set) => slider("Volume", get, (v) => { set(v); P.setLayerVolume(st, key, v); },
@@ -1054,16 +1059,47 @@
         h("div.ae-row", replaceBtn("audio", "Son 1"), removeBtn("audio", "le son 1")),
         regenSoundForm("audio", "Régénérer ce son (MiniMax Music)", "Ex. : drone grave et lent, cordes lointaines, vent", a.file)));
     }
-    // son 2 : voix off (IA ou fichier) ou deuxieme musique
+    // voix off : le MP3 de David (joue depuis le debut a chaque survol), en premier ; la voix IA reste en option
     const v = panel.voice || {};
+    const loadVoice = async (f2, zone) => {
+      if (!f2) return;
+      if (zone) zone.textContent = "envoi de " + f2.name + "…";
+      try {
+        await sendSound(`/api/projects/${c.pid}/panels/${c.id}/sound?layer=voice&name=${encodeURIComponent(f2.name)}`, f2);
+        await saveEdit(c.i, c.id, {}, { sounds: c.id });
+        toast(`Voix off chargée : ${f2.name}. Elle part du début à chaque survol de la case.`, 4500);
+      } catch (e) { if (zone) zone.textContent = "⚠ " + e.message; else toast("⚠ " + e.message); }
+    };
+    const dropTarget = (el, fn) => {
+      el.addEventListener("dragover", (e) => { e.preventDefault(); el.classList.add("over"); });
+      el.addEventListener("dragleave", () => el.classList.remove("over"));
+      el.addEventListener("drop", (e) => { e.preventDefault(); el.classList.remove("over"); fn(e.dataTransfer.files[0]); });
+    };
+    const ttsBox = h("details.ae-regen", h("summary", "ou générer une voix off IA (fal)"), voiceForm(c, v));
     if (p.voice) {
-      const kind = v.mode === "tts" ? "voix off IA" : v.mode === "music" ? "musique générée" : "fichier";
-      const vf = h("details.ae-regen", h("summary", v.mode === "tts" ? "🎙 Changer le texte ou la voix" : "🎙 Remplacer par une voix off IA"),
-                   voiceForm(c, v));
-      box.append(block("Son 2 · voix off", (v.name || (v.mode === "tts" ? (v.text || "").slice(0, 50) : "")) + ` (${kind})`,
+      const kind = v.mode === "tts" ? "voix IA" : v.mode === "music" ? "musique générée" : "";
+      const once = h("input", { type: "checkbox", checked: !p.voice.loop });
+      once.onchange = async () => {
+        try { await setLayer(c, "voice", Object.assign({}, v, { loop: !once.checked })); }
+        catch (e) { toast("⚠ " + e.message); }
+      };
+      const vb = block("🎙 Voix off", (v.mode === "tts" ? (v.text || "").slice(0, 50) : niceName(v)) + (kind ? ` (${kind})` : ""),
         vol("voice", () => p.voice.vol ?? 1, (x) => { p.voice.vol = x; queue({ volumes: { voice: x } }); }),
-        h("div.ae-row", replaceBtn("voice", "Son 2"), removeBtn("voice", "le son 2")), vf,
-        v.mode === "music" ? regenSoundForm("voice", "Régénérer cette musique", "Décris la musique voulue", v.file) : null));
+        h("label.ae-chk", once, "une fois à chaque survol, depuis le début (décoché : en boucle)"),
+        h("div.ae-row",
+          h("button.ae-btn.ae-main", { on: { click: () => pickAudio((f2) => loadVoice(f2)) } }, "📁 Charger une autre voix off"),
+          removeBtn("voice", "la voix off")),
+        h("p.ae-note", "Ou glisser un MP3 sur ce cadre."),
+        v.mode === "music" ? regenSoundForm("voice", "Régénérer cette musique", "Décris la musique voulue", v.file) : null,
+        ttsBox);
+      vb.classList.add("ae-voice");
+      dropTarget(vb, (f2) => loadVoice(f2));
+      box.prepend(vb);
+    } else {
+      const vz = h("div.ae-drop.ae-voice", "🎙 Charger une voix off (MP3) : glisser le fichier ici, ou cliquer");
+      vz.onclick = () => pickAudio((f2) => loadVoice(f2, vz));
+      dropTarget(vz, (f2) => loadVoice(f2, vz));
+      box.prepend(h("div.ae-snd", h("div.ae-sndh", h("b", "🎙 Voix off"), h("small", "aucune")), vz, ttsBox));
     }
     if (p.foley) {
       const fo = panel.foley || {}, h3 = (fo.engine || "h3") === "h3";
@@ -1073,38 +1109,44 @@
            : regenSoundForm("foley", "Régénérer les bruitages (fal)", "Ex. : pas sur le gravier, porte qui grince", fo.file)));
     }
     const extras = panel.extraSounds || [];
+    const extraList = (skip) => extras.filter((_, k) => k !== skip).map((e) => ({ file: e.file, volume: e.volume, loop: e.loop }));
     (p.more || []).forEach((x, i) => {
       const ex = extras[i] || {};
       const loop = h("input", { type: "checkbox", checked: x.loop });
       const send = () => queue({ extra: extras.map((e, k) => ({ file: e.file, volume: k === i ? x.vol : (p.more[k] || {}).vol ?? e.volume,
                                                                loop: k === i ? loop.checked : e.loop })) });
       loop.onchange = () => { x.loop = loop.checked; send(); };
-      box.append(block(`Son ajouté ${i + 1}`, ex.name || "",
+      const asVoice = h("button.ae-btn", { title: "Ce son est une voix off : il passe dans la voix off de la case (une fois à chaque survol)",
+                                            on: { click: async () => {
+        if (p.voice && !(await confirmBox("Remplacer la voix off actuelle ?", [`« ${niceName(v) || "voix off"} » sera remplacée par « ${niceName(ex) || "ce son"} ».`],
+                                          "Remplacer"))) return;
+        try {
+          await api(`/api/projects/${c.pid}/panels/${c.id}`, { voice: { mode: "file", file: ex.file, name: ex.name, volume: 1, loop: false } });
+          await saveEdit(c.i, c.id, { extra: extraList(i) }, { sounds: c.id });
+          toast("C'est maintenant la voix off de la case.");
+        } catch (e) { toast("⚠ " + e.message); }
+      } } }, "🎙 En faire la voix off");
+      box.append(block(`Son ajouté ${i + 1}`, niceName(ex),
         slider("Volume", () => x.vol, (v2) => { x.vol = v2; P.setLayerVolume(st, "more" + i, v2); send(); },
                { min: 0, max: 1, step: 0.01, fmt: (v2) => Math.round(v2 * 100) + " %" }),
-        h("div.ae-row", h("label.ae-chk", loop, "en boucle (sinon : une fois à chaque survol)"),
-          h("button.ae-btn", { on: { click: () => {
-            queue({ extra: extras.filter((_, k) => k !== i).map((e) => ({ file: e.file, volume: e.volume, loop: e.loop })) });
-            flush();
-          } } }, "✕ Retirer"))));
+        h("label.ae-chk", loop, "en boucle (sinon : une fois à chaque survol)"),
+        h("div.ae-row", asVoice,
+          h("button.ae-btn", { on: { click: () => { queue({ extra: extraList(i) }); flush(); } } }, "✕ Retirer"))));
     });
-    // ajouter : un son par-dessus ceux qui existent, ou une voix off s'il n'y en a pas
-    const drop = h("div.ae-drop", "＋ Ajouter un son à cette case (glisser un fichier ici, ou cliquer)");
-    const upload = async (f) => {
-      if (!f) return;
-      drop.textContent = "envoi de " + f.name + "…";
+    // ajouter un autre son (ambiance, bruitage...) par-dessus ceux qui existent
+    const drop = h("div.ae-drop", "＋ Ajouter un autre son (ambiance, bruitage…), en boucle : glisser un fichier ici, ou cliquer");
+    const upload = async (f2) => {
+      if (!f2) return;
+      drop.textContent = "envoi de " + f2.name + "…";
       try {
-        await sendSound(`/api/projects/${c.pid}/panels/${c.id}/sound?layer=extra&name=${encodeURIComponent(f.name)}`, f);
+        await sendSound(`/api/projects/${c.pid}/panels/${c.id}/sound?layer=extra&name=${encodeURIComponent(f2.name)}`, f2);
         await saveEdit(c.i, c.id, {}, { sounds: c.id });
-        toast("Son ajouté : il joue au survol de la case, avec les autres.");
+        toast("Son ajouté : il joue en boucle au survol de la case, avec les autres.");
       } catch (e) { drop.textContent = "⚠ " + e.message; }
     };
     drop.onclick = () => pickAudio(upload);
-    drop.ondragover = (e) => { e.preventDefault(); drop.classList.add("over"); };
-    drop.ondragleave = () => drop.classList.remove("over");
-    drop.ondrop = (e) => { e.preventDefault(); drop.classList.remove("over"); upload(e.dataTransfer.files[0]); };
+    dropTarget(drop, upload);
     box.append(drop);
-    if (!p.voice) box.append(h("details.ae-regen", h("summary", "🎙 Ajouter une voix off IA à cette case"), voiceForm(c, v)));
     // musique de la page
     const ps = (c.project && c.project.pageSound) || {}, inst = C.inst();
     const replacePage = h("button.ae-btn", { on: { click: () => pickAudio(async (f) => {

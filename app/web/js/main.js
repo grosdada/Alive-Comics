@@ -308,7 +308,7 @@ class App {
     const a = panel.audio || {}, v = panel.voice || {}, parts = [];
     if (a.mode === "file") parts.push(a.name || "fichier");
     if (a.mode === "generate") parts.push((this.presets.audio.find(x => x.id === a.preset) || this.presets.audio[0]).label);
-    if (v.mode && v.mode !== "none") parts.push(v.mode === "tts" ? "voix off" : v.mode === "music" ? "2e musique" : (v.name || "2e son"));
+    if (v.mode && v.mode !== "none") parts.push(v.mode === "tts" ? "voix IA" : v.mode === "music" ? "2e musique" : "voix off " + (v.name || ""));
     if (panel.foley?.on) parts.push("bruitages");
     return parts.join(" + ") || "aucun";
   }
