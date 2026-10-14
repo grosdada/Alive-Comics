@@ -60,7 +60,7 @@ L'interface s'ouvre sur http://127.0.0.1:8790/. Il faut Python 3.10+ et ffmpeg d
    recalculer la vidéo :
    - **Boucle** : timeline avec la courbe de mouvement (rouge = temps mort), poignées de début et de fin,
      « ✂ Couper les temps morts », fondu au raccord, image de départ, sens (boucle / aller-retour), vitesse ;
-   - **Tremblé** : taille, fréquence, rotation, graine (« ⏸ Figer l'image » : le tremblé continue sur l'image fixe) ;
+   - **Tremblé** : taille, fréquence, rotation, graine, préréglages enregistrables ; toujours identique au début et à la fin de la boucle (« 🔁 Adaptive loop » cale la fréquence affichée sur la boucle) ; « ⏸ Figer l'image » : il continue sur l'image fixe ;
    - **Couleur** (saturation, luminosité, contraste, température, teinte ; « Appliquer à toute la page ») et **Cadrage** ;
    - **Son** : volume de chaque couche, régénérer avec une consigne, **ajouter un son** par-dessus, volume (ou
      import) de la musique de la page ;

@@ -197,6 +197,7 @@
     P.setFx(cur.st, clone(cur.fx));
     queue({ edit: true });
     drawTimeline();
+    if (cur.shakeInfo) cur.shakeInfo();
   }
   function editPayload(c) {
     const e = {};
@@ -463,6 +464,7 @@
       if (mode === "a") r[0] = Math.min(f, r[1] - 4); else r[1] = Math.max(f, r[0] + 4);
       cur.fx.range = r;
       P.setFx(st, clone(cur.fx));
+      if (cur.shakeInfo) cur.shakeInfo();
       P.seekTo(st, mode === "a" ? r[0] : Math.max(r[0], r[1] - 12));
       drawTimeline();
     };
@@ -529,6 +531,7 @@
     for (const b of cur.tabs.children) b.classList.toggle("on", b.dataset.tab === lastTab);
     const box = cur.tabBody;
     box.textContent = "";
+    cur.shakeInfo = null;
     ({ loop: tabLoop, shake: tabShake, color: tabColor, frame: tabFrame, sound: tabSound, regen: tabRegen })[lastTab](box);
   }
 
@@ -568,17 +571,39 @@
       { min: 0.25, max: 2, step: 0.05, neutral: 1, fmt: (v) => "× " + fmt(v) }));
   }
 
+  let userShakes = null;              // prereglages de tremble enregistres (pour toutes les planches)
+  async function loadUserShakes() {
+    if (!userShakes) userShakes = (await api("/api/userpresets")).shake || [];
+    return userShakes;
+  }
+
   function tabShake(box) {
+    const st = cur.st;
     const sh = () => cur.fx.shake || { size: 0, freq: 0.2, rot: 0, seed: 0 };
     const set = (k, v) => change("shake", (fx) => { fx.shake = Object.assign({}, sh(), { [k]: v }); });
-    box.append(h("div.ae-row", Object.entries(SHAKES).map(([k, s]) => h("button.ae-btn", { on: { click: () => {
-      change("shake", (fx) => { fx.shake = Object.assign({}, s, { seed: sh().seed || 0 }); });
+    const use = (p) => {                 // un prereglage garde la graine de la case
+      change("shake", (fx) => { fx.shake = { size: p.size, freq: p.freq, rot: p.rot, seed: sh().seed || 0 }; });
       renderTab();
-    } } }, SHAKE_NAMES[k]))));
+    };
+    box.append(h("div.ae-row", Object.entries(SHAKES).map(([k, p]) => h("button.ae-btn", { on: { click: () => use(p) } }, SHAKE_NAMES[k]))));
+    const mine = h("div.ae-row");
+    const fillMine = () => {
+      mine.textContent = "";
+      for (const p of userShakes || []) {
+        mine.append(h("span.ae-chip",
+          h("button.ae-btn", { title: `${fmt(p.size)} % · ${fmt(p.freq)} Hz · ${fmt(p.rot)}°`, on: { click: () => use(p) } }, "★ " + p.name),
+          h("button.ae-x", { title: "Supprimer ce préréglage", on: { click: async () => {
+            try { userShakes = (await api("/api/userpresets", { kind: "shake", name: p.name, delete: true })).shake; fillMine(); }
+            catch (e) { toast("⚠ " + e.message); }
+          } } }, "✕")));
+      }
+    };
+    box.append(mine);
+    loadUserShakes().then(fillMine).catch(() => {});
     box.append(slider("Taille", () => sh().size, (v) => set("size", v),
       { min: 0, max: 3, step: 0.05, neutral: 0, fmt: (v) => fmt(v) + " %" }));
     box.append(slider("Fréquence", () => sh().freq || 0.2, (v) => set("freq", v),
-      { min: 0.05, max: 4, log: true, fmt: (v) => fmt(v) + " Hz" }));
+      { min: 0.05, max: 4, log: true, fmt: (v) => fmt(v, 3) + " Hz" }));
     box.append(slider("Rotation", () => sh().rot, (v) => set("rot", v),
       { min: 0, max: 1.5, step: 0.01, neutral: 0, fmt: (v) => fmt(v) + "°" }));
     const seed = h("input.ae-num", { type: "number", min: 0, max: 99999, value: sh().seed || 0 });
@@ -587,7 +612,45 @@
       h("button.ae-btn", { title: "Autre graine : autre trajet du tremblé", on: { click: () => {
         seed.value = Math.floor(Math.random() * 10000); seed.onchange();
       } } }, "🎲")), h("span.ae-val")));
-    box.append(h("p.ae-note", "Le tremblé avance avec l'image. « ⏸ Figer l'image » : il continue sur l'image fixe, pour le juger."));
+    // boucle adaptative : le tremble fait un nombre entier de cycles entre le in et le out (toujours, en lecture) ;
+    // le bouton cale la frequence affichee sur celle qui est reellement jouee pour la boucle actuelle
+    const info = h("span.ae-note");
+    cur.shakeInfo = () => {
+      const i = P.shakeInfo(st);
+      info.textContent = i && (sh().size > 0 || sh().rot > 0)
+        ? `${i.cycles} cycle${i.cycles > 1 ? "s" : ""} sur la boucle de ${fmt(i.sec)} s, soit ${fmt(i.hz, 3)} Hz joués : raccord identique au in et au out`
+        : "aucun tremblé";
+    };
+    cur.shakeInfo();
+    box.append(h("div.ae-row",
+      h("button.ae-btn.ae-main", { title: "Adapter le tremblé aux points de boucle actuels (in / out) : la fréquence est calée sur " +
+                                     "un nombre entier de cycles, le tremblé est le même au début et à la fin de la boucle",
+                                   on: { click: () => {
+        const i = P.shakeInfo(st);
+        if (!i) { toast("Pas de tremblé sur cette case."); return; }
+        set("freq", Math.round(i.hz * 1000) / 1000);
+        renderTab();
+        toast(`Tremblé adapté à la boucle : ${i.cycles} cycle${i.cycles > 1 ? "s" : ""} en ${fmt(i.sec)} s.`);
+      } } }, "🔁 Adaptive loop"), info));
+    // enregistrer le reglage comme prereglage
+    const name = h("input.ae-txt", { placeholder: "nom du préréglage", maxLength: 40 });
+    const save = async () => {
+      const n = name.value.trim();
+      if (!n) { name.focus(); return; }
+      try {
+        userShakes = (await api("/api/userpresets", { kind: "shake", name: n, value: sh() })).shake;
+        name.value = "";
+        fillMine();
+        toast(`Préréglage « ${n} » enregistré : disponible dans toutes les pages.`);
+      } catch (e) { toast("⚠ " + e.message); }
+    };
+    name.addEventListener("keydown", (e) => { if (e.key === "Enter") save(); });
+    box.append(h("div.ae-row", name, h("button.ae-btn", { on: { click: save } }, "💾 Enregistrer le préréglage")));
+    box.append(h("div.ae-row", h("button.ae-btn", { title: "Même tremblé sur toutes les cases vidéo de la page ; chaque case garde " +
+                                                    "sa graine (elles ne tremblent pas ensemble)", on: { click: () => applyAll("shake") } },
+                                 "Appliquer à toute la page")));
+    box.append(h("p.ae-note", "Le tremblé suit l'image et revient au même point au raccord de la boucle. « ⏸ Figer l'image » : " +
+                 "il continue sur l'image fixe, pour le juger."));
   }
 
   function tabColor(box) {
@@ -606,24 +669,28 @@
     box.append(row("Teinte", "hue", -30, 30, 1, 0, (v) => (v > 0 ? "+" : "") + v + "°"));
     box.append(h("div.ae-row",
       h("button.ae-btn", { on: { click: () => { change("grade", (fx) => { delete fx.grade; }); renderTab(); } } }, "↺ Neutre"),
-      h("button.ae-btn", { title: "Mêmes couleurs pour toutes les cases vidéo de cette page", on: { click: gradeAll } },
+      h("button.ae-btn", { title: "Mêmes couleurs pour toutes les cases vidéo de cette page", on: { click: () => applyAll("grade") } },
         "Appliquer à toute la page")));
   }
 
-  async function gradeAll() {
-    const c = cur, inst = C.inst(), grade = clone(c.fx.grade);
-    const others = inst.panels.filter(s => s !== c.st);
-    status("couleurs : toute la page…");
+  // meme reglage (couleurs, tremble) sur toutes les cases video de la page
+  async function applyAll(key) {
+    const c = cur, inst = C.inst(), others = inst.panels.filter(x => x !== c.st);
+    let val = clone(c.fx[key]);
+    if (key === "shake" && !val) val = { size: 0, freq: 0.2, rot: 0, seed: 0 };      // « aucun » explicite
+    status(`${key === "shake" ? "tremblé" : "couleurs"} : toute la page…`);
     try {
       for (const st of others) {
+        const v = clone(val);
+        if (v && key === "shake") v.seed = ((st.p.fx || {}).shake || {}).seed ?? v.seed;   // chaque case sa graine
         const fx = clone(st.p.fx || {});
-        if (grade) fx.grade = clone(grade); else delete fx.grade;
+        if (v) fx[key] = v; else delete fx[key];
         P.setFx(st, fx);
         const edit = clone((c.project.panels[st.p.id] || {}).edit || {});
-        if (grade) edit.grade = clone(grade); else delete edit.grade;
+        if (v) edit[key] = clone(v); else delete edit[key];
         await saveEdit(c.i, st.p.id, { edit });
       }
-      if (cur === c) status(`✓ couleurs appliquées aux ${others.length + 1} cases`);
+      if (cur === c) status(`✓ appliqué aux ${others.length + 1} cases de la page`);
     } catch (e) { status("⚠ " + e.message, true); }
   }
 

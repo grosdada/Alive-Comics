@@ -60,3 +60,8 @@
 .ae-toast.off { opacity: 0; }
 .ae-banner { position: fixed; left: 50%; top: 64px; transform: translateX(-50%); z-index: 70; background: #f2b45c; color: #1b150c;
              padding: 6px 16px; border-radius: 999px; font: 600 13px/1.4 system-ui, sans-serif; }
+.ae-txt { flex: 1; min-width: 140px; font: inherit; color: #ece8e1; background: #121212; border: 1px solid #444; border-radius: 999px; padding: 4px 10px; }
+.ae-chip { display: inline-flex; align-items: center; }
+.ae-chip .ae-btn { border-radius: 999px 0 0 999px; border-right: 0; }
+.ae-x { font-size: 11px; padding: 4px 8px; border-radius: 0 999px 999px 0; color: #9a948a; }
+.ae-x:hover { color: #e8766f; }

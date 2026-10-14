@@ -19,7 +19,9 @@
  * Sons au survol : audio = ambiance en boucle ; voice = voix off (reprise du debut a chaque survol, ou
  * boucle) ; foley = bruitages, cales sur l'image affichee quand la case joue toute seule ; more = sons ajoutes.
  * fx (retouches, appliquees en direct, sans re-encoder la video) :
- *   shake {size % de la case, freq Hz, rot degres, seed} : tremble camera, qui avance quand l'image avance
+ *   shake {size % de la case, freq Hz, rot degres, seed} : tremble camera, fonction de la position dans la boucle :
+ *         un nombre ENTIER de cycles entre le debut et la fin de boucle (freq arrondie), donc meme tremble au
+ *         raccord quels que soient les reglages et les points de boucle ; il se fige avec l'image
  *   grade {sat, bright, contrast, temp -1..1, hue degres} ; frame {zoom, x, y} : cadrage dans la case
  *   range [debut, fin] : points de boucle ; xfade : images de fondu au point de boucle
  *   speed : vitesse ; bounce : aller-retour (true) / boucle (false) ; start : image de depart
@@ -105,7 +107,7 @@
     const wait = node("span", "ac-wait", el);
     wait.textContent = "chargement…";
     const st = { p, inst, el, dot, wait, gauge, pos: 0, vel: 0, drag: null, anim: null, views: [], dir: 1, base,
-                 resumeAt: 0, src: withStamp(base + p.video, inst.stamp), over: false, speed: 0, shT: 0, lastPos: 0,
+                 resumeAt: 0, src: withStamp(base + p.video, inst.stamp), over: false, speed: 0, shFree: 0, lastPos: 0,
                  pinned: false, freeze: false, freeShake: false, pinSound: false };
     configure(st);
     st.pos = st.lastPos = st.home;
@@ -175,14 +177,31 @@
     st.tint = t ? [t > 0 ? "rgb(255,138,40)" : "rgb(40,120,255)", Math.min(1, Math.abs(t) * 0.55)] : ["transparent", 0];
   }
 
+  // boucle du tremble : sa duree (secondes de video) et la phase 0..1 de l'image affichee
+  function shakeLoop(st) {
+    const n = st.loopMode ? st.period : Math.max(1, st.b - st.a);
+    const u = (frac(st) - (st.loopMode ? st.lo : st.a)) / n + st.shFree;
+    return { sec: n / st.inst.fps, u };
+  }
+  // nombres de cycles par boucle : entiers (raccord parfait), croissants, au plus pres de la frequence demandee
+  function shakeCycles(sh, sec) {
+    const f = sh.freq || 0.2;
+    const k = (ratios) => {
+      const out = [];
+      for (const r of ratios) out.push(Math.max(out.length ? out[out.length - 1] + 1 : 1, Math.round(r * f * sec)));
+      return out;
+    };
+    return { x: k([1, 2.13, 3.71]), y: k([1.07, 1.93, 3.29]), r: k([0.83, 1.71]) };
+  }
+
   function transformOf(st) {
     const fx = st.p.fx || {}, sh = fx.shake, fr = fx.frame;
     let s = 1, dx = 0, dy = 0, rot = 0;
     if (sh && (sh.size > 0 || sh.rot > 0)) {
-      const w = 2 * Math.PI * (sh.freq || 0.2) * st.shT, ph = st.phases, a = sh.size || 0;
-      dx = a * (0.62 * Math.sin(w + ph[0]) + 0.28 * Math.sin(2.13 * w + ph[1]) + 0.10 * Math.sin(3.71 * w + ph[2]));
-      dy = a * (0.62 * Math.sin(1.07 * w + ph[3]) + 0.28 * Math.sin(1.93 * w + ph[4]) + 0.10 * Math.sin(3.29 * w + ph[5]));
-      rot = (sh.rot || 0) * (0.7 * Math.sin(0.83 * w + ph[6]) + 0.3 * Math.sin(1.71 * w + ph[7]));
+      const L = shakeLoop(st), K = shakeCycles(sh, L.sec), w = 2 * Math.PI * L.u, ph = st.phases, a = sh.size || 0;
+      dx = a * (0.62 * Math.sin(K.x[0] * w + ph[0]) + 0.28 * Math.sin(K.x[1] * w + ph[1]) + 0.10 * Math.sin(K.x[2] * w + ph[2]));
+      dy = a * (0.62 * Math.sin(K.y[0] * w + ph[3]) + 0.28 * Math.sin(K.y[1] * w + ph[4]) + 0.10 * Math.sin(K.y[2] * w + ph[5]));
+      rot = (sh.rot || 0) * (0.7 * Math.sin(K.r[0] * w + ph[6]) + 0.3 * Math.sin(K.r[1] * w + ph[7]));
       const th = (sh.rot || 0) * Math.PI / 180;
       s = (Math.cos(th) + st.aspect * Math.sin(th)) * (1 + 2 * a / 100);
     }
@@ -333,7 +352,8 @@
 
   function step(st, now, dt) {
     const fps = st.inst.fps;
-    if (st.freeShake) st.shT += dt;             // editeur : le tremble vit meme sur une image fixe
+    // editeur : le tremble vit meme sur une image fixe (il parcourt sa boucle en temps reel)
+    if (st.freeShake) st.shFree += dt / Math.max(0.2, shakeLoop(st).sec); else st.shFree = 0;
     if (st.anim) {
       const t = Math.min(1, (now - st.anim.t0) / 600), k = 1 - Math.pow(1 - t, 3);
       st.pos = st.anim.from + (st.home - st.anim.from) * k;
@@ -363,10 +383,6 @@
 
   function render(st) {
     const f = frac(st), idx = idxOf(st);
-    if (!st.anim) {                             // le tremble avance avec l'image (et se fige avec elle)
-      const moved = Math.abs(st.pos - st.lastPos);
-      if (moved < st.p.frames) st.shT += moved / st.inst.fps;
-    }
     st.lastPos = st.pos;
     applyFx(st);
     if (st.hover) for (const L of st.layers || []) if (L.mode === "sync") syncLayer(st, L, false);
@@ -618,5 +634,12 @@
 
   window.AlivePlayer = { isUnlocked: () => unlocked, mount, setBW, setSound, resetAll, hasAudio, isLightboxOpen: () => !!lb.st,
                          setEditHook, addView, removeView, setFx, updatePanel, setLayerVolume, setGlobalVolume, seekTo,
-                         setPinned, setPanelSound, frameOf: idxOf, _pages: pages };
+                         setPinned, setPanelSound, frameOf: idxOf, _pages: pages,
+                         // tremble d'une case : cycles par boucle et frequence reellement jouee
+                         shakeInfo(st) {
+                           const sh = (st.p.fx || {}).shake;
+                           if (!sh) return null;
+                           const L = shakeLoop(st), c = shakeCycles(sh, L.sec).x[0];
+                           return { cycles: c, sec: L.sec, hz: c / L.sec };
+                         } };
 })();

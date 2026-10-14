@@ -406,7 +406,13 @@ suit est appliqué <b>par le lecteur, en direct</b> : aucun ré-encodage, réver
 {retouches}
 <ul>
 <li>Repères du tremblé : léger {{size 0.4, freq 0.2, rot 0.046}}, moyen {{0.8, 0.2, 0.092}}, fort {{1.3, 0.2, 0.143}},
-nerveux {{0.9, 1.1, 0.2}}. Le tremblé avance avec l'image (il se fige quand la case se fige).</li>
+nerveux {{0.9, 1.1, 0.2}}. Le tremblé suit l'image (il se fige quand la case se fige).</li>
+<li><b>Raccord garanti</b> : le tremblé est calculé sur la position dans la boucle, avec un nombre <b>entier</b> de cycles
+entre le début et la fin ({code("freq")} est arrondie à la boucle). Il est donc identique au in et au out, quels que soient
+les réglages et les points de boucle. Le bouton « Adaptive loop » de l'éditeur cale {code("freq")} sur la valeur jouée.</li>
+<li>Préréglages de tremblé de David (toutes planches) : {code("GET /api/userpresets")} ->
+{code('{"shake": [{"name", "size", "freq", "rot"}]}')} ; {code('POST /api/userpresets {"kind": "shake", "name", "value"}')}
+(ou {code('"delete": true')}). Un préréglage ne garde pas la graine : chaque case garde la sienne.</li>
 <li>Depuis le 15/10/2026, le tremblé n'est plus incrusté dans la vidéo à l'export : les vidéos sont ré-encodées une fois sans
 lui, puis le lecteur l'applique.</li>
 <li>Un temps mort (image immobile) en fin de vidéo casse la boucle : {code("range")} + {code("xfade")} 6 le corrige sans rendu.</li>

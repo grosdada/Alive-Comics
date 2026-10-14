@@ -277,6 +277,11 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json({"public_key": publish.ensure_key()})
             if parts[1:] == ["test"] and m == "POST":
                 return self.send_json({"ok": publish.test()})
+        if head == "userpresets":                    # prereglages de l'utilisateur (tremble), pour toutes les planches
+            if m == "GET":
+                return self.send_json(edit.user_presets())
+            if m == "POST":
+                return self.send_json(edit.save_user_preset(self.jbody()))
         if head == "books":
             return self.books(m, parts, q)
         if head == "projects":

@@ -10,12 +10,40 @@ Ce qui est applique par le lecteur, en direct et sans re-encoder (panel["edit"])
 Plus : volumes des sons, sons ajoutes (extraSounds), regeneration de la video ou d'un son avec une consigne.
 """
 
+import json
 import secrets
 import time
+from pathlib import Path
 
 from . import jobs, llm, presets, settings, store
 
 GRADE = {"sat": (0, 3, 1), "bright": (0.3, 2, 1), "contrast": (0.3, 2, 1), "temp": (-1, 1, 0), "hue": (-180, 180, 0)}
+USER_PRESETS = Path(__file__).resolve().parent.parent / "data" / "user_presets.json"
+
+
+def user_presets():
+    """Prereglages enregistres par l'utilisateur (pour toutes les planches) : {"shake": [{name, size, freq, rot}]}."""
+    try:
+        return json.loads(USER_PRESETS.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {"shake": []}
+
+
+def save_user_preset(b):
+    """b : {kind: "shake", name, value: {size, freq, rot}} ; ou {kind, name, delete: true}. -> tous les prereglages.
+    La graine n'est pas gardee : chaque case garde la sienne (sinon toutes les cases trembleraient ensemble)."""
+    kind, name = b.get("kind"), (b.get("name") or "").strip()[:40]
+    if kind != "shake" or not name:
+        raise ValueError("préréglage : kind « shake » et un nom")
+    allp = user_presets()
+    lst = [x for x in allp.get(kind, []) if x.get("name") != name]
+    if not b.get("delete"):
+        sh = clean({"shake": b.get("value") or {}}).get("shake") or {}
+        lst.append({"name": name, "size": sh.get("size", 0), "freq": sh.get("freq", 0.2), "rot": sh.get("rot", 0)})
+    allp[kind] = lst
+    USER_PRESETS.parent.mkdir(exist_ok=True)
+    USER_PRESETS.write_text(json.dumps(allp, indent=1, ensure_ascii=False), encoding="utf-8")
+    return allp
 
 
 def _num(v, lo, hi, default):
