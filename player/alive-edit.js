@@ -100,7 +100,9 @@
       const encoded = new Set(res.encoded || []);
       if (encoded.size || opts.sounds || opts.video) pg.stamp = stamp;      // fichiers changes : anti-cache
       if (cur && cur.pid === pid) { cur.project = res.project; cur.panel = res.project.panels[cur.id] || {}; }
-      if (i !== C.cur() || opts.noApply) return Object.assign(res, { changed: JSON.stringify(old) !== JSON.stringify(res.page) });
+      if (i !== C.cur() || opts.noApply) {
+        return Object.assign(res, { changed: encoded.size > 0 || JSON.stringify(old) !== JSON.stringify(res.page) });
+      }
       const inst = C.inst();
       let remount = false;
       for (const e of res.page.panels) {
