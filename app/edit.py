@@ -7,6 +7,7 @@ Ce qui est applique par le lecteur, en direct et sans re-encoder (panel["edit"])
   range  [debut, fin] (images)                             points de boucle
   xfade  images de fondu au point de boucle
   speed  vitesse de lecture ; bounce : aller-retour (True) / boucle (False) ; start : image de depart
+  ease   {head, tail, gain} : les ralentis du debut et de la fin de boucle (H3 freine pour boucler) joues plus vite
 Plus : volumes des sons, sons ajoutes (extraSounds), regeneration de la video ou d'un son avec une consigne.
 """
 
@@ -82,6 +83,11 @@ def clean(e):
         a, b = int(_num(r[0], 0, 100000, 0)), int(_num(r[1], 0, 100000, 0))
         if b > a + 1:
             out["range"] = [a, b]
+    ez = e.get("ease")                           # ralentis du debut / de la fin de boucle joues plus vite
+    if isinstance(ez, dict):
+        head, tail, gain = int(_num(ez.get("head"), 0, 60, 0)), int(_num(ez.get("tail"), 0, 60, 0)), _num(ez.get("gain"), 1, 5, 1)
+        if gain > 1.01 and (head or tail):
+            out["ease"] = {"head": head, "tail": tail, "gain": round(gain, 2)}
     xf = int(_num(e.get("xfade"), 0, 48, 0))
     if xf:
         out["xfade"] = xf

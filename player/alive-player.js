@@ -25,6 +25,8 @@
  *   grade {sat, bright, contrast, temp -1..1, hue degres} ; frame {zoom, x, y} : cadrage dans la case
  *   range [debut, fin] : points de boucle ; xfade : images de fondu au point de boucle
  *   speed : vitesse ; bounce : aller-retour (true) / boucle (false) ; start : image de depart
+ *   ease {head, tail, gain} : H3 freine au debut et a la fin de chaque boucle (pour retomber sur la 1re image) ;
+ *         ces images-la sont jouees gain fois plus vite (rampe douce), sans couper : la boucle reste parfaite
  *
  * API : AlivePlayer.mount(conteneur, donnees, { base: "pages/p1/", gauge: false, stamp }) -> { destroy(), reset() }
  *       (gauge : affiche la tete de lecture au survol ; cachee par defaut ; stamp : anti-cache des fichiers)
@@ -152,9 +154,19 @@
     st.lo = a + st.xf;
     st.period = Math.max(1, b - st.lo);
     st.rate = fx.speed > 0 ? fx.speed : 1;
+    const ez = fx.ease;
+    st.ease = ez && ez.gain > 1 && (ez.head > 0 || ez.tail > 0) ? { head: ez.head | 0, tail: ez.tail | 0, gain: +ez.gain } : null;
     const h = fx.start != null ? fx.start : (p.center || 0);
     st.home = st.loopMode ? (h >= st.lo && h < b ? h : st.lo) : Math.max(a, Math.min(b, h));
     if (!st.loopMode) st.pos = Math.max(a, Math.min(b, st.pos));
+    // ralentis acceleres : temps joue cumule image par image (le tremble suit le temps, pas les images)
+    st.tmap = null;
+    if (st.ease) {
+      const s0 = st.loopMode ? st.lo : st.a, n0 = st.loopMode ? st.period : Math.max(1, st.b - st.a);
+      const t = new Float32Array(n0 + 1);
+      for (let i = 0; i < n0; i++) t[i + 1] = t[i] + 1 / easeK(st, s0 + i + 0.5);
+      st.tmap = t;
+    }
     // tremble : phases tirees de la graine ; marge de zoom pour ne jamais montrer les bords
     const r = (p.rect[2] - p.rect[0]) / Math.max(1, p.rect[3] - p.rect[1]);
     st.aspect = Math.max(r, 1 / r);
@@ -177,11 +189,26 @@
     st.tint = t ? [t > 0 ? "rgb(255,138,40)" : "rgb(40,120,255)", Math.min(1, Math.abs(t) * 0.55)] : ["transparent", 0];
   }
 
-  // boucle du tremble : sa duree (secondes de video) et la phase 0..1 de l'image affichee
+  // vitesse de lecture a la position f : x gain dans les ralentis du debut et de la fin (rampe douce)
+  function easeK(st, f) {
+    const e = st.ease;
+    if (!e) return 1;
+    const s0 = st.loopMode ? st.lo : st.a, sm = (x) => x * x * (3 - 2 * x);
+    let k = 1;
+    if (e.head && f - s0 < e.head) k = Math.max(k, e.gain + (1 - e.gain) * sm(Math.max(0, (f - s0) / e.head)));
+    if (e.tail && st.b - f < e.tail) k = Math.max(k, e.gain + (1 - e.gain) * sm(Math.max(0, (st.b - f) / e.tail)));
+    return k;
+  }
+
+  // boucle du tremble : sa duree (secondes jouees) et la phase 0..1 de l'image affichee
   function shakeLoop(st) {
     const n = st.loopMode ? st.period : Math.max(1, st.b - st.a);
-    const u = (frac(st) - (st.loopMode ? st.lo : st.a)) / n + st.shFree;
-    return { sec: n / st.inst.fps, u };
+    const x = frac(st) - (st.loopMode ? st.lo : st.a);
+    if (st.tmap) {
+      const t = st.tmap, i = Math.max(0, Math.min(n - 1, Math.floor(x))), w = Math.max(0, Math.min(1, x - i));
+      return { sec: t[n] / st.inst.fps, u: (t[i] + (t[i + 1] - t[i]) * w) / t[n] + st.shFree };
+    }
+    return { sec: n / st.inst.fps, u: x / n + st.shFree };
   }
   // nombres de cycles par boucle : entiers (raccord parfait), croissants, au plus pres de la frequence demandee
   function shakeCycles(sh, sec) {
@@ -370,7 +397,7 @@
       const active = !st.freeze && (st.inst.play === "always" || st.over || lb.st === st || st.pinned);
       st.speed += ((active ? 1 : 0) - st.speed) * Math.min(1, dt * (active ? 3 : 2.2));
       if ((st.speed < 0.004 && !active) || st.freeze) st.speed = 0;     // editeur : « figer l'image » = arret net
-      const stp = fps * dt * st.speed * st.rate;
+      const stp = fps * dt * st.speed * st.rate * easeK(st, frac(st));
       if (st.loopMode) st.pos += stp;
       else {
         st.pos += st.dir * stp;
@@ -603,6 +630,21 @@
     L.vol = Math.max(0, Math.min(1, vol));
     if (st.hover && soundOn) fade(L, L.vol);
   }
+  // son global remplace (ou retire) : fondu de sortie de l'ancien, le nouveau prend sa place
+  function setPageSound(inst, snd, stamp) {
+    if (inst.global) {
+      const g = inst.global;
+      fade(g, 0);
+      setTimeout(() => { g.a.pause(); g.a.src = ""; }, 900);
+      inst.global = null;
+    }
+    inst.data.sound = snd || undefined;
+    if (!snd) return;
+    const a = new Audio(withStamp(inst.base + snd.src, stamp));
+    a.loop = true; a.volume = 0; a.preload = "auto";
+    inst.global = { a, vol: Math.max(0, Math.min(1, snd.vol ?? 0.7)), timer: null, mode: "loop" };
+    if (unlocked && soundOn) startGlobal(inst);
+  }
   function setGlobalVolume(inst, vol) {
     if (!inst.global) return;
     inst.global.vol = Math.max(0, Math.min(1, vol));
@@ -634,12 +676,13 @@
 
   window.AlivePlayer = { isUnlocked: () => unlocked, mount, setBW, setSound, resetAll, hasAudio, isLightboxOpen: () => !!lb.st,
                          setEditHook, addView, removeView, setFx, updatePanel, setLayerVolume, setGlobalVolume, seekTo,
-                         setPinned, setPanelSound, frameOf: idxOf, _pages: pages,
+                         setPinned, setPanelSound, setPageSound, frameOf: idxOf, _pages: pages,
                          // tremble d'une case : cycles par boucle et frequence reellement jouee
                          shakeInfo(st) {
                            const sh = (st.p.fx || {}).shake;
                            if (!sh) return null;
                            const L = shakeLoop(st), c = shakeCycles(sh, L.sec).x[0];
                            return { cycles: c, sec: L.sec, hz: c / L.sec };
-                         } };
+                         },
+                         speedAt: (st, f) => easeK(st, f) };
 })();

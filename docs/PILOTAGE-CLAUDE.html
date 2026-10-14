@@ -419,7 +419,8 @@ suit est appliqué <b>par le lecteur, en direct</b> : aucun ré-encodage, réver
 <tr><td>xfade</td><td>nombre d'images (0 à 24)</td><td>fondu au point de boucle (raccord invisible après une coupe)</td></tr>
 <tr><td>speed</td><td>0,25 à 2</td><td>vitesse de lecture</td></tr>
 <tr><td>bounce</td><td>true / false</td><td>aller-retour ou boucle vers l'avant</td></tr>
-<tr><td>start</td><td>image</td><td>image de départ et de « Vue initiale »</td></tr></table></div>
+<tr><td>start</td><td>image</td><td>image de départ et de « Vue initiale »</td></tr>
+<tr><td>ease</td><td>{head, tail : images, gain : 1,5 à 3}</td><td>H3 freine au début et à la fin de chaque boucle (pour retomber sur la 1re image) : ces images sont jouées plus vite, sans couper</td></tr></table></div>
 <ul>
 <li>Repères du tremblé : léger {size 0.4, freq 0.2, rot 0.046}, moyen {0.8, 0.2, 0.092}, fort {1.3, 0.2, 0.143},
 nerveux {0.9, 1.1, 0.2}. Le tremblé suit l'image (il se fige quand la case se fige).</li>
@@ -435,9 +436,15 @@ ou <code>&quot;redo&quot;</code>), réglable par <code>POST /edit/&lt;case&gt; {
 un livre, commence par les cases <code>&quot;redo&quot;</code> et ne touche pas aux <code>&quot;ok&quot;</code>.</li>
 <li>Depuis le 15/10/2026, le tremblé n'est plus incrusté dans la vidéo à l'export : les vidéos sont ré-encodées une fois sans
 lui, puis le lecteur l'applique.</li>
-<li>Un temps mort (image immobile) en fin de vidéo casse la boucle : <code>range</code> + <code>xfade</code> 6 le corrige sans rendu.</li>
+<li>Le « fixe » qui casse une boucle est un <b>ralenti</b> : H3 freine sur les 10 à 20 dernières images (et les premières) pour
+retomber sur l'image de départ. <code>&quot;ease&quot;: {&quot;head&quot;: 8, &quot;tail&quot;: 16, &quot;gain&quot;: 2}</code> les joue plus vite, sans couper : la boucle reste
+parfaite. (Couper avec <code>range</code> + <code>xfade</code> reste possible, mais le raccord se voit davantage.)</li>
 <li>Sons : <code>volumes</code> règle les couches existantes, <code>/sound?layer=extra</code> ajoute un son par-dessus, <code>pageVolume</code>
 règle la musique de la page.</li>
+<li><b>Pas de son en double</b> : tout import de son (<code>/upload?kind=audio|voice|page</code>, <code>/panels/&lt;case&gt;/sound</code>) est
+reconnu par son contenu. S'il sert déjà dans une planche, la réponse est <code>409</code> avec <code>{&quot;duplicate&quot;: true, &quot;used&quot;: [{&quot;where&quot;: …}]}</code> :
+ne force (<code>&amp;force=1</code>) que si la réutilisation est voulue (ex. même musique sur tout un livre). S'il a déjà été importé sans
+servir, le fichier existant est repris (<code>&quot;reused&quot;: true</code>).</li>
 </ul></section>
 
 <section id="publier"><h2><span class="n">10</span>Exporter, publier, livres</h2>

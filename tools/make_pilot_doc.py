@@ -61,6 +61,7 @@ retouches = table(["Clé de edit", "Valeur", "Effet"], [
     ["speed", "0,25 à 2", "vitesse de lecture"],
     ["bounce", "true / false", "aller-retour ou boucle vers l'avant"],
     ["start", "image", "image de départ et de « Vue initiale »"],
+    ["ease", "{head, tail : images, gain : 1,5 à 3}", "H3 freine au début et à la fin de chaque boucle (pour retomber sur la 1re image) : ces images sont jouées plus vite, sans couper"],
 ])
 
 PAGE = f"""<!doctype html>
@@ -419,9 +420,15 @@ ou {code('"redo"')}), réglable par {code('POST /edit/<case> {"review": "redo"}'
 un livre, commence par les cases {code('"redo"')} et ne touche pas aux {code('"ok"')}.</li>
 <li>Depuis le 15/10/2026, le tremblé n'est plus incrusté dans la vidéo à l'export : les vidéos sont ré-encodées une fois sans
 lui, puis le lecteur l'applique.</li>
-<li>Un temps mort (image immobile) en fin de vidéo casse la boucle : {code("range")} + {code("xfade")} 6 le corrige sans rendu.</li>
+<li>Le « fixe » qui casse une boucle est un <b>ralenti</b> : H3 freine sur les 10 à 20 dernières images (et les premières) pour
+retomber sur l'image de départ. {code('"ease": {"head": 8, "tail": 16, "gain": 2}')} les joue plus vite, sans couper : la boucle reste
+parfaite. (Couper avec {code("range")} + {code("xfade")} reste possible, mais le raccord se voit davantage.)</li>
 <li>Sons : {code("volumes")} règle les couches existantes, {code("/sound?layer=extra")} ajoute un son par-dessus, {code("pageVolume")}
 règle la musique de la page.</li>
+<li><b>Pas de son en double</b> : tout import de son ({code("/upload?kind=audio|voice|page")}, {code("/panels/<case>/sound")}) est
+reconnu par son contenu. S'il sert déjà dans une planche, la réponse est {code("409")} avec {code('{"duplicate": true, "used": [{"where": …}]}')} :
+ne force ({code("&force=1")}) que si la réutilisation est voulue (ex. même musique sur tout un livre). S'il a déjà été importé sans
+servir, le fichier existant est repris ({code('"reused": true')}).</li>
 </ul></section>
 
 <section id="publier"><h2><span class="n">10</span>Exporter, publier, livres</h2>

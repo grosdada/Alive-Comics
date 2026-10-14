@@ -3,9 +3,10 @@
  * Charge par book.html seulement quand la page est servie par l'application (jamais en ligne).
  * « ✏️ Éditer » puis clic sur une case : un popup de retouche, avec un apercu agrandi de la case.
  *   - timeline : points de boucle (debut / fin), image de depart, fondu au point de boucle, vitesse, sens,
- *     courbe de mouvement (les temps morts en rouge) et « couper les temps morts » ;
+ *     courbe de mouvement (les ralentis en rouge) et « lisser la boucle » (ralentis du debut et de la fin acceleres) ;
  *   - tremble (taille, frequence, rotation, graine), couleurs, cadrage : appliques en direct par le lecteur ;
- *   - sons : volumes, regenerer avec une consigne, ajouter un son, musique de la page ;
+ *   - sons : volumes, remplacer, regenerer, voix off IA, ajouter un son, musique de la page (un son deja utilise
+ *     ailleurs declenche une alerte avec les references ; un son deja importe n'est jamais copie deux fois) ;
  *   - regenerer la sequence : consigne en francais (l'IA reecrit le prompt), meme graine ou non, versions.
  * Tout est enregistre au fil de l'eau dans le projet (panel.edit...) et l'export est remis a jour (rapide).
  */
@@ -13,7 +14,7 @@
   "use strict";
   const C = window.AliveBookCtl, P = window.AlivePlayer;
   if (!C || !P) return;
-  const KEYS = ["shake", "grade", "frame", "range", "xfade", "speed", "bounce", "start"];
+  const KEYS = ["shake", "grade", "frame", "range", "xfade", "speed", "bounce", "start", "ease"];
   const SHAKES = {
     aucun: { size: 0, freq: 0.2, rot: 0 }, leger: { size: 0.4, freq: 0.2, rot: 0.046 },
     moyen: { size: 0.8, freq: 0.2, rot: 0.092 }, fort: { size: 1.3, freq: 0.2, rot: 0.143 },
@@ -92,7 +93,8 @@
     opts = opts || {};
     const run = async () => {
       const pid = await projectOf(i);
-      const res = await api(`/api/projects/${pid}/edit/${panelId}`, Object.assign({}, body, C.kind === "book" ? { book: C.id } : {}));
+      const payload = Object.keys(body).length ? body : { refresh: 1 };      // corps vide = remonter l'export
+      const res = await api(`/api/projects/${pid}/edit/${panelId}`, Object.assign({}, payload, C.kind === "book" ? { book: C.id } : {}));
       projects.set(pid, res.project);
       const pg = C.B.pages[i], old = pg.data;
       pg.data = res.page;
@@ -112,7 +114,7 @@
         if (!st || !e.video) { remount = remount || !!e.video; continue; }
         P.updatePanel(st, e, stamp, !video);
         if (cur && cur.st === st) {
-          if (video) { delete cur.fx.range; delete cur.fx.start; delete cur.fx.xfade; }
+          if (video) { delete cur.fx.range; delete cur.fx.start; delete cur.fx.xfade; delete cur.fx.ease; }
           P.setFx(st, clone(cur.fx));
           if (video) loadTimeline();
           if (sounds) renderTab();
@@ -253,8 +255,29 @@
     }
   }
   document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && cur && !e.target.closest("input, textarea, select")) close();
-  });
+    const t = e.target instanceof Element ? e.target : document.body;
+    if (e.key === "Escape" && cur && !t.closest("input, textarea, select")) close();
+    // barre espace : lecture / pause de la case ouverte (sauf en tapant du texte)
+    if (e.code === "Space" && cur && cur.togglePlay && !t.closest("textarea, select, input:not([type=range]):not([type=checkbox])")) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (document.activeElement && document.activeElement.closest(".ae-pop button")) document.activeElement.blur();
+      cur.togglePlay();
+    }
+  }, true);
+
+  // retour a l'accueil de l'application, et la planche affichee dans l'application
+  (function nav() {
+    const header = document.querySelector("header");
+    if (!header) return;
+    const home = h("a.ae-nav", { href: "/", title: "Accueil de l'application (planches et livres)" }, "🏠 Accueil");
+    const open = h("a.ae-nav", { href: "/", title: "Ouvrir cette planche dans l'application" }, "✎ Planche");
+    header.insertBefore(open, header.firstChild);
+    header.insertBefore(home, open);
+    const upd = () => projectOf(C.cur()).then((pid) => { if (pid) open.href = "/#p=" + pid; }).catch(() => {});
+    document.addEventListener("alive-page", upd);
+    upd();
+  })();
 
   async function pick(st) {
     if (st.static) { toast("Image fixe : cette case n'a pas de vidéo (lui donner une action dans l'application)."); return; }
@@ -360,23 +383,23 @@
     const dot = h("button.ae-dot.ae-dot-head", { type: "button", dataset: { panel: p.id } });
     paintDot(dot, reviewOf(cur.pid, p.id));
     dot.addEventListener("click", () => reviewMenu(dot, cur.i, cur.pid, p.id));
-    const head = h("div.ae-head", dot, h("b", `Case ${p.id}`), h("span.ae-sub", pg.title || ""), h("span.ae-sp"), sndBtn,
+    const bigBtn = h("button.ae-ib", { title: "Agrandir / réduire la fenêtre (on peut aussi tirer le coin en bas à droite)" }, "⤢");
+    const head = h("div.ae-head", dot, h("b", `Case ${p.id}`), h("span.ae-sub", pg.title || ""), h("span.ae-sp"), bigBtn, sndBtn,
                    h("button.ae-ib", { title: "Fermer (Échap)", on: { click: close } }, "✕"));
-    // apercu agrandi : une vue de plus sur la case, avec les memes retouches
-    const W = 432, ar = (p.rect[2] - p.rect[0]) / Math.max(1, p.rect[3] - p.rect[1]);
-    let ph = Math.min(250, W / ar), pw = ph * ar;
-    if (pw > W) { pw = W; ph = W / ar; }
-    const stage = h("div.ac-view.ae-stage", { style: { width: pw + "px", height: ph + "px" } });
+    // apercu agrandi : une vue de plus sur la case, avec les memes retouches ; il suit la taille de la fenetre
+    const ar = (p.rect[2] - p.rect[0]) / Math.max(1, p.rect[3] - p.rect[1]);
+    const stage = h("div.ac-view.ae-stage");
     cur.view = P.addView(st, stage);
-    const playBtn = h("button.ae-btn", { title: "Figer l'image : le tremblé continue, pour le juger sur une image fixe" });
+    const playBtn = h("button.ae-btn", { title: "Lecture / pause (barre espace) : en pause, le tremblé continue sur l'image fixe" });
     const syncPlay = () => {
       st.freeze = !cur.playing; st.freeShake = !cur.playing;
-      playBtn.textContent = cur.playing ? "⏸ Figer l'image" : "▶ Lecture";
+      playBtn.textContent = cur.playing ? "⏸ Pause (espace)" : "▶ Lecture (espace)";
     };
-    playBtn.onclick = () => { cur.playing = !cur.playing; syncPlay(); };
+    cur.togglePlay = () => { cur.playing = !cur.playing; syncPlay(); };
+    playBtn.onclick = cur.togglePlay;
     syncPlay();
     const info = h("span.ae-info");
-    const canvas = h("canvas.ae-tl", { width: W * 2, height: 150 });
+    const canvas = h("canvas.ae-tl", { width: 864, height: 150 });
     canvas.style.width = "100%"; canvas.style.height = "75px";
     const tabs = h("div.ae-tabs");
     const tabBody = h("div.ae-tab");
@@ -391,6 +414,46 @@
             h("div.ae-body", h("div.ae-stagebox", stage), h("div.ae-row", playBtn, info), canvas, tabs, tabBody), foot);
     document.body.append(pop);
     Object.assign(cur, { canvas, info, tabBody, tabs });
+    try {                                   // derniere taille choisie
+      const sz = JSON.parse(localStorage.getItem("ae-size") || "null");
+      if (sz) { pop.style.width = Math.min(sz[0], innerWidth - 16) + "px"; pop.style.height = Math.min(sz[1], innerHeight - 24) + "px"; }
+    } catch (_) { /* stockage indisponible */ }
+    const fitStage = () => {
+      if (!pop) return;
+      const body = pop.querySelector(".ae-body");
+      const W = Math.max(200, body.clientWidth - 30);
+      const H = pop.style.height ? Math.max(160, pop.clientHeight * 0.46) : 250;
+      let ph = Math.min(H, W / ar), pw = ph * ar;
+      if (pw > W) { pw = W; ph = W / ar; }
+      stage.style.width = pw + "px"; stage.style.height = ph + "px";
+    };
+    fitStage();
+    const me = pop;
+    let saveT = null;
+    new ResizeObserver(() => {
+      if (pop !== me) return;
+      fitStage();
+      clearTimeout(saveT);
+      saveT = setTimeout(() => {
+        try {
+          if (pop && pop.style.width) localStorage.setItem("ae-size", JSON.stringify([pop.offsetWidth, pop.offsetHeight]));
+        } catch (_) { /* stockage indisponible */ }
+      }, 400);
+    }).observe(pop);
+    bigBtn.onclick = () => {
+      if (pop.style.width && pop.offsetWidth > 700) {
+        pop.style.width = pop.style.height = "";
+        try { localStorage.removeItem("ae-size"); } catch (_) { /* rien */ }
+      } else {
+        const w = Math.min(1000, innerWidth - 24);
+        pop.style.width = w + "px";
+        pop.style.left = Math.max(12, Math.min(pop.offsetLeft, innerWidth - w - 12)) + "px";
+        pop.style.top = "56px";
+        pop.style.height = (innerHeight - 68) + "px";
+        pop.style.maxHeight = "";
+      }
+      fitStage();
+    };
     placePop(head);
     bindTimeline(canvas);
     loadTimeline();
@@ -410,7 +473,7 @@
 
   function placePop(head) {
     const r = cur.st.el.getBoundingClientRect();
-    const w = Math.min(460, innerWidth - 16);
+    const w = pop.offsetWidth || Math.min(460, innerWidth - 16);
     let x = r.left + r.width / 2 > innerWidth / 2 ? 12 : innerWidth - w - 12;
     let y = 64;
     if (userPos) { x = userPos[0]; y = userPos[1]; }
@@ -478,9 +541,17 @@
     }
     motion[0] = n > 1 ? motion[1] : 0;
     v.removeAttribute("src"); v.load();
-    const sorted = Array.from(motion).sort((a, b) => a - b);
-    const med = sorted[Math.floor(sorted.length / 2)] || 0;
-    const res = { thumbs, motion, n, thr: Math.max(0.15, med * 0.15), max: sorted[Math.floor(sorted.length * 0.95)] || 1 };
+    // activite lissee (5 images) : H3 freine au debut et a la fin de chaque boucle pour retomber sur la 1re image
+    const act = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      let sum = 0, k = 0;
+      for (let j = Math.max(1, i - 2); j <= Math.min(n - 1, i + 2); j++) { sum += motion[j]; k++; }
+      act[i] = k ? sum / k : motion[i];
+    }
+    const sa = Array.from(act).sort((a, b) => a - b), q = (x) => sa[Math.min(sa.length - 1, Math.floor(sa.length * x))] || 0;
+    const floor = q(0.1), ref = q(0.5);
+    const res = { thumbs, motion, act, n, floor, ref, slow: floor + 0.35 * (ref - floor),
+                  max: Array.from(motion).sort((a, b) => a - b)[Math.floor(n * 0.95)] || 1 };
     analyses.set(key, res);
     return res;
   }
@@ -516,9 +587,9 @@
         g.drawImage(t.c, (sx - w) / 2, (sy - hh) / 2, w, hh, PAD + k * cw, top, cw - 2, Hs);
       });
       const y0 = top + Hs + 4;
-      for (let i = 0; i < n; i++) {           // courbe de mouvement : rouge = temps mort
+      for (let i = 0; i < n; i++) {           // courbe de mouvement : rouge = ralenti (presque immobile)
         const v = a.motion[i], hh = Math.max(1.5, Math.min(1, v / a.max) * Hm);
-        g.fillStyle = v < a.thr ? "#d9534f" : "#6f9b6a";
+        g.fillStyle = a.act[i] < a.slow ? "#d9534f" : "#6f9b6a";
         const x = xOf(i);
         g.fillRect(x - 1, y0 + Hm - hh, Math.max(2, (Wd - 2 * PAD) / n), hh);
       }
@@ -531,6 +602,12 @@
     const xa = xOf(st.a), xb = xOf(st.b);
     g.fillStyle = "rgba(0,0,0,.62)";
     g.fillRect(0, 0, xa, cv.height); g.fillRect(xb, 0, Wd - xb, cv.height);
+    if (st.ease) {                           // ralentis acceleres : bleu
+      const s0 = st.loopMode ? st.lo : st.a;
+      g.fillStyle = "rgba(90,160,255,.30)";
+      if (st.ease.head) g.fillRect(xOf(s0), 0, xOf(s0 + st.ease.head) - xOf(s0), cv.height);
+      if (st.ease.tail) g.fillRect(xOf(st.b - st.ease.tail), 0, xb - xOf(st.b - st.ease.tail), cv.height);
+    }
     if (st.xf) {
       g.fillStyle = "rgba(242,180,92,.28)";
       g.fillRect(xOf(st.b - st.xf), 0, xb - xOf(st.b - st.xf), cv.height);
@@ -585,24 +662,21 @@
     cv.addEventListener("pointercancel", up);
   }
 
-  // couper les temps morts : debut et fin immobiles retires (la courbe en rouge)
-  function autoTrim() {
-    const a = cur.ana;
+  // lisser la boucle : les ralentis du debut et de la fin (en rouge) sont joues plus vite, sans rien couper
+  function autoEase() {
+    const a = cur.ana, st = cur.st;
     if (!a) { toast("Analyse de la vidéo en cours…"); return; }
-    const n = a.n, m = a.motion, moving = (i) => m[i] >= a.thr;
-    let s = 1;
-    while (s < n - 1 && !(moving(s) && moving(Math.min(n - 1, s + 1)))) s++;
-    let e = n - 1;
-    while (e > s && !(moving(e) && moving(e - 1))) e--;
-    s = Math.max(0, s - 1);
-    if (e - s < 12) { toast("Presque toute la vidéo est immobile : rien de sûr à couper (régénérer plutôt)."); return; }
-    if (s === 0 && e >= n - 2) { toast("Pas de temps mort au début ni à la fin."); return; }
-    change("range", (fx) => {
-      fx.range = [s, e];
-      if (cur.st.loopMode && !fx.xfade) { fx.xfade = 6; cur.touched.add("xfade"); }
-    });
-    P.seekTo(cur.st, s);
-    toast(`Boucle : images ${s} à ${e}` + (cur.fx.xfade ? `, fondu de ${cur.fx.xfade} images au raccord` : ""));
+    const s0 = st.loopMode ? st.lo : st.a, b = st.b;
+    let head = 0, tail = 0;
+    while (s0 + head < b - 4 && a.act[Math.min(a.n - 1, s0 + head + 1)] < a.slow) head++;
+    while (b - tail > s0 + head + 4 && a.act[b - tail] < a.slow) tail++;
+    if (head + tail < 3) { toast("Pas de ralenti net au début ni à la fin de cette boucle."); return; }
+    let sum = 0, k = 0;
+    for (let i = s0 + 1; i <= s0 + head; i++) { sum += a.act[i]; k++; }
+    for (let i = b - tail + 1; i <= b; i++) { sum += a.act[Math.min(a.n - 1, i)]; k++; }
+    const gain = Math.round(Math.max(1.5, Math.min(3, a.ref / Math.max(0.05, sum / k))) * 10) / 10;
+    change("ease", (fx) => { fx.ease = { head, tail, gain }; });
+    toast(`Boucle lissée : ${head} images au début et ${tail} à la fin jouées ×${fmt(gain, 1)} (zones bleues).`, 5000);
     renderTab();
   }
 
@@ -640,9 +714,11 @@
   function tabLoop(box) {
     const st = cur.st;
     const here = () => P.frameOf(st);
-    box.append(h("p.ae-note", "Glisser les poignées orange de la timeline (début et fin de boucle). Cliquer ailleurs pour se " +
-                 "placer. Les barres rouges = temps morts (image immobile)."));
+    box.append(h("p.ae-note", "Barres rouges = ralentis : H3 freine au début et à la fin de chaque boucle pour retomber sur " +
+                 "la première image, c'est ce qui fait « un fixe ». « Lisser la boucle » les joue plus vite (zones bleues), sans " +
+                 "rien couper : la boucle reste parfaite. Poignées orange : début et fin de boucle."));
     box.append(h("div.ae-row",
+      h("button.ae-btn.ae-main", { on: { click: autoEase } }, "⏩ Lisser la boucle"),
       h("button.ae-btn", { on: { click: () => change("range", (fx) => {
         const r = fx.range ? fx.range.slice() : [0, st.p.frames - 1];
         r[0] = Math.min(here(), r[1] - 4); fx.range = r;
@@ -653,11 +729,22 @@
       }) } }, "Fin ici ⟧"),
       h("button.ae-btn", { title: "Image montrée au départ et après « Vue initiale »",
                             on: { click: () => change("start", (fx) => { fx.start = here(); }) } }, "▼ Départ ici"),
-      h("button.ae-btn.ae-main", { on: { click: autoTrim } }, "✂ Couper les temps morts"),
-      h("button.ae-btn", { title: "Toute la vidéo", on: { click: () => {
-        change("range", (fx) => { delete fx.range; delete fx.start; delete fx.xfade; });
-        cur.touched.add("start"); cur.touched.add("xfade"); renderTab();
+      h("button.ae-btn", { title: "Toute la vidéo, sans lissage", on: { click: () => {
+        change("range", (fx) => { delete fx.range; delete fx.start; delete fx.xfade; delete fx.ease; });
+        for (const k of ["start", "xfade", "ease"]) cur.touched.add(k);
+        renderTab();
       } } }, "↺")));
+    const ez = () => cur.fx.ease || { head: 0, tail: 0, gain: 2 };
+    const setE = (k, v) => change("ease", (fx) => {
+      const e = Object.assign({}, ez(), { [k]: v });
+      if ((e.head || e.tail) && e.gain > 1) fx.ease = e; else delete fx.ease;
+    });
+    box.append(slider("Ralenti du début", () => ez().head, (v) => setE("head", v),
+      { min: 0, max: 40, step: 1, neutral: 0, fmt: (v) => v ? `${v} images` : "—" }));
+    box.append(slider("Ralenti de la fin", () => ez().tail, (v) => setE("tail", v),
+      { min: 0, max: 40, step: 1, neutral: 0, fmt: (v) => v ? `${v} images` : "—" }));
+    box.append(slider("Accélération", () => ez().gain, (v) => setE("gain", v),
+      { min: 1, max: 4, step: 0.1, fmt: (v) => "× " + fmt(v, 1) }));
     const sens = h("select", {},
       h("option", { value: "loop" }, "Boucle (vers l'avant)"), h("option", { value: "bounce" }, "Aller-retour"));
     sens.value = st.loopMode ? "loop" : "bounce";
@@ -842,8 +929,8 @@
           const err = js.find(j => j.status === "error");
           if (err) { out.textContent = "⚠ " + (err.error || "erreur"); return; }
           out.textContent = "terminé : mise en place…";
-          await saveEdit(c.i, c.id === undefined ? "_" : c.id, {}, { sounds: c.id });
-          if (layer === "page") { C.remount(C.B.pages[c.i].stamp); return; }
+          if (layer === "page") { await refreshPage(c); return; }
+          await saveEdit(c.i, c.id, {}, { sounds: c.id });
           out.textContent = "";
           out.append("✓ nouveau son en place ");
           if (prev) out.append(h("button.ae-btn", { on: { click: async () => {
@@ -859,31 +946,131 @@
              ta, h("div.ae-row", h("label.ae-chk", same, "même graine"), go), out);
   }
 
+  // envoi d'un son : s'il sert deja dans une planche, alerte avec les references ; deja importe = reutilise
+  function confirmBox(title, lines, okLabel) {
+    return new Promise((done) => {
+      const back = h("div.ae-modal-back");
+      const end = (v) => { back.remove(); done(v); };
+      back.append(h("div.ae-modal", h("b", title), h("ul", lines.map(l => h("li", l))),
+        h("p.ae-note", "S'il est utilisé quand même, le fichier déjà importé est repris : il n'est pas copié une deuxième fois."),
+        h("div.ae-row", h("span.ae-sp"), h("button.ae-btn", { on: { click: () => end(false) } }, "Annuler"),
+          h("button.ae-btn.ae-main", { on: { click: () => end(true) } }, okLabel || "Utiliser quand même"))));
+      back.addEventListener("pointerdown", (e) => { if (e.target === back) end(false); });
+      document.body.append(back);
+    });
+  }
+  async function sendSound(url, file) {
+    const go = async (force) => {
+      const r = await fetch(url + (force ? "&force=1" : ""), { method: "POST", body: file });
+      let j = {};
+      try { j = await r.json(); } catch (_) { /* reponse vide */ }
+      if (r.status === 409 && j.used && !force) {
+        if (!(await confirmBox("Ce son est déjà utilisé", j.used.map(u => u.where)))) throw new Error("import annulé");
+        return go(true);
+      }
+      if (!r.ok) throw new Error(j.error || "envoi refusé");
+      if (j.reused) toast("Son déjà importé : le fichier existant est réutilisé (pas de doublon).", 4500);
+      return j;
+    };
+    return go(false);
+  }
+  function pickAudio(fn) {
+    const inp = h("input", { type: "file", accept: "audio/*,.mp3,.wav,.ogg,.m4a,.flac,.aac" });
+    inp.onchange = () => { if (inp.files[0]) fn(inp.files[0]); };
+    inp.click();
+  }
+  // le son global de la page a change : le lecteur le recharge sans demonter la page
+  async function refreshPage(c) {
+    const res = await saveEdit(c.i, "_", {}, { noApply: true });
+    if (C.cur() === c.i) P.setPageSound(C.inst(), res.page.sound || null, C.B.pages[c.i].stamp || String(Date.now()));
+    if (cur === c) renderTab();
+  }
+  async function setLayer(c, layer, value) {           // remplace l'objet de la couche (mode none = retirer)
+    await api(`/api/projects/${c.pid}/panels/${c.id}`, { [layer]: value });
+    await saveEdit(c.i, c.id, {}, { sounds: c.id });
+  }
+
+  let voicePresets = null;
+  async function loadVoicePresets() {
+    if (!voicePresets) voicePresets = await api("/api/presets");
+    return voicePresets;
+  }
+  // voix off IA (MiniMax Speech sur fal) : texte, voix, emotion, langue
+  function voiceForm(c, v, onBusy) {
+    const ta = h("textarea", { rows: 3, placeholder: "Texte de la voix off (dans la langue choisie)" });
+    ta.value = v.mode === "tts" ? (v.text || "") : "";
+    const voice = h("select"), emo = h("select"), lang = h("select");
+    loadVoicePresets().then((pr) => {
+      for (const x of pr.voices) voice.append(h("option", { value: x.id }, x.label));
+      for (const x of pr.emotions) emo.append(h("option", { value: x }, x));
+      for (const x of pr.languages) lang.append(h("option", { value: x }, x));
+      voice.value = v.voice_id || "Deep_Voice_Man"; emo.value = v.emotion || "neutral"; lang.value = v.language || "French";
+    }).catch(() => {});
+    const out = h("div.ae-jobs");
+    const go = h("button.ae-btn.ae-main", "🎙 Générer la voix off (fal)");
+    go.onclick = async () => {
+      if (!ta.value.trim()) { ta.focus(); return; }
+      const old = clone(c.panel.voice || {});
+      go.disabled = true; out.textContent = "envoi…";
+      try {
+        await api(`/api/projects/${c.pid}/panels/${c.id}`, { voice: { mode: "tts", text: ta.value.trim(), voice_id: voice.value,
+          emotion: emo.value, language: lang.value, volume: old.volume ?? 1, loop: !!old.loop } });
+        let res;
+        try { res = await api(`/api/projects/${c.pid}/voice/${c.id}`, {}); }
+        catch (e) { await api(`/api/projects/${c.pid}/panels/${c.id}`, { voice: old }); throw e; }   // on remet l'ancienne voix
+        watchJobs(c.pid, res.jobs.map(j => j.id), (js) => { out.textContent = jobText(js); }, async (js) => {
+          go.disabled = false;
+          const err = js.find(j => j.status === "error");
+          if (err) { out.textContent = "⚠ " + (err.error || "erreur"); return; }
+          await saveEdit(c.i, c.id, {}, { sounds: c.id });
+          out.textContent = "✓ nouvelle voix off en place";
+        });
+        out.textContent = "en file…";
+      } catch (e) { go.disabled = false; out.textContent = "⚠ " + e.message; }
+    };
+    return h("div.ae-blk", ta, h("div.ae-row", voice, emo, lang), h("div.ae-row", go), out);
+  }
+
   function tabSound(box) {
     const c = cur, st = c.st, p = st.p, panel = c.panel || {}, pg = C.B.pages[c.i];
     const vol = (key, get, set) => slider("Volume", get, (v) => { set(v); P.setLayerVolume(st, key, v); },
                                           { min: 0, max: 1, step: 0.01, fmt: (v) => Math.round(v * 100) + " %" });
     const block = (title, name, ...kids) => h("div.ae-snd", h("div.ae-sndh", h("b", title), h("small", name || "")), ...kids);
-    if (!p.audio && !p.voice && !p.foley && !(p.more || []).length) box.append(h("p.ae-note", "Pas encore de son dans cette case."));
+    const replaceBtn = (layer, label) => h("button.ae-btn", { title: "Importer un autre fichier à la place", on: { click: () => pickAudio(async (f) => {
+      try {
+        await sendSound(`/api/projects/${c.pid}/panels/${c.id}/sound?layer=${layer}&name=${encodeURIComponent(f.name)}`, f);
+        await saveEdit(c.i, c.id, {}, { sounds: c.id });
+        toast(`${label} remplacé.`);
+      } catch (e) { toast("⚠ " + e.message); }
+    }) } }, "📁 Remplacer");
+    const removeBtn = (layer, label) => h("button.ae-btn", { on: { click: async () => {
+      if (!(await confirmBox(`Retirer ${label} de la case ?`, ["Le fichier reste dans le projet : tu pourras le remettre."], "Retirer"))) return;
+      try { await setLayer(c, layer, { mode: "none" }); toast(`${label} retiré.`); } catch (e) { toast("⚠ " + e.message); }
+    } } }, "✕ Retirer");
     if (p.audio) {
       const a = panel.audio || {};
       box.append(block("Son 1 · ambiance / musique", a.name || (a.mode === "generate" ? "généré (MiniMax Music)" : ""),
         vol("audio", () => p.audioVol ?? 1, (v) => { p.audioVol = v; queue({ volumes: { audio: v } }); }),
-        regenSoundForm("audio", "Régénérer ce son", "Ex. : drone grave et lent, cordes lointaines, vent", a.file)));
+        h("div.ae-row", replaceBtn("audio", "Son 1"), removeBtn("audio", "le son 1")),
+        regenSoundForm("audio", "Régénérer ce son (MiniMax Music)", "Ex. : drone grave et lent, cordes lointaines, vent", a.file)));
     }
+    // son 2 : voix off (IA ou fichier) ou deuxieme musique
+    const v = panel.voice || {};
     if (p.voice) {
-      const v = panel.voice || {}, tts = v.mode === "tts";
-      box.append(block(tts ? "Son 2 · voix off" : "Son 2", v.name || (tts ? (v.text || "").slice(0, 60) : ""),
+      const kind = v.mode === "tts" ? "voix off IA" : v.mode === "music" ? "musique générée" : "fichier";
+      const vf = h("details.ae-regen", h("summary", v.mode === "tts" ? "🎙 Changer le texte ou la voix" : "🎙 Remplacer par une voix off IA"),
+                   voiceForm(c, v));
+      box.append(block("Son 2 · voix off", (v.name || (v.mode === "tts" ? (v.text || "").slice(0, 50) : "")) + ` (${kind})`,
         vol("voice", () => p.voice.vol ?? 1, (x) => { p.voice.vol = x; queue({ volumes: { voice: x } }); }),
-        regenSoundForm("voice", tts ? "Refaire la voix (fal)" : "Régénérer ce son",
-                       tts ? "Texte à dire (laisser vide = même texte)" : "Décris la musique voulue", v.file)));
+        h("div.ae-row", replaceBtn("voice", "Son 2"), removeBtn("voice", "le son 2")), vf,
+        v.mode === "music" ? regenSoundForm("voice", "Régénérer cette musique", "Décris la musique voulue", v.file) : null));
     }
     if (p.foley) {
-      const f = panel.foley || {}, h3 = (f.engine || "h3") === "h3";
-      box.append(block("Bruitages", h3 ? "piste son de la vidéo H3" : f.engine,
+      const fo = panel.foley || {}, h3 = (fo.engine || "h3") === "h3";
+      box.append(block("Bruitages", h3 ? "piste son de la vidéo H3" : fo.engine,
         vol("foley", () => p.foley.vol ?? 1, (x) => { p.foley.vol = x; queue({ volumes: { foley: x } }); }),
         h3 ? h("p.ae-note", "Ces bruitages sortent de la vidéo : régénérer la séquence pour les changer.")
-           : regenSoundForm("foley", "Régénérer les bruitages (fal)", "Ex. : pas sur le gravier, porte qui grince", f.file)));
+           : regenSoundForm("foley", "Régénérer les bruitages (fal)", "Ex. : pas sur le gravier, porte qui grince", fo.file)));
     }
     const extras = panel.extraSounds || [];
     (p.more || []).forEach((x, i) => {
@@ -893,55 +1080,58 @@
                                                                loop: k === i ? loop.checked : e.loop })) });
       loop.onchange = () => { x.loop = loop.checked; send(); };
       box.append(block(`Son ajouté ${i + 1}`, ex.name || "",
-        slider("Volume", () => x.vol, (v) => { x.vol = v; P.setLayerVolume(st, "more" + i, v); send(); },
-               { min: 0, max: 1, step: 0.01, fmt: (v) => Math.round(v * 100) + " %" }),
+        slider("Volume", () => x.vol, (v2) => { x.vol = v2; P.setLayerVolume(st, "more" + i, v2); send(); },
+               { min: 0, max: 1, step: 0.01, fmt: (v2) => Math.round(v2 * 100) + " %" }),
         h("div.ae-row", h("label.ae-chk", loop, "en boucle (sinon : une fois à chaque survol)"),
           h("button.ae-btn", { on: { click: () => {
-            queue({ extra: extras.filter((_, k) => k !== i).map((e, k2) => ({ file: e.file, volume: e.volume, loop: e.loop })) });
+            queue({ extra: extras.filter((_, k) => k !== i).map((e) => ({ file: e.file, volume: e.volume, loop: e.loop })) });
             flush();
           } } }, "✕ Retirer"))));
     });
-    // ajouter un son par-dessus ceux qui existent
-    const file = h("input", { type: "file", accept: "audio/*,.mp3,.wav,.ogg,.m4a,.flac", hidden: true });
+    // ajouter : un son par-dessus ceux qui existent, ou une voix off s'il n'y en a pas
     const drop = h("div.ae-drop", "＋ Ajouter un son à cette case (glisser un fichier ici, ou cliquer)");
     const upload = async (f) => {
       if (!f) return;
       drop.textContent = "envoi de " + f.name + "…";
       try {
-        await fetch(`/api/projects/${c.pid}/panels/${c.id}/sound?layer=extra&name=${encodeURIComponent(f.name)}`,
-                    { method: "POST", body: f }).then(r => { if (!r.ok) throw new Error("envoi refusé"); });
+        await sendSound(`/api/projects/${c.pid}/panels/${c.id}/sound?layer=extra&name=${encodeURIComponent(f.name)}`, f);
         await saveEdit(c.i, c.id, {}, { sounds: c.id });
         toast("Son ajouté : il joue au survol de la case, avec les autres.");
       } catch (e) { drop.textContent = "⚠ " + e.message; }
     };
-    file.onchange = () => upload(file.files[0]);
-    drop.onclick = () => file.click();
+    drop.onclick = () => pickAudio(upload);
     drop.ondragover = (e) => { e.preventDefault(); drop.classList.add("over"); };
     drop.ondragleave = () => drop.classList.remove("over");
     drop.ondrop = (e) => { e.preventDefault(); drop.classList.remove("over"); upload(e.dataTransfer.files[0]); };
-    box.append(drop, file);
+    box.append(drop);
+    if (!p.voice) box.append(h("details.ae-regen", h("summary", "🎙 Ajouter une voix off IA à cette case"), voiceForm(c, v)));
     // musique de la page
     const ps = (c.project && c.project.pageSound) || {}, inst = C.inst();
+    const replacePage = h("button.ae-btn", { on: { click: () => pickAudio(async (f) => {
+      try {
+        await sendSound(`/api/projects/${c.pid}/upload?kind=page&name=${encodeURIComponent(f.name)}`, f);
+        await refreshPage(c);
+        toast("Musique de la page en place.");
+      } catch (e) { toast("⚠ " + e.message); }
+    }) } }, pg.data.sound ? "📁 Remplacer la musique" : "📁 Importer une musique");
+    const removePage = h("button.ae-btn", { on: { click: async () => {
+      if (!(await confirmBox("Retirer la musique de la page ?", ["Le fichier reste dans le projet."], "Retirer"))) return;
+      try {
+        await api(`/api/projects/${c.pid}/update`, { pageSound: { mode: "none" } });
+        await refreshPage(c);
+      } catch (e) { toast("⚠ " + e.message); }
+    } } }, "✕ Retirer");
     if (pg.data.sound && inst.global) {
-      box.append(block("Musique de la page", ps.name || (ps.mode === "generate" ? "générée (MiniMax Music)" : ""),
-        slider("Volume", () => inst.global.vol, (v) => { P.setGlobalVolume(inst, v); pg.data.sound.vol = v; queue({ pageVolume: v }); },
-               { min: 0, max: 1, step: 0.01, fmt: (v) => Math.round(v * 100) + " %" }),
-        ps.mode === "generate" ? regenSoundForm("page", "Régénérer la musique de la page", "Décris la musique voulue", ps.file)
-                               : h("p.ae-note", "Musique importée. Elle baisse toute seule quand une case joue ses sons.")));
+      box.append(block("Musique de la page", (ps.name || (ps.mode === "generate" ? "générée (MiniMax Music)" : "")),
+        slider("Volume", () => inst.global.vol, (x) => { P.setGlobalVolume(inst, x); pg.data.sound.vol = x; queue({ pageVolume: x }); },
+               { min: 0, max: 1, step: 0.01, fmt: (x) => Math.round(x * 100) + " %" }),
+        h("div.ae-row", replacePage, removePage),
+        regenSoundForm("page", ps.mode === "generate" ? "Régénérer la musique (MiniMax Music)" : "Remplacer par une musique générée (MiniMax Music)",
+                       "Décris la musique voulue", ps.file),
+        h("p.ae-note", "Elle baisse toute seule quand une case joue ses sons.")));
     } else {
-      const pf = h("input", { type: "file", accept: "audio/*,.mp3,.wav,.ogg,.m4a,.flac", hidden: true });
-      pf.onchange = async () => {
-        const f = pf.files[0];
-        if (!f) return;
-        try {
-          await fetch(`/api/projects/${c.pid}/upload?kind=page&name=${encodeURIComponent(f.name)}`, { method: "POST", body: f });
-          await saveEdit(c.i, "_", {}, { noApply: true });
-          toast("Musique de page en place.");
-          C.remount(C.B.pages[c.i].stamp);
-        } catch (e) { toast("⚠ " + e.message); }
-      };
-      box.append(block("Musique de la page", "aucune", h("div.ae-row",
-        h("button.ae-btn", { on: { click: () => pf.click() } }, "＋ Importer une musique pour toute la page"), pf)));
+      box.append(block("Musique de la page", "aucune", h("div.ae-row", replacePage),
+        regenSoundForm("page", "Générer une musique (MiniMax Music)", "Décris la musique voulue", null)));
     }
   }
 

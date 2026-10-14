@@ -1,5 +1,5 @@
 // Alive-Comics : application (etat, projets, edition, rendus, export, publication, reglages, livres).
-import { api, get, post, put, upload, h, toast, debounce, modal, loadImage } from "./api.js";
+import { api, get, post, put, upload, uploadSound, h, toast, debounce, modal, loadImage } from "./api.js";
 import { compute, PRESETS, PAGE_DEFAULTS, FORMATS, pageSize, transpose, randomLayout, removeLeaf, splitLeaf, leaves, clone } from "./geometry.js";
 import { Editor, icon } from "./editor.js";
 import { startImage, pageImages } from "./exporter.js";
@@ -365,11 +365,11 @@ class App {
 
   async importAudio(id, file, layer = "audio") {
     try {
-      const res = await upload(`projects/${this.project.id}/upload?kind=${layer}&panel=${id}&name=${encodeURIComponent(file.name)}`, file);
+      const res = await uploadSound(`projects/${this.project.id}/upload?kind=${layer}&panel=${id}&name=${encodeURIComponent(file.name)}`, file);
       const panel = this.panel(id);
       Object.assign(panel[layer] = panel[layer] || {}, { mode: "file", file: res.file, name: file.name });
       this.refreshInspector(); this.editor.renderOverlay(); this.save();
-      toast("Son importé dans la case.", "ok");
+      toast(res.reused ? "Son déjà importé : le fichier existant est réutilisé." : "Son importé dans la case.", "ok");
     } catch (e) { toast(e.message, "error"); }
   }
 
@@ -594,10 +594,10 @@ class App {
   pickPageSound() {
     pickFile("audio/*", async (file) => {
       try {
-        const res = await upload(`projects/${this.project.id}/upload?kind=page&name=${encodeURIComponent(file.name)}`, file);
+        const res = await uploadSound(`projects/${this.project.id}/upload?kind=page&name=${encodeURIComponent(file.name)}`, file);
         Object.assign(this.project.pageSound = this.project.pageSound || {}, { mode: "file", file: res.file, name: file.name, rev: Date.now() / 1000 });
         this.refreshInspector(); this.save();
-        toast("Son global importé.", "ok");
+        toast(res.reused ? "Son global déjà importé : le fichier existant est réutilisé." : "Son global importé.", "ok");
       } catch (e) { toast(e.message, "error"); }
     });
   }

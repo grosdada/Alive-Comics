@@ -6,13 +6,32 @@ export async function api(method, path, body, raw) {
   else if (body !== undefined) { opt.body = JSON.stringify(body); opt.headers["Content-Type"] = "application/json"; }
   const r = await fetch("/api/" + path, opt);
   const data = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(data.error || ("erreur " + r.status));
+  if (!r.ok) { const err = new Error(data.error || ("erreur " + r.status)); err.status = r.status; err.data = data; throw err; }
   return data;
 }
 export const get = (p) => api("GET", p);
 export const post = (p, b) => api("POST", p, b ?? {});
 export const put = (p, b) => api("PUT", p, b);
 export const upload = (p, blob) => api("POST", p, undefined, blob);
+
+// import d'un son : s'il sert deja dans une planche, on previent (avec les references) avant de le reutiliser ;
+// s'il a deja ete importe sans servir, le serveur reprend le fichier existant (pas de doublon)
+export async function uploadSound(p, blob) {
+  try {
+    return await upload(p, blob);
+  } catch (e) {
+    if (e.status !== 409 || !e.data?.used) throw e;
+    const ok = await new Promise((done) => {
+      modal("Son déjà utilisé", h("div",
+        h("p", "Ce son (même contenu, quel que soit son nom) est déjà utilisé ici :"),
+        h("ul", e.data.used.map(u => h("li", u.where))),
+        h("p.muted", "Si tu l'utilises quand même, le fichier déjà importé est repris : il n'est pas copié une deuxième fois.")),
+        [{ label: "Annuler", click: () => done(false) }, { label: "Utiliser quand même", primary: true, click: () => done(true) }]);
+    });
+    if (!ok) throw new Error("import annulé");
+    return upload(p + (p.includes("?") ? "&" : "?") + "force=1", blob);
+  }
+}
 
 // h("div.cls#id", {attr, on: {click}}, enfants...)
 export function h(sel, props, ...kids) {

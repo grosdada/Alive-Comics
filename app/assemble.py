@@ -131,7 +131,7 @@ def player_fx(panel, pid, plan):
         sh = presets.shake_params(panel, pid)
         if sh:
             fx["shake"] = sh
-    for k in ("grade", "frame", "range", "xfade", "speed", "bounce", "start"):
+    for k in ("grade", "frame", "range", "xfade", "speed", "bounce", "start", "ease"):
         if e.get(k) not in (None, {}, []):
             fx[k] = e[k]
     return fx

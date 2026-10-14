@@ -55,15 +55,18 @@ L'interface s'ouvre sur http://127.0.0.1:8790/. Il faut Python 3.10+ et ffmpeg d
 8. **Aperçu** : assemble la page jouable et l'ouvre. Si rien n'a changé depuis le dernier assemblage, la page déjà
    prête s'ouvre immédiatement ; sinon seul ce qui a changé est refait. **📁 Dossier** ouvre le dossier de la page
    (index.html, vidéos, sons). **Publier** : la met en ligne (lien à partager).
-8 bis. **✏️ Éditer** (dans l'aperçu d'une page ou d'un livre, seulement depuis l'application) : clic sur une case,
-   un popup de retouche s'ouvre avec la case en grand. Tout se voit en direct et s'enregistre tout seul, sans
+8 bis. **✏️ Éditer** (dans l'aperçu d'une page ou d'un livre, seulement depuis l'application ; « 🏠 Accueil » et
+   « ✎ Planche » ramènent à l'application) : clic sur une case, un popup de retouche s'ouvre avec la case en grand
+   (⤢ ou le coin en bas à droite pour l'agrandir). Tout se voit en direct et s'enregistre tout seul, sans
    recalculer la vidéo :
-   - **Boucle** : timeline avec la courbe de mouvement (rouge = temps mort), poignées de début et de fin,
-     « ✂ Couper les temps morts », fondu au raccord, image de départ, sens (boucle / aller-retour), vitesse ;
+   - **Boucle** : timeline avec la courbe de mouvement (rouge = ralenti : H3 freine au début et à la fin de chaque
+     boucle), « ⏩ Lisser la boucle » (ces ralentis joués plus vite, sans couper), poignées de début et de fin, fondu au
+     raccord, image de départ, sens (boucle / aller-retour), vitesse ; barre espace = lecture / pause ;
    - **Tremblé** : taille, fréquence, rotation, graine, préréglages enregistrables ; toujours identique au début et à la fin de la boucle (« 🔁 Adaptive loop » cale la fréquence affichée sur la boucle) ; « ⏸ Figer l'image » : il continue sur l'image fixe ;
    - **Couleur** (saturation, luminosité, contraste, température, teinte ; « Appliquer à toute la page ») et **Cadrage** ;
-   - **Son** : volume de chaque couche, régénérer avec une consigne, **ajouter un son** par-dessus, volume (ou
-     import) de la musique de la page ;
+   - **Son** : volume, remplacer, retirer ou régénérer chaque couche, voix off IA (texte, voix, émotion, langue),
+     **ajouter un son** par-dessus, musique de la page (volume, remplacer, générer, retirer). Un son déjà utilisé dans
+     une planche déclenche une alerte avec la référence ; un son déjà importé n'est jamais copié deux fois ;
    - **Régénérer** : consigne en français (l'IA réécrit le prompt H3), « même graine » pour ne changer qu'un détail,
      versions déjà calculées.
    En mode édition, une **pastille** en haut à droite de chaque case : orange = à voir, vert = OK, rouge = à

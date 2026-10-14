@@ -22,7 +22,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
-from . import assemble, compose, director, edit, falapi, geometry, jobs, llm, presets, publish, settings, store
+from . import assemble, compose, director, edit, falapi, geometry, jobs, llm, presets, publish, settings, sounds, store
 
 ROOT = Path(__file__).resolve().parent.parent
 WEB = ROOT / "app" / "web"
@@ -191,6 +191,8 @@ class Handler(BaseHTTPRequestHandler):
                 pid, _, rel = path[10:].partition("/")
                 return self.send_file(store.path(pid, rel))
             self.send_error(404)
+        except sounds.Duplicate as e:            # son deja utilise ailleurs : l'interface previent (et peut forcer)
+            self.send_json({"error": str(e), "duplicate": True, "used": e.used}, 409)
         except ApiError as e:
             self.send_json({"error": str(e)}, e.status)
         except FileNotFoundError as e:
@@ -334,7 +336,12 @@ class Handler(BaseHTTPRequestHandler):
             data = self.body()
             name = q.get("name") or "fichier"
             stamp = time.strftime("%Y%m%d-%H%M%S") + "-" + secrets.token_hex(2)
-            rel = store.write_file(pid, "assets", f"{stamp}-{name}", data)
+            snd = None
+            if q.get("kind") in ("page", "audio", "voice"):    # sons : jamais deux fois le meme fichier
+                snd = sounds.place(pid, data, name, q.get("force") == "1")
+                rel = snd["file"]
+            else:
+                rel = store.write_file(pid, "assets", f"{stamp}-{name}", data)
             if q.get("kind") == "page":
                 store.mutate(pid, lambda p: p.setdefault("pageSound", {}).update(mode="file", file=rel, name=name,
                                                                                 rev=time.time()))
@@ -343,7 +350,7 @@ class Handler(BaseHTTPRequestHandler):
                     aud = p["panels"].setdefault(q["panel"], {}).setdefault(q["kind"], {})
                     aud.update(mode="file", file=rel, name=name)
                 store.mutate(pid, setaud)
-            return self.send_json({"file": rel, "url": f"/projects/{pid}/{rel}"})
+            return self.send_json(dict(snd or {}, file=rel, url=f"/projects/{pid}/{rel}"))
         if sub == "rev" and m == "GET":                 # numero de version (l'interface se recharge s'il bouge)
             p = store.get(pid)
             return self.send_json({"rev": p.get("rev", 0), "updated": p.get("updated")})
@@ -393,7 +400,14 @@ class Handler(BaseHTTPRequestHandler):
             data = self.body()
             name = q.get("name") or ("image.png" if parts[4] == "image" else "son.mp3")
             stamp = time.strftime("%Y%m%d-%H%M%S") + "-" + secrets.token_hex(2)
-            rel = store.write_file(pid, "assets", f"{stamp}-{name}", data)
+            snd = None
+            if parts[4] == "sound":                           # sons : jamais deux fois le meme fichier
+                if q.get("layer", "audio") not in ("audio", "voice", "extra"):
+                    raise ApiError("layer : audio, voice ou extra (son ajouté en plus)")
+                snd = sounds.place(pid, data, name, q.get("force") == "1")
+                rel = snd["file"]
+            else:
+                rel = store.write_file(pid, "assets", f"{stamp}-{name}", data)
             if parts[4] == "image":
                 from PIL import Image
                 with Image.open(store.path(pid, rel)) as im:
@@ -413,7 +427,7 @@ class Handler(BaseHTTPRequestHandler):
                 raise ApiError("layer : audio, voice ou extra (son ajouté en plus)")
             if layer == "extra":
                 p = store.mutate(pid, lambda pp: edit.add_extra_sound(pp, parts[3], rel, name))
-                return self.send_json({"file": rel, "layer": layer, "extra": p["panels"][parts[3]]["extraSounds"]})
+                return self.send_json(dict(snd, layer=layer, extra=p["panels"][parts[3]]["extraSounds"]))
 
             def setsnd(p):
                 panel = p["panels"].get(parts[3])
@@ -421,7 +435,7 @@ class Handler(BaseHTTPRequestHandler):
                     raise KeyError(parts[3])
                 panel.setdefault(layer, {}).update(mode="file", file=rel, name=name)
             store.mutate(pid, setsnd)
-            return self.send_json({"file": rel, "layer": layer})
+            return self.send_json(dict(snd, layer=layer))
         if sub == "start" and m == "POST":
             rel = store.write_file(pid, "start", f"{parts[3]}.png", self.body())
             return self.send_json({"file": rel})
@@ -459,7 +473,7 @@ class Handler(BaseHTTPRequestHandler):
         if sub == "edit" and len(parts) == 4 and m == "POST":     # mode edition de l'apercu : retouches d'une case
             b = self.jbody()
             edit.apply(pid, parts[3], b)
-            if set(b) <= {"review", "book"}:            # pastille de suivi seulement : rien a assembler
+            if "review" in b and set(b) <= {"review", "book"}:     # pastille de suivi seulement : rien a assembler
                 return self.send_json({"ok": True, "page": assemble.read_data(store.pdir(pid) / "export"),
                                        "encoded": [], "report": [], "project": store.get(pid)})
             res = assemble.build(pid)                   # rapide : les retouches ne re-encodent rien
