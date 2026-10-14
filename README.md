@@ -66,6 +66,8 @@ L'interface s'ouvre sur http://127.0.0.1:8790/. Il faut Python 3.10+ et ffmpeg d
      import) de la musique de la page ;
    - **Régénérer** : consigne en français (l'IA réécrit le prompt H3), « même graine » pour ne changer qu'un détail,
      versions déjà calculées.
+   En mode édition, une **pastille** en haut à droite de chaque case : orange = à voir, vert = OK, rouge = à
+   retoucher (clic dessus pour changer) ; le compteur à côté du titre résume la page et le livre.
    Le tremblé caméra est appliqué par le lecteur (plus incrusté dans la vidéo). Pour mettre les retouches en ligne :
    republier la page ou le livre.
 9. **Livres** (page d'accueil) : enchaîner plusieurs planches, aperçu, publication.

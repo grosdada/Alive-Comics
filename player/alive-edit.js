@@ -145,14 +145,113 @@
     C.button.setAttribute("aria-pressed", String(on));
     document.body.classList.toggle("ae-on", on);
     P.setEditHook(on ? pick : null);
-    if (!on) { close(); banner(null); return; }
+    if (!on) { close(); banner(null); removeDots(); return; }
     const hint = document.getElementById("hint");
     if (hint) hint.classList.add("off");
-    prepare(C.cur()).then(() => toast("Cliquez sur une case pour la retoucher. Glisser dans une case la fait toujours bouger.", 4500))
-                    .catch(() => {});
+    prepare(C.cur()).then(() => {
+      renderDots();
+      toast("Cliquez sur une case pour la retoucher. Pastille en haut à droite : à voir / OK / à retoucher.", 5000);
+    }).catch(() => {});
   }
   C.button.addEventListener("click", () => setMode(!on));
-  document.addEventListener("alive-page", (e) => { close(); if (on) prepare(e.detail.index).catch(() => {}); });
+  document.addEventListener("alive-page", (e) => {
+    close();
+    removeDots();
+    if (on) prepare(e.detail.index).then(renderDots).catch(() => {});
+  });
+
+  // ------------------------------------------------------------------ pastilles de suivi : a voir / OK / a retoucher
+  const REVIEW = { todo: ["#f2a33c", "À voir"], ok: ["#45b56a", "OK"], redo: ["#e0483e", "À retoucher"] };
+  let dotsEl = null, menuEl = null, sumEl = null;
+  const pidOf = {};                    // page -> projet
+  const reviewOf = (pid, id) => (((projects.get(pid) || {}).panels || {})[id] || {}).review || "todo";
+
+  async function renderDots() {
+    removeDots();
+    const i = C.cur(), inst = C.inst(), pg = C.B.pages[i];
+    let pid;
+    try { pid = await projectOf(i); await project(pid); } catch (_) { return; }
+    if (!on || C.inst() !== inst) return;
+    const [PW, PH] = pg.data.size;
+    dotsEl = h("div.ae-dots");
+    for (const e of pg.data.panels) {
+      const pts = e.poly || [[e.rect[0], e.rect[1]], [e.rect[2], e.rect[1]], [e.rect[2], e.rect[3]], [e.rect[0], e.rect[3]]];
+      const [x, y] = pts.reduce((m, q) => (q[0] - q[1] > m[0] - m[1] ? q : m));        // coin en haut a droite
+      const d = h("button.ae-dot", { type: "button", dataset: { panel: e.id },
+                                     style: { left: x / PW * 100 + "%", top: y / PH * 100 + "%" } });
+      paintDot(d, reviewOf(pid, e.id));
+      d.addEventListener("click", (ev) => { ev.stopPropagation(); reviewMenu(d, i, pid, e.id); });
+      dotsEl.append(d);
+    }
+    inst.pageEl.append(dotsEl);
+    summary();
+  }
+  function removeDots() {
+    if (dotsEl) dotsEl.remove();
+    dotsEl = null;
+    closeMenu();
+    if (sumEl) sumEl.hidden = true;
+  }
+  function paintDot(d, v) {
+    d.dataset.v = v;
+    d.title = `Case ${d.dataset.panel} : ${REVIEW[v][1]} (cliquer pour changer)`;
+  }
+  function closeMenu() {
+    if (menuEl) menuEl.remove();
+    menuEl = null;
+  }
+  function reviewMenu(anchor, i, pid, id) {
+    closeMenu();
+    const r = anchor.getBoundingClientRect();
+    menuEl = h("div.ae-revmenu", Object.entries(REVIEW).map(([v, [color, label]]) =>
+      h("button" + (reviewOf(pid, id) === v ? ".on" : ""), { type: "button", on: { click: () => { closeMenu(); setReview(i, pid, id, v); } } },
+        h("i", { style: { background: color } }), label)));
+    document.body.append(menuEl);
+    menuEl.style.left = Math.max(8, Math.min(innerWidth - menuEl.offsetWidth - 8, r.right - menuEl.offsetWidth)) + "px";
+    menuEl.style.top = Math.min(innerHeight - menuEl.offsetHeight - 8, r.bottom + 6) + "px";
+    const away = (e) => {
+      if (menuEl && !menuEl.contains(e.target) && e.target !== anchor) { closeMenu(); document.removeEventListener("pointerdown", away, true); }
+      if (!menuEl) document.removeEventListener("pointerdown", away, true);
+    };
+    document.addEventListener("pointerdown", away, true);
+  }
+  function setReview(i, pid, id, v) {
+    const pj = projects.get(pid);
+    if (pj && pj.panels[id]) pj.panels[id].review = v;
+    for (const d of document.querySelectorAll(`.ae-dot[data-panel="${id}"]`)) paintDot(d, v);
+    summary();
+    saveEdit(i, id, { review: v }, { noApply: true }).catch((e) => toast("⚠ " + e.message));
+  }
+  // compteur : la page, et tout le livre
+  async function summary() {
+    if (!sumEl) {                         // a cote du titre
+      sumEl = h("span.ae-sum", { title: "Suivi des cases : OK · à voir · à retoucher" });
+      (document.getElementById("where") || C.button).after(sumEl);
+    }
+    const count = (k) => {
+      const pid = pidOf[k];
+      const n = { ok: 0, todo: 0, redo: 0 };
+      const pj = pid ? projects.get(pid) : null;
+      for (const e of C.B.pages[k].data.panels) n[pj ? reviewOf(pid, e.id) : "todo"]++;
+      return n;
+    };
+    const chip = (n) => h("span", ["ok", "todo", "redo"].map(v => h("span.ae-n", { title: REVIEW[v][1] },
+                                                                  h("i", { style: { background: REVIEW[v][0] } }), n[v])));
+    const i = C.cur();
+    pidOf[i] = await projectOf(i);
+    sumEl.hidden = false;
+    sumEl.textContent = "";
+    sumEl.append(chip(count(i)));
+    if (C.B.pages.length > 1) {
+      try {
+        await Promise.all(C.B.pages.map((_, k) => projectOf(k).then((pid) => { pidOf[k] = pid; return project(pid); })));
+      } catch (_) { return; }
+      const tot = { ok: 0, todo: 0, redo: 0 };
+      C.B.pages.forEach((_, k) => { const n = count(k); for (const v in tot) tot[v] += n[v]; });
+      sumEl.textContent = "";
+      sumEl.append(h("small", "page"), chip(count(i)), h("small", "livre"), chip(tot));
+    }
+  }
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape" && cur && !e.target.closest("input, textarea, select")) close();
   });
@@ -258,7 +357,10 @@
       sndBtn.textContent = cur.sound ? "🔊" : "🔇";
       sndBtn.classList.toggle("on", cur.sound);
     };
-    const head = h("div.ae-head", h("b", `Case ${p.id}`), h("span.ae-sub", pg.title || ""), h("span.ae-sp"), sndBtn,
+    const dot = h("button.ae-dot.ae-dot-head", { type: "button", dataset: { panel: p.id } });
+    paintDot(dot, reviewOf(cur.pid, p.id));
+    dot.addEventListener("click", () => reviewMenu(dot, cur.i, cur.pid, p.id));
+    const head = h("div.ae-head", dot, h("b", `Case ${p.id}`), h("span.ae-sub", pg.title || ""), h("span.ae-sp"), sndBtn,
                    h("button.ae-ib", { title: "Fermer (Échap)", on: { click: close } }, "✕"));
     // apercu agrandi : une vue de plus sur la case, avec les memes retouches
     const W = 432, ar = (p.rect[2] - p.rect[0]) / Math.max(1, p.rect[3] - p.rect[1]);

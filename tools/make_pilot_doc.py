@@ -413,6 +413,10 @@ les réglages et les points de boucle. Le bouton « Adaptive loop » de l'édite
 <li>Préréglages de tremblé de David (toutes planches) : {code("GET /api/userpresets")} ->
 {code('{"shake": [{"name", "size", "freq", "rot"}]}')} ; {code('POST /api/userpresets {"kind": "shake", "name", "value"}')}
 (ou {code('"delete": true')}). Un préréglage ne garde pas la graine : chaque case garde la sienne.</li>
+<li><b>Suivi des cases</b> : en mode édition, une pastille en haut à droite de chaque case dit où en est David :
+orange = à voir (défaut), vert = OK, rouge = à retoucher. C'est {code("panels[case].review")} ({code("null")}, {code('"ok"')}
+ou {code('"redo"')}), réglable par {code('POST /edit/<case> {"review": "redo"}')}. Si David te demande de reprendre
+un livre, commence par les cases {code('"redo"')} et ne touche pas aux {code('"ok"')}.</li>
 <li>Depuis le 15/10/2026, le tremblé n'est plus incrusté dans la vidéo à l'export : les vidéos sont ré-encodées une fois sans
 lui, puis le lecteur l'applique.</li>
 <li>Un temps mort (image immobile) en fin de vidéo casse la boucle : {code("range")} + {code("xfade")} 6 le corrige sans rendu.</li>

@@ -104,6 +104,8 @@ def apply(pid, panel_id, b):
                 raise KeyError(panel_id)
             if "edit" in b:
                 panel["edit"] = clean(b["edit"])
+            if "review" in b:                        # suivi : a voir (defaut) / ok / a retoucher
+                panel["review"] = b["review"] if b["review"] in ("ok", "redo") else None
             for layer, v in (b.get("volumes") or {}).items():
                 if layer in ("audio", "voice", "foley") and isinstance(panel.get(layer), dict):
                     panel[layer]["volume"] = round(_num(v, 0, 1, 0.8), 3)
@@ -115,7 +117,7 @@ def apply(pid, panel_id, b):
         if b.get("pageVolume") is not None and p.get("pageSound"):
             p["pageSound"]["volume"] = round(_num(b["pageVolume"], 0, 1, 0.7), 3)
             p["pageSound"]["rev"] = time.time()
-    if any(k in b for k in ("edit", "volumes", "extra", "pageVolume")):
+    if any(k in b for k in ("edit", "volumes", "extra", "pageVolume", "review")):
         store.mutate(pid, upd)
 
 

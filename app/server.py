@@ -62,7 +62,7 @@ def merge_project(server_p, ui_p):
         panel = dict(panel)
         panel["renders"] = old.get("renders", [])
         panel["chosen"] = old.get("chosen", {})
-        for k in ("edit", "extraSounds", "prompt_override"):      # ecrits par le mode edition de l'apercu
+        for k in ("edit", "extraSounds", "prompt_override", "review"):      # ecrits par le mode edition de l'apercu
             if k not in panel and k in old:
                 panel[k] = old[k]
         for layer in ("audio", "voice", "foley"):
@@ -459,6 +459,9 @@ class Handler(BaseHTTPRequestHandler):
         if sub == "edit" and len(parts) == 4 and m == "POST":     # mode edition de l'apercu : retouches d'une case
             b = self.jbody()
             edit.apply(pid, parts[3], b)
+            if set(b) <= {"review", "book"}:            # pastille de suivi seulement : rien a assembler
+                return self.send_json({"ok": True, "page": assemble.read_data(store.pdir(pid) / "export"),
+                                       "encoded": [], "report": [], "project": store.get(pid)})
             res = assemble.build(pid)                   # rapide : les retouches ne re-encodent rien
             book = next((x for x in self.books_list() if x["id"] == b.get("book")), None) if b.get("book") else None
             if book:
