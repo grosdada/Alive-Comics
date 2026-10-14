@@ -19,12 +19,13 @@ ORBIT_PROMPT = (
 FROZEN_PROMPT = ORBIT_PROMPT.replace(" In a continuous 360 orbit.", "")
 TAIL = " Then the camera stops. No zoom, no dolly."
 
-AMPLITUDES = {"petit": 40, "moyen": 55, "grand": 70}
+AMPLITUDES = {"petit": 40, "moyen": 55, "grand": 70}     # angle ECRIT dans le prompt (H3 en fait moins)
 
 # Tremble « camera a l'epaule » ajoute au montage (ffmpeg), car H3 ne fait qu'un tremble mou et imprevisible.
 # (deplacement en fraction de l'image, rotation en radians) ; periodique : la boucle reste parfaite.
 # v2 (14/10, retour de David) : la v1 (3,6 % + saccades rapides) faisait « faux tremble 2D ». Derive lente et douce,
-# a peine de rotation : on doit sentir l'operateur, pas voir l'image bouger.
+# a peine de rotation : on doit sentir l'operateur, pas voir l'image bouger. v3 (autre session, 80553bd) : recadrage
+# a position fractionnaire (filtre perspective) et derive plus lente, voir assemble.shake_filter.
 SHAKES = {"aucun": (0, 0), "leger": (0.004, 0.0008), "moyen": (0.008, 0.0016), "fort": (0.013, 0.0025)}
 SHAKE_VERSION = 3
 SHAKE_DEFAULT = {"epaule": "moyen"}            # sinon : aucun
@@ -32,7 +33,7 @@ SHAKE_DEFAULT = {"epaule": "moyen"}            # sinon : aucun
 
 def shake_level(panel):
     cam = (panel or {}).get("camera") or {}
-    return cam.get("shake") or SHAKE_DEFAULT.get(cam.get("id"), "aucun")     # angle ECRIT dans le prompt (H3 en fait moins)
+    return cam.get("shake") or SHAKE_DEFAULT.get(cam.get("id"), "aucun")
 
 # ------------------------------------------------------------------ cameras
 # kind : "frozen" = temps fige, la case se pilote au glisser ; "animated" = la scene bouge, lecture auto.
