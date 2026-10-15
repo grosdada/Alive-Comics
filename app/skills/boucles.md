@@ -90,6 +90,42 @@ waiting. Bad: in full swing, mid-gesture (H3 wants to finish the gesture). A cro
 (frozen panel): add a flow (lights, screen, rain) or a relay at the back. Close-up faces: idle + light flow; if the
 mouth speaks, the panel needs a voice.
 
+## Voice and music
+- If a character's mouth moves to speak (lip-sync), the panel NEEDS a voice, even if it says almost nothing. When the
+  voice option is on, write one short French line said once per hover; otherwise say in "explain_fr" that this panel
+  needs a voice-off (the author records his own short maxims as MP3 and loads them himself).
+- One music per page (the page sound); foley and a few laconic lines in some panels only. Not every panel needs its
+  own sound.
+
+## After rendering: check, then repair without re-rendering when possible
+- Measures: motion < 0.3 = frozen; mirror (video vs itself played backwards) < 0.55 with one excursion = ROUND TRIP;
+  braking (speed of the first/last 12 frames vs the middle) < 0.5 = slows at the seam; seam jump > 3 = visible jump.
+- Braking at the seam: repair with the edit-mode keys "ease" (play the slow frames faster) or "range" + "xfade". No
+  re-render. Orbits always loop well but brake hard at the edges: "ease" fixes them.
+- Round trip or frozen panel: NOT repairable. Re-render with another text (another engine) or another seed; after two
+  failures change the engine (flow, relay, orbit) rather than insist.
+
+## Examples to follow
+- Relay + rhythm (dryers): "At the hair salon the women under the silver dryer hoods keep turning pages of their
+  magazines; the man in the pale puffer and the man in the cream feather outfit keep nodding their heads under the
+  dryers; the hairdresser keeps walking along the line and checking the curlers."
+- Cycle + flow: "At the sink the man in the gold quilted outfit keeps turning a cup under the running tap, always in
+  the same direction, the water pouring in a continuous stream; the man in the plaid shirt beside him keeps a living
+  idle, breathing, blinking."
+- Rhythm + flow (steam): "In the canteen the man in the pale pink quilted collar keeps stirring his coffee, the spoon
+  going round and round in the same direction; steam keeps rising from the cup; the television on the wall keeps
+  flickering; he keeps a living idle, eyes lowered, breathing."
+- Relay alone (corridor): "In the green corridor two fidèles sit on the plastic chairs keeping a living idle; down the
+  corridor a steady stream of crew members keeps coming toward us and passing out of the frame on the right while new
+  ones keep appearing at the far end."
+
+## Examples NOT to write
+- "The man slowly raises his arm to greet her, then lowers it." -> guaranteed round trip (big gesture + "slowly").
+- "He walks in place down the corridor." -> H3 moves the subject forward then back.
+- "The woman stays in place and does not move." -> frozen panel ("stays in place", negation).
+- "The camera arcs ninety degrees around the model." (looping) -> the camera comes back; use orbit360.
+- "The cup fills with coffee." -> a changed state never comes back identical.
+
 ## Checklist for each living panel
 1. Read the image: find the engine (flow, relay, cycle, rhythm).
 2. Every character gets a living idle; at most one or two strong verbs per character.
@@ -100,4 +136,7 @@ mouth speaks, the panel needs a voice.
    zoom, cinematic, operator.
 7. Camera "fixe" (shake is in the player); no 90-degree arc in a loop; orbit360 for the largest panel of the page.
 8. Sounds: "The only sound is the natural sound of the place: ..." (H3 computes them, free).
-9. Panels marked review "ok" (green) were validated by the author: NEVER change them.
+9. Voice: a mouth that speaks needs a voice (short French line, or flag it for the author's MP3). One music per page.
+10. After rendering: check motion, mirror, braking, seam; repair braking with "ease" / "range"; re-render round trips
+    and frozen panels with another engine.
+11. Panels marked review "ok" (green) were validated by the author: NEVER change them.
