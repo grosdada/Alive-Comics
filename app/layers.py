@@ -52,7 +52,8 @@ MIN_AREA = 0.004               # un sujet couvre au moins 0,4 % de la case (les 
 # "hybride" (LaMa pres du contour, la ou la parallaxe le montre, Qwen plus loin). Les deux plaques sont toujours calculees.
 PLATE = "qwen"
 CROWD = 0.45                   # mesure : bonnes cases 14-37 % de sujets, foules 54-67 %
-FRONT_MAX = 0.35               # foule : premier plan detache sur 35 % de la case au plus...
+FRONT_MAX = 0.6                # foule ou gros plan : premier plan detache sur 60 % de la case au plus (a 35 %, une
+                               # mariee sur 43 % devant des invites minuscules n'etait pas detachee)...
 FRONT_GAP = 0.08               # ... et seulement s'il est net (ecart de profondeur avec la personne suivante)
 FILL_PROMPT = ("Fill the magenta area with the background that is hidden behind it: continue the walls, the floor and "
                "the scenery around it, so that the magenta area disappears completely. The area must contain only empty "
@@ -353,31 +354,6 @@ def _sharp(region):
     return np.clip(cv2.GaussianBlur(m, (0, 0), 0.7), 0, 1).astype(np.float32)
 
 
-def _plane(d, keep):
-    """Plan (sol ou mur) ajuste sur la profondeur d aux pixels keep, sans tenir compte des ecarts (3 passes, residus
-    au-dela de 2,5 ecarts robustes ecartes) -> carte H x W. Un plan n'a aucun pli ni bosse : le fond ne s'etire pas
-    localement, il garde seulement la perspective d'ensemble."""
-    import numpy as np
-    H, W = d.shape
-    ys, xs = np.nonzero(keep)
-    if xs.size < 500:
-        return np.full((H, W), float(np.median(d)), np.float32)
-    step = max(1, xs.size // 40000)
-    xs, ys = xs[::step], ys[::step]
-    z = d[ys, xs].astype(np.float64)
-    A = np.stack([np.ones_like(z), xs / W, ys / H], 1)
-    w = np.ones_like(z)
-    coef = np.array([np.median(z), 0.0, 0.0])
-    for _ in range(3):
-        if w.sum() < 100:
-            break
-        coef, *_ = np.linalg.lstsq(A * w[:, None], z * w, rcond=None)
-        r = np.abs(A @ coef - z)
-        w = (r < 2.5 * (1.4826 * np.median(r) + 1e-4)).astype(np.float64)
-    yy, xx = np.mgrid[0:H, 0:W].astype(np.float32)
-    return np.clip(coef[0] + coef[1] * (xx + 0.5) / W + coef[2] * (yy + 0.5) / H, 0, 1).astype(np.float32)
-
-
 def _depth(im, d):
     """Profondeur 0-1 de la photo (brute gardee dans raw/depth.npy : compute et build lisent la meme)."""
     import numpy as np
@@ -398,7 +374,8 @@ def _plan(subs, d_im):
     """Sujets a detacher, du plus proche au plus loin -> (sujets, foule ?, part de la case couverte par tous).
     Case normale : tous. Foule (plus de CROWD de la case) : le premier plan seulement, c.-a-d. les plus proches,
     separes de la personne suivante par FRONT_GAP de profondeur au moins et sur FRONT_MAX de la case au plus ; le
-    reste de la foule reste dans le decor. Aucun premier plan net : [] (la nappe simple)."""
+    reste de la foule reste dans le decor ; un gros plan (une mariee sur 43 % de la case devant des invites minuscules,
+    ou seule dans la case) est detache en entier. Aucun premier plan net : [] (la carte de la case, un plan)."""
     import cv2
     import numpy as np
     for s in subs:
@@ -411,11 +388,16 @@ def _plan(subs, d_im):
         covers.append(float(acc.mean()))
     if covers[-1] <= CROWD:
         return subs, False, covers[-1]
+    allm = np.any([s["mask"] for s in subs], axis=0)
+    z_rest = float(np.median(d_im[~allm])) if (~allm).any() else 0.0     # le decor, derriere le dernier sujet
     k = 0
-    for i in range(1, len(subs)):
+    for i in range(1, len(subs) + 1):
         if covers[i - 1] > FRONT_MAX:
             break
-        if subs[i - 1]["z"] - subs[i]["z"] >= FRONT_GAP:
+        gap = subs[i - 1]["z"] - (subs[i]["z"] if i < len(subs) else z_rest)
+        # au-dela de 35 % de la case, seulement un premier plan tres net (ecart 0,3) : la mariee devant des invites
+        # lointains oui ; 9 personnes sur 52 % d'une foule dansante (ecart 0,12 avec le fond) non
+        if gap >= FRONT_GAP and (covers[i - 1] <= 0.35 or gap >= 0.3):
             k = i
     return subs[:k], True, covers[-1]
 
@@ -713,7 +695,7 @@ def build(pid, panel_id, spec=None):
 
     # 5) fond : un plan ajuste sur la profondeur de la photo hors des sujets detaches (la foule restee au decor compte),
     # pente bornee (le lecteur ne peut alors jamais replier l'image)
-    d_bg = depth.bound_slope(_plane(d_im, M < 0.01))
+    d_bg = depth.bound_slope(depth.plane(d_im, M < 0.01))
 
     # 6) fichiers
     d.mkdir(parents=True, exist_ok=True)

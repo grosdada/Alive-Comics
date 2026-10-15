@@ -5,7 +5,8 @@ Modele : Depth Anything V2 Small, licence Apache 2.0 (distribuable, usage commer
 pas de file d'attente. Le modele (99 Mo) est telecharge une fois dans data/models/.
 Attention : les tailles Base / Large / Giant de Depth Anything V2 sont CC-BY-NC (non commercial) : ne pas les utiliser.
 
-Carte « nappe sans pli » (v2) : niveaux de gris, blanc = proche, noir = loin, normalisee 0-1 par image (centiles 1-99),
+Carte v3 (16/10/2026) : un plan ajuste sur la profondeur (plus aucune deformation locale ; la nappe v2 s'etirait autour
+des personnages). Ancienne carte « nappe sans pli » (v2) : niveaux de gris, blanc = proche, noir = loin, normalisee 0-1 par image (centiles 1-99),
 lissee en suivant les bords de l'image (Fast Global Smoother d'OpenCV), puis pente bornee : la nappe ne peut plus se
 replier sur elle-meme, donc plus de bords dedoubles (la v1 dilatait la carte, ce qui collait une bande de fond au sujet).
 Le vrai relief sans etirement vient des couches (app/layers.py) ; cette nappe sert d'apercu immediat et de repli.
@@ -28,7 +29,7 @@ MODEL = store.ROOT / "data" / "models" / "depth-anything-v2-small.onnx"
 LICENSE = ("Depth Anything V2 Small (Apache License 2.0) : https://huggingface.co/depth-anything/Depth-Anything-V2-Small ; "
            "ONNX : https://huggingface.co/onnx-community/depth-anything-v2-small")
 MEAN, STD = (0.485, 0.456, 0.406), (0.229, 0.224, 0.225)
-SHEET_VERSION = "2"
+SHEET_VERSION = "3"
 K_REF = 0.05          # deplacement maximal (en largeur de case) par unite de profondeur : sert a borner la pente
 DEPTH_PRO = store.ROOT / "data" / "models" / "hf" / "apple__DepthPro-hf"
 _lock = threading.Lock()
@@ -153,6 +154,31 @@ def bound_slope(d, k_ref=K_REF):
     return env
 
 
+def plane(d, keep=None):
+    """Plan (sol ou mur) ajuste sur la profondeur d aux pixels keep, sans tenir compte des ecarts (3 passes, residus
+    au-dela de 2,5 ecarts robustes ecartes) -> carte H x W. Un plan n'a aucun pli ni bosse : le fond ne s'etire pas
+    localement, il garde seulement la perspective d'ensemble."""
+    import numpy as np
+    H, W = d.shape
+    ys, xs = np.nonzero(np.ones(d.shape, bool) if keep is None else keep)
+    if xs.size < 500:
+        return np.full((H, W), float(np.median(d)), np.float32)
+    step = max(1, xs.size // 40000)
+    xs, ys = xs[::step], ys[::step]
+    z = d[ys, xs].astype(np.float64)
+    A = np.stack([np.ones_like(z), xs / W, ys / H], 1)
+    w = np.ones_like(z)
+    coef = np.array([np.median(z), 0.0, 0.0])
+    for _ in range(3):
+        if w.sum() < 100:
+            break
+        coef, *_ = np.linalg.lstsq(A * w[:, None], z * w, rcond=None)
+        r = np.abs(A @ coef - z)
+        w = (r < 2.5 * (1.4826 * np.median(r) + 1e-4)).astype(np.float64)
+    yy, xx = np.mgrid[0:H, 0:W].astype(np.float32)
+    return np.clip(coef[0] + coef[1] * (xx + 0.5) / W + coef[2] * (yy + 0.5) / H, 0, 1).astype(np.float32)
+
+
 def save_map(d, dst, version=SHEET_VERSION):
     import numpy as np
     from PIL import Image
@@ -166,12 +192,13 @@ def save_map(d, dst, version=SHEET_VERSION):
 
 
 def compute(src, dst):
-    """Carte « nappe sans pli » de l'image src -> dst (PNG 8 bits, meme taille que src)."""
+    """Carte de la case sans couches -> dst (PNG 8 bits, meme taille que src) : un PLAN ajuste sur la profondeur (v3,
+    16/10/2026). La nappe (v2) suivait le relief et s'etirait autour des personnages ; David n'en veut plus : sans
+    couches, l'image glisse d'un bloc avec une legere perspective, sans aucune deformation."""
     import numpy as np
     from PIL import Image
     rgb = np.asarray(Image.open(src).convert("RGB"), np.float32) / 255
-    d = normalize(raw(rgb))
-    d = bound_slope(smooth_edges(d, rgb))
+    d = bound_slope(plane(normalize(raw(rgb))))
     save_map(d, dst)
 
 
