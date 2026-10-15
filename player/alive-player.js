@@ -34,6 +34,11 @@
  *       Mode edition (apercu de l'application) : setEditHook(fn), addView, removeView, setFx, updatePanel,
  *       setLayerVolume, setGlobalVolume, seekTo, setPinned, setPanelSound.
  * Les videos doivent etre « tout-intra » (ffmpeg -g 1) pour un saut instantane.
+ *
+ * Cases en relief (depth: {img, map, preset, amount, focus, duration, trigger}) : pas de video, une photo et sa carte
+ * de profondeur (blanc = proche). Un seul canevas WebGL par page (les navigateurs limitent le nombre de contextes) :
+ * chaque case y est dessinee dans son polygone ; la camera bouge de quelques pour cent au survol (ou au clic) et suit
+ * le glisser. Au repos, le dessin est identique a l'image de la page. Sans WebGL : l'image fixe, sans erreur.
  */
 (function () {
   "use strict";
@@ -97,6 +102,7 @@
       const pts = p.poly.map(([x, y]) => `${(x - x0) / (x1 - x0) * 100}% ${(y - y0) / (y1 - y0) * 100}%`);
       el.style.clipPath = `polygon(${pts.join(", ")})`;
     }
+    if (!p.video && p.depth) { makeRelief(inst, p, el, base); return; }
     if (!p.video) {
       el.classList.add("static");
       const so = { p, inst, el, static: true };
@@ -374,10 +380,12 @@
   function tick(now) {
     const dt = Math.min(0.05, (now - lastTick) / 1000); lastTick = now;
     for (const inst of pages) for (const st of inst.panels) step(st, now, dt);
+    for (const R of renderers) if (R.dirty) R.draw();
     if (pages.size) requestAnimationFrame(tick); else ticking = false;
   }
 
   function step(st, now, dt) {
+    if (st.relief) { stepRelief(st, now, dt); return; }
     const fps = st.inst.fps;
     // editeur : le tremble vit meme sur une image fixe (il parcourt sa boucle en temps reel)
     if (st.freeShake) st.shFree += dt / Math.max(0.2, shakeLoop(st).sec); else st.shFree = 0;
@@ -433,6 +441,7 @@
   function resetPage(inst) {
     const t0 = performance.now();
     for (const st of inst.panels) {
+      if (st.relief) { st.rv.once = -1; continue; }
       st.vel = 0;
       let from = st.pos;
       if (st.loopMode) {                  // par le chemin le plus court
@@ -446,7 +455,9 @@
 
   function destroyPage(inst) {
     if (lb.st && lb.st.inst === inst) closeLightbox();
+    if (inst.rr) inst.rr.destroy();
     for (const st of inst.panels) {
+      for (const rv of (st.rviews || []).slice()) rv.remove();
       for (const vw of st.views.slice()) removeView(st, vw);
       if (st.idle) { st.idle.pause(); st.idle.removeAttribute("src"); st.idle.load(); }
       dropLayers(st);
@@ -592,6 +603,287 @@
     lb.el.classList.remove("open"); lb.el.setAttribute("aria-hidden", "true");
   }
 
+  // ---------------------------------------------------------------- relief (carte de profondeur, WebGL)
+  const renderers = new Set();          // canevas WebGL actifs (un par page, plus les vues de l'editeur)
+  const RELIEF_VS = "attribute vec2 p; attribute vec2 t; varying vec2 v; void main(){ v = t; gl_Position = vec4(p, 0.0, 1.0); }";
+  const RELIEF_FS = `precision highp float;
+    varying vec2 v; uniform sampler2D uImg, uDep;
+    uniform vec2 uOff; uniform float uDolly, uZoom, uFocus, uOver, uShow, uHue;
+    uniform vec3 uFrame; uniform vec4 uGrade;
+    void main(){
+      vec2 s = (v - 0.5 + uFrame.yz * (uFrame.x - 1.0) * 0.5) / uFrame.x + 0.5;   // cadrage (fx.frame)
+      s = (s - 0.5) / (uOver * uZoom) + 0.5;                                      // sur-cadrage pendant le mouvement
+      vec2 uv = s;
+      for (int i = 0; i < 8; i++) {                                               // point fixe : pixel source
+        float z = texture2D(uDep, clamp(uv, 0.0, 1.0)).r - uFocus;
+        uv = (s - 0.5) / (1.0 + uDolly * z) + 0.5 - z * uOff;
+      }
+      uv = clamp(uv, 0.0, 1.0);
+      vec3 c = texture2D(uImg, uv).rgb;
+      c *= uGrade.y;                                                              // luminosite
+      c = (c - 0.5) * uGrade.z + 0.5;                                             // contraste
+      float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
+      c = mix(vec3(l), c, uGrade.x);                                              // saturation
+      c += vec3(0.07, 0.0, -0.07) * uGrade.w;                                     // temperature
+      if (uHue != 0.0) {                                                          // teinte (rotation autour du gris)
+        float a = radians(uHue), co = cos(a), si = sin(a);
+        vec3 k = vec3(0.57735);
+        c = c * co + cross(k, c) * si + k * dot(k, c) * (1.0 - co);
+      }
+      gl_FragColor = vec4(mix(clamp(c, 0.0, 1.0), vec3(texture2D(uDep, uv).r), uShow), 1.0);
+    }`;
+  const RELIEF_MOVES = {
+    respire: (ph, a, e) => ({ ox: 0, oy: 0, dolly: 0.6 * e, zoom: 1 + 1.6 * a * e }),
+    glisse: (ph, a, e) => ({ ox: a * Math.sin(2 * Math.PI * ph) * e, oy: 0, dolly: 0, zoom: 1 }),
+    tourne: (ph, a, e) => ({ ox: a * Math.sin(2 * Math.PI * ph) * e, oy: 0.6 * a * (1 - Math.cos(2 * Math.PI * ph)) * e * 0.5, dolly: 0, zoom: 1 }),
+    vertigo: (ph, a, e) => ({ ox: 0, oy: 0, dolly: -12 * a * e, zoom: 1 }),
+  };
+  const CYCLIC = { respire: true, vertigo: true };     // enveloppe qui revient a zero a chaque tour
+
+  function makeGL(canvas) {
+    const gl = canvas.getContext("webgl", { premultipliedAlpha: false, antialias: true, alpha: true, preserveDrawingBuffer: false });
+    if (!gl) return null;
+    const sh = (type, src) => { const o = gl.createShader(type); gl.shaderSource(o, src); gl.compileShader(o); return o; };
+    const prog = gl.createProgram();
+    gl.attachShader(prog, sh(gl.VERTEX_SHADER, RELIEF_VS));
+    gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, RELIEF_FS));
+    gl.linkProgram(prog);
+    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) return null;
+    gl.useProgram(prog);
+    const U = {};
+    for (const n of ["uImg", "uDep", "uOff", "uDolly", "uZoom", "uFocus", "uOver", "uShow", "uHue", "uFrame", "uGrade"]) U[n] = gl.getUniformLocation(prog, n);
+    gl.uniform1i(U.uImg, 0); gl.uniform1i(U.uDep, 1);
+    const R = { gl, canvas, prog, U, items: [], dirty: true, aP: gl.getAttribLocation(prog, "p"), aT: gl.getAttribLocation(prog, "t") };
+    R.texture = (source) => {
+      const t = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, t);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, source);
+      return t;
+    };
+    // verts : [x, y (espace de decoupe), u, v] en triangles
+    R.add = (st, verts) => {
+      const it = { st, n: verts.length / 4, buf: gl.createBuffer(), tImg: null, tDep: null };
+      gl.bindBuffer(gl.ARRAY_BUFFER, it.buf);
+      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(verts), gl.STATIC_DRAW);
+      R.items.push(it);
+      R.upload(it);
+      return it;
+    };
+    R.upload = (it) => {
+      const st = it.st;
+      if (!st.imgOk || !st.depOk) return;
+      if (it.tImg) { gl.deleteTexture(it.tImg); gl.deleteTexture(it.tDep); }
+      it.tImg = R.texture(st.imgEl); it.tDep = R.texture(st.depEl);
+      R.dirty = true;
+    };
+    R.remove = (st) => {
+      R.items = R.items.filter(it => {
+        if (it.st !== st) return true;
+        gl.deleteBuffer(it.buf); if (it.tImg) { gl.deleteTexture(it.tImg); gl.deleteTexture(it.tDep); }
+        return false;
+      });
+      R.dirty = true;
+    };
+    R.resize = (w, h) => {
+      const dpr = Math.min(2, window.devicePixelRatio || 1), k = Math.min(1, 2560 / Math.max(1, w * dpr));
+      canvas.width = Math.max(1, Math.round(w * dpr * k)); canvas.height = Math.max(1, Math.round(h * dpr * k));
+      R.dirty = true;
+    };
+    R.draw = () => {
+      R.dirty = false;
+      gl.viewport(0, 0, canvas.width, canvas.height);
+      gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT);
+      for (const it of R.items) {
+        if (!it.tImg) continue;
+        const st = it.st, m = st.motion || { ox: 0, oy: 0, dolly: 0, zoom: 1, over: 1 }, c = st.p.depth || {};
+        const fx = st.p.fx || {}, g = fx.grade || {}, fr = fx.frame || {};
+        gl.bindBuffer(gl.ARRAY_BUFFER, it.buf);
+        gl.enableVertexAttribArray(R.aP); gl.vertexAttribPointer(R.aP, 2, gl.FLOAT, false, 16, 0);
+        gl.enableVertexAttribArray(R.aT); gl.vertexAttribPointer(R.aT, 2, gl.FLOAT, false, 16, 8);
+        gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, it.tImg);
+        gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, it.tDep);
+        gl.uniform2f(R.U.uOff, m.ox, m.oy);
+        gl.uniform1f(R.U.uDolly, m.dolly); gl.uniform1f(R.U.uZoom, m.zoom); gl.uniform1f(R.U.uOver, m.over);
+        gl.uniform1f(R.U.uFocus, c.focus ?? 0.7); gl.uniform1f(R.U.uShow, st.showMap ? 1 : 0);
+        gl.uniform3f(R.U.uFrame, fr.zoom > 1 ? fr.zoom : 1, fr.zoom > 1 ? (fr.x || 0) : 0, fr.zoom > 1 ? (fr.y || 0) : 0);
+        gl.uniform4f(R.U.uGrade, g.sat ?? 1, g.bright ?? 1, g.contrast ?? 1, g.temp || 0);
+        gl.uniform1f(R.U.uHue, g.hue || 0);
+        gl.drawArrays(gl.TRIANGLES, 0, it.n);
+      }
+    };
+    R.destroy = () => {
+      renderers.delete(R);
+      const lose = gl.getExtension("WEBGL_lose_context");
+      if (lose) lose.loseContext();
+      canvas.remove();
+    };
+    renderers.add(R);
+    return R;
+  }
+
+  // canevas de la page : sous les cases (qui gardent les gestes), au-dessus de l'image de fond, sous les traits
+  function pageRenderer(inst) {
+    if (inst.rr !== undefined) return inst.rr;
+    const cv = document.createElement("canvas");
+    cv.className = "ac-relief";
+    inst.pageEl.insertBefore(cv, inst.pageEl.querySelector(".ac-panel"));
+    const R = makeGL(cv);
+    inst.rr = R;
+    if (!R) { cv.remove(); return null; }
+    const ro = new ResizeObserver(() => R.resize(inst.pageEl.clientWidth, inst.pageEl.clientHeight));
+    ro.observe(inst.pageEl);
+    const destroy = R.destroy;
+    R.destroy = () => { ro.disconnect(); destroy(); };
+    return R;
+  }
+
+  function polyVerts(p, PW, PH) {
+    const [x0, y0, x1, y1] = p.rect;
+    const pts = p.poly || [[x0, y0], [x1, y0], [x1, y1], [x0, y1]];
+    const V = pts.map(([x, y]) => [x / PW * 2 - 1, 1 - y / PH * 2, (x - x0) / (x1 - x0), (y - y0) / (y1 - y0)]);
+    const out = [];
+    for (let i = 1; i < V.length - 1; i++) out.push(...V[0], ...V[i], ...V[i + 1]);    // eventail (cases convexes)
+    return out;
+  }
+
+  function loadRelief(st, stamp) {
+    const c = st.p.depth;
+    st.imgOk = st.depOk = false;
+    st.imgEl = new Image(); st.depEl = new Image();
+    const done = () => {
+      if (!st.imgOk || !st.depOk) return;
+      for (const R of renderers) for (const it of R.items) if (it.st === st) R.upload(it);
+      st.depthData = null;
+    };
+    st.imgEl.onload = () => { st.imgOk = true; done(); };
+    st.depEl.onload = () => { st.depOk = true; done(); };
+    st.imgEl.src = withStamp(st.base + c.img, stamp);
+    st.depEl.src = withStamp(st.base + c.map, stamp);
+  }
+
+  function makeRelief(inst, p, el, base) {
+    el.classList.add("relief");
+    const st = { p, inst, el, base, relief: true, views: [], rviews: [], layers: [], over: false, hover: false, pinned: false,
+                 showMap: false, rv: { ph: 0, lvl: 0, once: -1, dx: 0, dy: 0, drag: null }, motion: null };
+    loadRelief(st, inst.stamp);
+    const R = pageRenderer(inst);
+    if (R) R.add(st, polyVerts(p, inst.data.size[0], inst.data.size[1]));
+    buildLayers(st);
+    el.addEventListener("pointerenter", (e) => { if (e.pointerType !== "touch") { st.over = true; soundOnPanel(st, true); } });
+    el.addEventListener("pointerleave", (e) => { if (e.pointerType !== "touch") st.over = false; if (!st.pinSound) soundOnPanel(st, false); });
+    // glisser : la camera suit le doigt ou la souris ; simple clic : le mouvement joue une fois (ou l'editeur s'ouvre)
+    el.addEventListener("pointerdown", (e) => {
+      if (e.button !== 0) return;
+      try { el.setPointerCapture(e.pointerId); } catch (_) { /* pointeur deja relache */ }
+      const r = el.getBoundingClientRect();
+      st.rv.drag = { x: e.clientX, y: e.clientY, w: r.width, h: r.height, t: performance.now(), moved: false };
+      if (e.pointerType === "touch") {
+        for (const i2 of pages) for (const o of i2.panels) if (o !== st && o.hover) soundOnPanel(o, false);
+        if (st.layers.length) soundOnPanel(st, true);
+      }
+    });
+    el.addEventListener("pointermove", (e) => {
+      const d = st.rv.drag;
+      if (!d) return;
+      const dx = (e.clientX - d.x) / d.w, dy = (e.clientY - d.y) / d.h;
+      if (Math.hypot(e.clientX - d.x, e.clientY - d.y) > 5) d.moved = true;
+      st.rv.dx = Math.max(-1, Math.min(1, dx * 2.5)); st.rv.dy = Math.max(-1, Math.min(1, dy * 2.5));
+    });
+    const up = (e) => {
+      const d = st.rv.drag;
+      if (!d) return;
+      st.rv.drag = null;
+      if (!d.moved && performance.now() - d.t < 600 && e.type === "pointerup") {
+        if (editHook) editHook(st); else st.rv.once = performance.now();
+      }
+    };
+    el.addEventListener("pointerup", up);
+    el.addEventListener("pointercancel", up);
+    inst.panels.push(st);
+  }
+
+  // mouvement d'une case en relief : boucle douce tant qu'elle est survolee (ou un tour au clic), plus le glisser
+  function stepRelief(st, now, dt) {
+    const c = st.p.depth || {}, rv = st.rv, a = c.amount || 0.025, dur = Math.max(0.5, c.duration || 2);
+    const move = RELIEF_MOVES[c.preset] || RELIEF_MOVES.respire;
+    const hoverOn = (c.trigger || "hover") === "hover" && (st.over || st.pinned || st.inst.play === "always");
+    rv.lvl += ((hoverOn ? 1 : 0) - rv.lvl) * Math.min(1, dt * (hoverOn ? 2.5 : 2));
+    if (rv.lvl < 0.002 && !hoverOn) rv.lvl = 0;
+    let m;
+    if (rv.once >= 0) {                                  // un tour, au clic
+      let t = (now - rv.once) / 1000 / dur;
+      if (t >= 1) { t = 1; rv.once = -1; }
+      const sm = t * t * (3 - 2 * t), env = Math.sin(Math.PI * sm);
+      m = move(sm, a, env);
+      m.k = env;
+    } else {
+      if (rv.lvl > 0) rv.ph = (rv.ph + dt / dur) % 1;
+      const e = CYCLIC[c.preset || "respire"] ? (0.5 - 0.5 * Math.cos(2 * Math.PI * rv.ph)) * rv.lvl : rv.lvl;
+      m = move(rv.ph, a, e);
+      m.k = rv.lvl;
+    }
+    // glisser : decalage qui suit le pointeur, puis revient en douceur
+    if (!rv.drag) { rv.dx *= Math.exp(-6 * dt); rv.dy *= Math.exp(-6 * dt); if (Math.abs(rv.dx) + Math.abs(rv.dy) < 1e-3) rv.dx = rv.dy = 0; }
+    m.ox -= rv.dx * a * 1.6; m.oy -= rv.dy * a * 1.0;
+    const k = Math.max(m.k, Math.min(1, Math.hypot(rv.dx, rv.dy)));
+    m.over = 1 + k * (2.4 * a + 0.02) + 0.35 * Math.abs(m.dolly);   // au repos : 1 = identique a l'image de la page
+    const old = st.motion;
+    if (!old || old.ox !== m.ox || old.oy !== m.oy || old.dolly !== m.dolly || old.zoom !== m.zoom || old.over !== m.over) {
+      st.motion = m;
+      for (const R of renderers) if (R.items.some(it => it.st === st)) R.dirty = true;
+    }
+  }
+
+  // vue supplementaire d'une case en relief (editeur) : son propre canevas, toute la surface
+  function addReliefView(st, host) {
+    const cv = document.createElement("canvas");
+    cv.className = "ac-relief-view";
+    host.appendChild(cv);
+    const R = makeGL(cv);
+    if (!R) { cv.remove(); return { remove() {}, ok: false }; }
+    R.add(st, [-1, 1, 0, 0, 1, 1, 1, 0, 1, -1, 1, 1, -1, 1, 0, 0, 1, -1, 1, 1, -1, -1, 0, 1]);
+    const ro = new ResizeObserver(() => R.resize(host.clientWidth, host.clientHeight));
+    ro.observe(host);
+    const vw = { ok: true, canvas: cv, remove() { ro.disconnect(); R.destroy(); st.rviews = st.rviews.filter(x => x !== vw); } };
+    st.rviews.push(vw);
+    startTick();
+    return vw;
+  }
+  function setRelief(st, cfg) {
+    st.p.depth = Object.assign({}, st.p.depth, cfg);
+    for (const R of renderers) if (R.items.some(it => it.st === st)) R.dirty = true;
+  }
+  function reliefShowMap(st, on) { st.showMap = !!on; for (const R of renderers) R.dirty = true; }
+  function reliefPlay(st) { st.rv.once = performance.now(); }
+  // profondeur (0..1) sous un point de la case : pour choisir le plan net d'un clic
+  function reliefDepthAt(st, u, v) {
+    if (!st.depOk) return null;
+    if (!st.depthData) {
+      const c = document.createElement("canvas");
+      c.width = st.depEl.naturalWidth; c.height = st.depEl.naturalHeight;
+      const g = c.getContext("2d", { willReadFrequently: true });
+      g.drawImage(st.depEl, 0, 0);
+      st.depthData = { w: c.width, h: c.height, d: g.getImageData(0, 0, c.width, c.height).data };
+    }
+    const D = st.depthData, x = Math.max(0, Math.min(D.w - 1, Math.round(u * (D.w - 1)))), y = Math.max(0, Math.min(D.h - 1, Math.round(v * (D.h - 1))));
+    return D.d[(y * D.w + x) * 4] / 255;
+  }
+  function updateRelief(st, entry, stamp) {
+    const reload = !st.p.depth || entry.depth.img !== st.p.depth.img || entry.depth.map !== st.p.depth.map || stamp;
+    st.p = entry;
+    if (reload) loadRelief(st, stamp);
+    const was = st.hover;
+    dropLayers(st);
+    const keep = st.inst.stamp;
+    st.inst.stamp = stamp || keep;
+    buildLayers(st);
+    st.inst.stamp = keep;
+    if (was) soundOnPanel(st, true);
+    for (const R of renderers) R.dirty = true;
+  }
+
   // ---------------------------------------------------------------- mode edition (apercu de l'application)
   function setEditHook(fn) {
     editHook = fn || null;
@@ -599,6 +891,7 @@
   }
   function setFx(st, fx) {
     st.p.fx = fx || undefined;
+    if (st.relief) { for (const R of renderers) R.dirty = true; return; }
     configure(st);
     applyFx(st, true);
     render(st);
@@ -677,6 +970,7 @@
   window.AlivePlayer = { isUnlocked: () => unlocked, mount, setBW, setSound, resetAll, hasAudio, isLightboxOpen: () => !!lb.st,
                          setEditHook, addView, removeView, setFx, updatePanel, setLayerVolume, setGlobalVolume, seekTo,
                          setPinned, setPanelSound, setPageSound, frameOf: idxOf, _pages: pages,
+                         addReliefView, setRelief, reliefShowMap, reliefPlay, reliefDepthAt, updateRelief,
                          // tremble d'une case : cycles par boucle et frequence reellement jouee
                          shakeInfo(st) {
                            const sh = (st.p.fx || {}).shake;

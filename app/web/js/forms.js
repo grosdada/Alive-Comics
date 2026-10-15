@@ -34,6 +34,39 @@ function volume(obj, def, app) {
 }
 
 // ------------------------------------------------------------------ camera
+// traitement d'une case : video MiniMax H3 (quelques minutes sur les machines) ou photo en relief (instantane)
+export function treatmentForm(app, pid) {
+  const panel = app.panel(pid);
+  const relief = panel.treatment === "relief";
+  const box = h("div.form");
+  box.append(seg([["h3", "Vidéo H3"], ["relief", "Relief (instantané)"]], relief ? "relief" : "h3", (m) => {
+    panel.treatment = m; app.commitSoon("panel"); app.refreshInspector(); app.editor.renderOverlay?.();
+  }));
+  if (!relief) {
+    box.append(h("p.muted", "La case devient une courte vidéo MiniMax H3 (quelques minutes de calcul sur les machines)."));
+    return box;
+  }
+  const r = panel.relief = panel.relief || {};
+  box.append(h("p.muted", "Photo en relief : une carte de profondeur calculée en une seconde sur ce PC (Depth Anything V2 Small, " +
+                         "licence Apache 2.0). Le lecteur bouge la caméra de quelques pour cent au survol, au clic ou au glisser. Aucune vidéo."));
+  box.append(field("Mouvement", select(app.presets.relief || [], r.preset || "respire", (v) => { r.preset = v; app.commitSoon("panel"); }),
+                   (app.presets.relief || []).find(x => x.id === (r.preset || "respire"))?.hint));
+  box.append(field("Déclenchement", select([{ id: "hover", label: "Au survol (boucle douce)" }, { id: "click", label: "Au clic (un tour)" }],
+                                            r.trigger || "hover", (v) => { r.trigger = v; app.commitSoon("panel"); })));
+  const go = h("button.primary", "Calculer la carte de profondeur");
+  go.addEventListener("click", async () => {
+    go.disabled = true; go.textContent = "Calcul…";
+    try {
+      await app.ensureStart?.(pid);
+      const res = await post(`projects/${app.project.id}/depth/${pid}`, { force: true });
+      toast(`Carte prête en ${res.seconds} s. Aperçu pour voir le relief.`, "ok");
+    } catch (e) { toast(e.message, "error"); }
+    go.disabled = false; go.textContent = "Calculer la carte de profondeur";
+  });
+  box.append(h("div.row", go), h("small.muted", "Amplitude, plan net et durée se règlent dans l'aperçu, mode édition."));
+  return box;
+}
+
 export function cameraForm(app, pid, compact) {
   const panel = app.panel(pid);
   const cam = panel.camera = panel.camera || { id: "arc", fields: {} };

@@ -22,7 +22,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
-from . import assemble, compose, director, edit, falapi, geometry, jobs, llm, presets, publish, settings, sounds, store
+from . import assemble, compose, depth, director, edit, falapi, geometry, jobs, llm, presets, publish, settings, sounds, store
 
 ROOT = Path(__file__).resolve().parent.parent
 WEB = ROOT / "app" / "web"
@@ -458,8 +458,12 @@ class Handler(BaseHTTPRequestHandler):
             missing = [x for x in b.get("panels", []) if not store.path(pid, f"start/{x}.png").exists()]
             if missing or not store.get(pid).get("geometry"):
                 compose.compose(pid, missing or None)
+            relief = []
             for panel in b.get("panels", []):
                 try:
+                    if presets.treatment(store.get(pid)["panels"].get(panel)) == "relief":
+                        if depth.ensure(pid, panel):           # relief : la carte en ~1 s, pas de video
+                            relief.append(panel)
                     created += S.enqueue_panel(pid, panel, b.get("target", "local"), b.get("machines"),
                                                b.get("seeds", {}).get(panel))
                 except (FileNotFoundError, KeyError, ValueError) as e:
@@ -469,7 +473,7 @@ class Handler(BaseHTTPRequestHandler):
                           for j in S.list(pid))
             if ps.get("mode") == "generate" and not ps.get("file") and not pending:
                 created += S.enqueue_audio(pid, "_page", b.get("machines"))          # son global pas encore genere
-            return self.send_json({"jobs": created, "errors": errors})
+            return self.send_json({"jobs": created, "errors": errors, "relief": relief})
         if sub == "audio" and m == "POST":
             b = self.jbody()
             return self.send_json({"jobs": S.enqueue_audio(pid, parts[3], b.get("machines"), b.get("seed"))})
@@ -486,6 +490,13 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_json({"ok": True, "page": assemble.read_data(store.pdir(pid) / "export"),
                                    "encoded": res.get("encoded", []), "report": res.get("report", []),
                                    "project": store.get(pid)})
+        if sub == "depth" and len(parts) == 4 and m == "POST":    # carte de profondeur d'une case (relief)
+            t0 = time.time()
+            rel = depth.ensure(pid, parts[3], bool(self.jbody().get("force")))
+            if not rel:
+                raise ApiError("pas d'image de départ pour cette case : poser une image d'abord")
+            return self.send_json({"file": rel, "url": f"/projects/{pid}/{rel}?t={int(time.time())}",
+                                   "seconds": round(time.time() - t0, 2), "model": depth.MODEL_ID})
         if sub == "regen" and len(parts) == 4 and m == "POST":    # regenerer la video d'une case (consigne, graine)
             return self.send_json(edit.regen(pid, parts[3], self.jbody()))
         if sub == "regensound" and len(parts) == 4 and m == "POST":

@@ -101,6 +101,20 @@ def clean(e):
     return out
 
 
+def clean_relief(r):
+    out = {}
+    if r.get("preset") in presets.RELIEF_IDS:
+        out["preset"] = r["preset"]
+    for k, lo, hi in (("amount", 0.002, 0.08), ("duration", 0.6, 8)):
+        if r.get(k) is not None:
+            out[k] = round(_num(r[k], lo, hi, lo), 4)
+    if r.get("focus") is not None:
+        out["focus"] = round(_num(r["focus"], 0, 1, 0.7), 3)
+    if r.get("trigger") in presets.RELIEF_TRIGGERS:
+        out["trigger"] = r["trigger"]
+    return out
+
+
 def apply(pid, panel_id, b):
     """Enregistre retouches, volumes, sons ajoutes ; panel_id « _ » = seulement la page (volume du son global)."""
     def upd(p):
@@ -110,6 +124,10 @@ def apply(pid, panel_id, b):
                 raise KeyError(panel_id)
             if "edit" in b:
                 panel["edit"] = clean(b["edit"])
+            if isinstance(b.get("relief"), dict):     # reglages du relief (preset, amplitude, plan net, duree, declenchement)
+                panel["relief"] = clean_relief(b["relief"])
+            if b.get("treatment") in ("relief", "h3"):
+                panel["treatment"] = b["treatment"]
             if "review" in b:                        # suivi : a voir (defaut) / ok / a retoucher
                 panel["review"] = b["review"] if b["review"] in ("ok", "redo") else None
             for layer, v in (b.get("volumes") or {}).items():
@@ -123,7 +141,7 @@ def apply(pid, panel_id, b):
         if b.get("pageVolume") is not None and p.get("pageSound"):
             p["pageSound"]["volume"] = round(_num(b["pageVolume"], 0, 1, 0.7), 3)
             p["pageSound"]["rev"] = time.time()
-    if any(k in b for k in ("edit", "volumes", "extra", "pageVolume", "review")):
+    if any(k in b for k in ("edit", "volumes", "extra", "pageVolume", "review", "relief", "treatment")):
         store.mutate(pid, upd)
 
 

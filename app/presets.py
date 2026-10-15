@@ -227,8 +227,44 @@ def _arc(subject, short, toward, ending, angle, rigid):
     return f"The camera {body}{TAIL}"
 
 
+# ------------------------------------------------------------------ relief (carte de profondeur, sans video)
+# Chaque case choisit son traitement : « h3 » (video MiniMax H3, defaut) ou « relief » (photo en relief : une carte de
+# profondeur calculee en ~1 s, le lecteur bouge la camera de quelques pour cent). Voir app/depth.py et docs/PARALLAXE-RELIEF.html.
+RELIEF_PRESETS = [
+    {"id": "respire", "label": "Respire", "hint": "petite avancée vers le sujet puis retour : portraits, couples, détails",
+     "amount": 0.025, "duration": 2.0},
+    {"id": "glisse", "label": "Glisse", "hint": "travelling latéral aller-retour : groupes, paysages, tables",
+     "amount": 0.025, "duration": 2.4},
+    {"id": "tourne", "label": "Tourne", "hint": "petit cercle de caméra autour du sujet : sujet central bien détaché",
+     "amount": 0.02, "duration": 2.6},
+    {"id": "vertigo", "label": "Vertigo", "hint": "le sujet garde sa taille, le fond s'éloigne : moments forts",
+     "amount": 0.03, "duration": 2.2},
+]
+RELIEF_IDS = {r["id"] for r in RELIEF_PRESETS}
+RELIEF_TRIGGERS = ("hover", "click")
+
+
+def treatment(panel):
+    return "relief" if (panel or {}).get("treatment") == "relief" else "h3"
+
+
+def relief_cfg(panel):
+    """Reglages du relief d'une case (completes par les valeurs du preset)."""
+    r = (panel or {}).get("relief") or {}
+    pre = next((x for x in RELIEF_PRESETS if x["id"] == r.get("preset")), RELIEF_PRESETS[0])
+    out = {"preset": pre["id"], "amount": float(r.get("amount") or pre["amount"]),
+           "duration": float(r.get("duration") or pre["duration"]),
+           "trigger": r.get("trigger") if r.get("trigger") in RELIEF_TRIGGERS else "hover"}
+    if r.get("focus") is not None:
+        out["focus"] = float(r["focus"])
+    return out
+
+
 def plan_panel(panel, project_style=""):
-    """Comme _plan_panel, plus les « precisions » libres de la camera et de l'action, ajoutees au prompt."""
+    """Comme _plan_panel, plus les « precisions » libres de la camera et de l'action, ajoutees au prompt.
+    Case en relief : aucune video (player « depth »), seulement une carte de profondeur."""
+    if treatment(panel) == "relief":
+        return {"player": "depth", "autoplay": False, "loop": False, "jobs": []}
     res = _plan_panel(panel, project_style)
     cam, act = panel.get("camera") or {}, panel.get("action") or {}
     extra = [(cam.get("extra") or "").strip()]
@@ -385,4 +421,4 @@ def public():
     return {"cameras": CAMERAS, "actions": ACTIONS, "audio": [{k: v for k, v in a.items() if k != "caption"} for a in AUDIO],
             "amplitudes": AMPLITUDES, "fields": {k: {"label": a, "placeholder": b} for k, (a, b) in FIELDS.items()},
             "voices": VOICES, "emotions": EMOTIONS, "languages": LANGUAGES, "foley": FOLEY,
-            "shakes": list(SHAKES), "shake_default": SHAKE_DEFAULT}
+            "shakes": list(SHAKES), "shake_default": SHAKE_DEFAULT, "relief": RELIEF_PRESETS}

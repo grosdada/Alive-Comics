@@ -1,0 +1,594 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Relief au clic</title>
+<meta name="description" content="Alive Comics : cases en relief par carte de profondeur, et un « biscuit » H3 ou 360 de temps en temps. Topo pour construire l'option dans l'application.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@112,500;112,800;125,900&family=Source+Sans+3:ital,wght@0,400;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Meme charte que ALIVE-COMICS-TOPO.html : fond papier, encre, ambre. */
+:root {
+  --bg: #f3f2ef; --panel: #ffffff; --ink: #18160f; --muted: #686258; --line: #d9d5cc; --stroke: #18160f;
+  --accent: #a3650c; --accent-soft: #f2b45c; --accent-ink: #1b150c;
+  --ok: #2f8f4e; --todo: #c97f12; --redo: #c8382e;
+  --display: "Archivo", "Arial Black", "Helvetica Neue", sans-serif;
+  --body: "Source Sans 3", "Segoe UI", system-ui, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, Consolas, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #121212; --panel: #1b1b1b; --ink: #ece8e1; --muted: #9a948a; --line: #2e2e2e; --stroke: #000000;
+    --accent: #f2b45c; --accent-soft: #f2b45c; --accent-ink: #1b150c;
+    --ok: #45b56a; --todo: #f2a33c; --redo: #e0483e; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #121212; --panel: #1b1b1b; --ink: #ece8e1; --muted: #9a948a; --line: #2e2e2e; --stroke: #000000;
+  --accent: #f2b45c; --accent-soft: #f2b45c; --accent-ink: #1b150c;
+  --ok: #45b56a; --todo: #f2a33c; --redo: #e0483e; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--ink); font: 17px/1.55 var(--body); margin: 0; }
+.wrap { max-width: 1120px; margin: 0 auto; padding-inline: 20px; padding-block: 28px 64px; }
+h1, h2, h3 { font-family: var(--display); text-wrap: balance; margin: 0; }
+h1 { font-weight: 900; font-stretch: 125%; font-size: clamp(34px, 6vw, 64px); line-height: .98; letter-spacing: -.01em; text-transform: uppercase; }
+h2 { font-weight: 800; font-stretch: 112%; font-size: clamp(24px, 3.4vw, 34px); line-height: 1.08; text-transform: uppercase; }
+h3 { font-weight: 800; font-stretch: 112%; font-size: 17px; letter-spacing: .02em; text-transform: uppercase; }
+p { margin: 0; }
+a { color: var(--accent); }
+.eyebrow { font: 600 12px/1.2 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
+.lead { font-size: clamp(18px, 2.1vw, 21px); line-height: 1.5; max-width: 66ch; }
+.muted { color: var(--muted); }
+code, .mono { font-family: var(--mono); font-size: .86em; }
+pre { margin: 0; background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 14px 16px; overflow-x: auto;
+      font: 13px/1.55 var(--mono); }
+header.hero { display: grid; gap: 22px; padding-block: 18px 26px; }
+.stats { display: flex; flex-wrap: wrap; gap: 10px 28px; font-variant-numeric: tabular-nums; }
+.stat b { display: block; font: 900 30px/1 var(--display); font-stretch: 125%; }
+.stat span { font-size: 13px; color: var(--muted); }
+section { padding-block: 34px 6px; border-top: 3px solid var(--stroke); margin-top: 34px; display: grid; gap: 18px; }
+.sec-head { display: grid; gap: 8px; }
+.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px 28px; }
+.block { display: grid; gap: 8px; align-content: start; min-width: 0; }
+.block ul, .block ol { margin: 0; padding-left: 20px; display: grid; gap: 5px; }
+.block li { font-size: 16px; }
+.block li::marker { color: var(--accent); }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 16px 18px; display: grid; gap: 8px; align-content: start; min-width: 0; }
+.steps { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; counter-reset: s; }
+.steps li { counter-increment: s; background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 14px 16px 16px;
+            display: grid; gap: 6px; align-content: start; min-width: 0; }
+.steps li::before { content: counter(s); font: 900 26px/1 var(--display); font-stretch: 125%; color: var(--accent); }
+.steps li b { font-size: 16px; }
+.steps li span { font-size: 15px; color: var(--muted); }
+.table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 4px; background: var(--panel); }
+table { border-collapse: collapse; width: 100%; font-size: 15px; }
+th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font: 600 12px/1.3 var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+tr:last-child td { border-bottom: 0; }
+.pill { display: inline-block; font: 600 11px/1.6 var(--mono); padding: 0 8px; border-radius: 999px; white-space: nowrap; }
+.pill.ok { background: color-mix(in srgb, var(--ok) 18%, transparent); color: var(--ok); }
+.pill.no { background: color-mix(in srgb, var(--redo) 16%, transparent); color: var(--redo); }
+.pill.maybe { background: color-mix(in srgb, var(--todo) 18%, transparent); color: var(--todo); }
+.note { border-left: 4px solid var(--accent); padding: 10px 14px; background: var(--panel); border-radius: 0 4px 4px 0; }
+
+/* ---------------- demo */
+.demo { display: grid; gap: 12px; }
+.stage { position: relative; border: 3px solid var(--stroke); background: #000; aspect-ratio: 3 / 2; overflow: hidden; cursor: pointer; }
+.stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.stage .hint { position: absolute; left: 0; top: 0; background: var(--accent-soft); color: var(--accent-ink); font: 700 12px/1.25 var(--body);
+               padding: 5px 9px; border-right: 2px solid var(--stroke); border-bottom: 2px solid var(--stroke); pointer-events: none; }
+.controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.controls button { font: 600 14px/1 var(--body); padding: 9px 13px; border-radius: 4px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); cursor: pointer; }
+.controls button[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent-ink); border-color: var(--stroke); }
+.controls label { font-size: 14px; color: var(--muted); display: flex; gap: 8px; align-items: center; }
+.controls input[type=range] { width: 130px; accent-color: var(--accent); }
+.fallback { padding: 30px; color: #fff; }
+
+/* ---------------- schema */
+.diagram { background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 10px; overflow-x: auto; }
+.diagram svg { display: block; width: 100%; min-width: 640px; height: auto; }
+.diagram text { font-family: var(--body); fill: var(--ink); font-size: 14px; }
+.diagram .q { fill: var(--muted); font-size: 12px; }
+.diagram .bx { fill: none; stroke: var(--ink); stroke-width: 1.4; }
+.diagram .bx.hot { fill: color-mix(in srgb, var(--accent-soft) 35%, transparent); stroke: var(--accent); stroke-width: 2; }
+.diagram .ln { fill: none; stroke: var(--muted); stroke-width: 1.4; }
+.diagram .ah { fill: var(--muted); }
+footer { margin-top: 40px; font-size: 14px; color: var(--muted); display: grid; gap: 6px; }
+@media (max-width: 640px) { body { font-size: 16px; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="hero">
+  <p class="eyebrow">Alive Comics · option « relief » · topo pour l'application · 15 octobre 2026</p>
+  <h1>Relief au clic,<br>et un biscuit de temps en temps</h1>
+  <p class="lead">Par défaut, chaque case d'une page devient une <b>photo en relief</b> : une carte de profondeur calculée en
+    une seconde, et le lecteur fait bouger la caméra de quelques pour cent au clic. Pas de vidéo, pas de file d'attente
+    GPU, résultat instantané. Sur une case par page, on garde un <b>biscuit</b> : un rendu H3 ou une orbite 360, choisi
+    par un workflow qui le propose à l'auteur.</p>
+  <div class="stats">
+    <div class="stat"><b>~1 s</b><span>de calcul par case (carte de profondeur)</span></div>
+    <div class="stat"><b>~7 min</b><span>pour une case H3 sur une 5090, à comparer</span></div>
+    <div class="stat"><b>1</b><span>biscuit H3 ou 360 par page, par défaut</span></div>
+    <div class="stat"><b>0 €</b><span>de cloud pour le relief</span></div>
+  </div>
+</header>
+
+<!-- ======================================================= DEMO -->
+<section id="demo">
+  <div class="sec-head">
+    <p class="eyebrow">À essayer</p>
+    <h2>La démo, en vrai</h2>
+    <p class="muted">Une scène dessinée par le code et sa carte de profondeur, rendues par le même shader que celui proposé
+      plus bas. Clique dans l'image pour jouer le mouvement. Le code de cette démo sert de référence pour le lecteur.</p>
+  </div>
+  <div class="demo">
+    <div class="stage" id="stage" role="button" tabindex="0" aria-label="Case en relief : cliquer pour jouer le mouvement">
+      <canvas id="gl"></canvas>
+      <span class="hint" id="hint">Clic : jouer le mouvement</span>
+    </div>
+    <div class="controls" role="group" aria-label="Mouvement">
+      <button data-preset="respire" aria-pressed="true">Respire</button>
+      <button data-preset="glisse" aria-pressed="false">Glisse</button>
+      <button data-preset="tourne" aria-pressed="false">Tourne</button>
+      <button data-preset="vertigo" aria-pressed="false">Vertigo</button>
+      <button id="showDepth" aria-pressed="false">Voir la carte</button>
+      <button id="follow" aria-pressed="false">Suivre la souris</button>
+      <label>Amplitude <input id="amount" type="range" min="0.005" max="0.06" step="0.001" value="0.025"></label>
+      <label>Plan net <input id="focus" type="range" min="0" max="1" step="0.01" value="0.78"></label>
+    </div>
+  </div>
+</section>
+
+<!-- ======================================================= CONCEPT -->
+<section id="concept">
+  <div class="sec-head">
+    <p class="eyebrow">Le principe</p>
+    <h2>Une page en relief, un biscuit</h2>
+  </div>
+  <div class="grid2">
+    <div class="block">
+      <h3>Pourquoi le relief par défaut</h3>
+      <ul>
+        <li><b>Instantané.</b> La carte de profondeur se calcule en une à deux secondes ; l'auteur voit sa page bouger tout de suite, y compris en mode « fais-le toi-même ».</li>
+        <li><b>Presque gratuit.</b> Aucun rendu vidéo : la capacité des PC ne limite plus le nombre d'albums.</li>
+        <li><b>Fidèle aux visages.</b> On ne régénère aucun pixel : la photo du client reste la sienne, seule la caméra bouge. Fini le risque de visage qui dérive.</li>
+        <li><b>Lisible pour tout le monde.</b> « Photo en relief » se comprend sans explication, là où la boucle vidéo paraissait trop arty pour ce public.</li>
+      </ul>
+    </div>
+    <div class="block">
+      <h3>Pourquoi garder un biscuit</h3>
+      <ul>
+        <li>Une seule case qui <b>vit vraiment</b> (H3) ou qu'on fait tourner (360) donne le « waouh » de la page.</li>
+        <li>Rare, il garde sa valeur ; partout, il fatiguerait et coûterait 7 minutes de GPU par case.</li>
+        <li>Il se calcule <b>en arrière-plan</b> : la page est visible tout de suite en relief, le biscuit remplace sa case quand il est prêt.</li>
+        <li>C'est aussi la monnaie des formules payantes : « 1 biscuit par page » en Essentiel, plus en Signature.</li>
+      </ul>
+    </div>
+  </div>
+  <div class="note">Précédent à connaître : Facebook a lancé ses « photos 3D » sur ce principe en 2018. L'effet seul n'est donc pas
+    une nouveauté ; la différence d'Alive Comics, c'est la page d'album, l'animation au clic, le son, et le biscuit.</div>
+</section>
+
+<!-- ======================================================= PIPELINE -->
+<section id="pipeline">
+  <div class="sec-head">
+    <p class="eyebrow">Le circuit d'une case</p>
+    <h2>De la photo au relief</h2>
+  </div>
+  <div class="diagram">
+    <svg viewBox="0 0 980 300" role="img" aria-label="Circuit : photo, carte de profondeur, nettoyage, lecteur WebGL ; en option couches et bouchage ; biscuit H3 ou 360 en parallèle">
+      <defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah" d="M0 0L10 5L0 10z"/></marker></defs>
+      <rect class="bx" x="10" y="40" width="150" height="70" rx="6"/>
+      <text x="85" y="70" text-anchor="middle" font-weight="700">Photo de la case</text>
+      <text class="q" x="85" y="92" text-anchor="middle" font-size="12">start/p3.png</text>
+      <rect class="bx hot" x="200" y="40" width="170" height="70" rx="6"/>
+      <text x="285" y="70" text-anchor="middle" font-weight="700">Carte de profondeur</text>
+      <text class="q" x="285" y="92" text-anchor="middle" font-size="12">tâche « depth », ~1 s</text>
+      <rect class="bx" x="410" y="40" width="170" height="70" rx="6"/>
+      <text x="495" y="70" text-anchor="middle" font-weight="700">Nettoyage</text>
+      <text class="q" x="495" y="92" text-anchor="middle" font-size="12">flou + dilatation des bords</text>
+      <rect class="bx hot" x="620" y="40" width="170" height="70" rx="6"/>
+      <text x="705" y="70" text-anchor="middle" font-weight="700">Lecteur WebGL</text>
+      <text class="q" x="705" y="92" text-anchor="middle" font-size="12">shader de parallaxe</text>
+      <rect class="bx" x="830" y="40" width="140" height="70" rx="6"/>
+      <text x="900" y="70" text-anchor="middle" font-weight="700">Clic</text>
+      <text class="q" x="900" y="92" text-anchor="middle" font-size="12">mouvement 2 s</text>
+      <path class="ln" d="M160 75H198" marker-end="url(#ah)"/>
+      <path class="ln" d="M370 75H408" marker-end="url(#ah)"/>
+      <path class="ln" d="M580 75H618" marker-end="url(#ah)"/>
+      <path class="ln" d="M790 75H828" marker-end="url(#ah)"/>
+      <rect class="bx" x="410" y="160" width="170" height="70" rx="6" stroke-dasharray="5 4"/>
+      <text x="495" y="190" text-anchor="middle" font-weight="700">Couches + bouchage</text>
+      <text class="q" x="495" y="212" text-anchor="middle" font-size="12">niveau 2, en option</text>
+      <path class="ln" d="M495 110V158" marker-end="url(#ah)"/>
+      <path class="ln" d="M580 195H705V112" marker-end="url(#ah)"/>
+      <rect class="bx" x="10" y="200" width="300" height="70" rx="6"/>
+      <text x="160" y="230" text-anchor="middle" font-weight="700">Biscuit : rendu H3 ou orbite 360</text>
+      <text class="q" x="160" y="252" text-anchor="middle" font-size="12">file existante, en arrière-plan, remplace la case</text>
+      <path class="ln" d="M85 110V198" marker-end="url(#ah)"/>
+    </svg>
+  </div>
+  <p class="muted">Le relief passe par une nouvelle tâche courte dans la file existante ; le biscuit garde le circuit H3
+    actuel. Les deux cohabitent sur la même page.</p>
+</section>
+
+<!-- ======================================================= MODELES -->
+<section id="modeles">
+  <div class="sec-head">
+    <p class="eyebrow">La carte de profondeur</p>
+    <h2>Quel modèle, avec quelle licence</h2>
+    <p class="muted">C'est un usage commercial : la licence décide avant la qualité. Plusieurs modèles connus sont
+      interdits en commercial dans leurs grandes tailles.</p>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Modèle</th><th>Licence</th><th>Commercial</th><th>Usage proposé</th></tr></thead>
+      <tbody>
+        <tr><td><b>Depth Anything 3, Mono-Large</b> (et Metric-Large, Small, Base)</td><td>Apache 2.0 d'après la fiche du modèle</td><td><span class="pill ok">oui</span></td><td>Modèle principal, calcul sur les PC (ComfyUI ou Python).</td></tr>
+        <tr><td>Depth Anything 3, Large / Giant / Nested</td><td>CC-BY-NC 4.0</td><td><span class="pill no">non</span></td><td>À ne pas utiliser.</td></tr>
+        <tr><td><b>Depth Anything V2, Small</b></td><td>Apache 2.0</td><td><span class="pill ok">oui</span></td><td>Aperçu instantané dans le navigateur (mode « fais-le toi-même »), ou secours.</td></tr>
+        <tr><td>Depth Anything V2, Base / Large</td><td>CC-BY-NC 4.0</td><td><span class="pill no">non</span></td><td>À ne pas utiliser, même s'il est souvent installé par défaut dans ComfyUI.</td></tr>
+        <tr><td>Apple Depth Pro</td><td>« Apple Sample Code License »</td><td><span class="pill maybe">à vérifier</span></td><td>Bords très nets (cheveux), mais termes à lire avant tout usage commercial.</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="grid2">
+    <div class="block">
+      <h3>Où le calculer</h3>
+      <ul>
+        <li><b>Sur les PC, via ComfyUI</b> : nouvelle tâche <code>depth</code> dans la file existante, prioritaire sur les vidéos (une seconde de calcul, elle ne doit jamais attendre derrière un rendu H3 de 7 minutes). L'application reste sans bibliothèque à installer : c'est ComfyUI qui porte le modèle.</li>
+        <li><b>Dans le navigateur</b> (plus tard, grand public) : Depth Anything V2 Small en ONNX avec transformers.js, pour un relief immédiat dès l'envoi d'une photo, avant même que le serveur réponde. Compatibilité à vérifier sur mobile.</li>
+      </ul>
+    </div>
+    <div class="block">
+      <h3>Format du fichier</h3>
+      <ul>
+        <li>Niveaux de gris, <b>blanc = proche</b>, noir = loin, normalisé 0–1 par image.</li>
+        <li>PNG <b>16 bits</b> si possible (le SaveImage standard de ComfyUI écrit en 8 bits : prévoir un nœud de sauvegarde 16 bits, ou accepter le 8 bits avec un léger flou pour masquer les marches d'escalier).</li>
+        <li>Calculée sur l'image <b>entière</b> de la case avant recadrage ; le lecteur applique le même cadrage (<code>fx.frame</code>) à l'image et à la carte.</li>
+        <li>Rangement : <code>projects/&lt;id&gt;/depth/&lt;case&gt;.png</code>, à côté de <code>start/</code>.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ======================================================= RENDU -->
+<section id="rendu">
+  <div class="sec-head">
+    <p class="eyebrow">Le lecteur</p>
+    <h2>Deux niveaux de rendu</h2>
+  </div>
+  <div class="grid2">
+    <div class="card">
+      <h3>Niveau 1 : shader de déplacement (MVP)</h3>
+      <p>Un seul quad WebGL par case. Pour chaque pixel affiché, on cherche le pixel source par quelques itérations de
+        point fixe : <code>uv = écran − (profondeur(uv) − plan_net) × décalage</code>. Huit itérations suffisent pour
+        des mouvements de 1 à 4 % de la largeur. C'est le code de la démo ci-dessus.</p>
+      <ul>
+        <li>Le <b>plan net</b> (profondeur du sujet) ne bouge pas : le premier plan et le fond partent en sens contraires, c'est ce qui donne la sensation de relief.</li>
+        <li>Un léger <b>sur-cadrage</b> (5–6 %) cache les bords qui se découvrent.</li>
+        <li>Avant d'envoyer la carte : <b>flou de 1–2 px</b> et <b>dilatation des zones proches</b> (filtre max de 2–4 px) pour éviter les déchirures autour des personnages.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>Niveau 2 : couches et bouchage (plus tard)</h3>
+      <p>On découpe le sujet (détourage) et on bouche le fond derrière lui avec un modèle de remplissage, calculé une fois
+        sur les PC. Le lecteur superpose alors 2 à 4 plans : mouvements plus amples, zéro étirement autour des cheveux et
+        des voiles.</p>
+      <ul>
+        <li>Coût : quelques secondes de plus par case, toujours sans vidéo.</li>
+        <li>À réserver aux cases « héros » ou aux formules haut de gamme.</li>
+        <li>Même format de données côté lecteur : une liste de couches <code>{img, depth, alpha}</code>.</li>
+      </ul>
+    </div>
+  </div>
+  <div class="block">
+    <h3>Mouvements au clic</h3>
+    <p class="muted">Clic ou tap : le mouvement joue en ~2 s avec accélération douce, puis revient au repos. Au survol, rien
+      ne bouge (même règle que les vidéos) ; en option, un très léger suivi du pointeur, et l'inclinaison du téléphone
+      (gyroscope, demande d'autorisation sur iPhone).</p>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Preset</th><th>Ce qui bouge</th><th>Pour quelles photos</th><th>Réglage par défaut</th></tr></thead>
+      <tbody>
+        <tr><td><b>Respire</b></td><td>Petite avancée vers le sujet, puis retour</td><td>Portraits, couple, détails</td><td>zoom 4 %, 2,0 s</td></tr>
+        <tr><td><b>Glisse</b></td><td>Travelling latéral aller-retour</td><td>Groupes, paysages, tables de banquet</td><td>2,5 %, 2,4 s</td></tr>
+        <tr><td><b>Tourne</b></td><td>Petit cercle de caméra autour du plan net</td><td>Sujet central bien détaché du fond</td><td>2 %, 2,6 s</td></tr>
+        <tr><td><b>Vertigo</b></td><td>Le sujet garde sa taille, le fond s'éloigne</td><td>Moments forts : sortie de mairie, lancer de riz</td><td>6 %, 2,2 s</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="note"><b>Piège technique majeur :</b> un navigateur limite le nombre de contextes WebGL (environ 16, moins sur
+    mobile). Une page de 8 cases dans un livre de 10 pages les dépasse vite. Le lecteur doit utiliser <b>un seul canevas
+    WebGL partagé</b> par page (dessin case par case avec <code>scissor</code>, découpe par le polygone de la case),
+    ou n'activer le WebGL que sur la case touchée et afficher les autres en image fixe. Sans WebGL : image fixe, sans
+    erreur.</div>
+</section>
+
+<!-- ======================================================= INTEGRATION -->
+<section id="integration">
+  <div class="sec-head">
+    <p class="eyebrow">Pour l'instance qui code</p>
+    <h2>Brancher le relief dans Alive Comics</h2>
+    <p class="muted">Propositions calées sur le code actuel (<code>presets.py</code>, <code>jobs.py</code>,
+      <code>assemble.py</code>, <code>alive-player.js</code>). Les noms sont des suggestions ; garder les conventions
+      existantes là où elles diffèrent.</p>
+  </div>
+  <ol class="steps">
+    <li><b>Une caméra « Relief »</b><span>Dans <code>presets.CAMERAS</code>, une entrée <code>{"id": "relief", "kind": "depth"}</code>. <code>_plan_panel</code> renvoie alors <code>{"player": "depth", "autoplay": false, "loop": false, "jobs": []}</code> : aucune vidéo à calculer.</span></li>
+    <li><b>Une tâche « depth »</b><span><code>Scheduler.enqueue_depth(projet, case)</code> ; <code>_pick_local</code> accepte le type <code>depth</code> et le passe <b>avant</b> les vidéos ; <code>preflight</code> vérifie le nœud de profondeur ; graphe dans <code>comfy.py</code> (charger l'image, modèle Apache, sauvegarde). Lancée seule dès qu'une image est posée sur une case.</span></li>
+    <li><b>Les réglages de la case</b><span><code>panel["depth"] = {"file": "depth/p3.png", "model": "da3-mono-large", "preset": "respire", "amount": 0.025, "focus": "auto", "duration": 2.0, "trigger": "click"}</code>. <code>focus: "auto"</code> = profondeur médiane du centre de la case (ou des visages détectés plus tard).</span></li>
+    <li><b>L'assemblage</b><span>Dans <code>_build</code>, pour <code>player == "depth"</code> : copier l'image et la carte dans l'export, et écrire <code>entry["depth"] = {"img", "map", "preset", "amount", "focus", "duration"}</code>. Ajouter leurs dates dans <code>page_key</code> pour le cache.</span></li>
+    <li><b>Le lecteur</b><span>Dans <code>makePanel</code> : si <code>p.depth</code>, une vue WebGL dans la case (même <code>clipPath</code>, mêmes <code>fx.grade</code> et <code>fx.frame</code>, même double-clic plein écran, mêmes sons au survol). Le clic joue le preset. Reprendre le shader et l'animation de la démo.</span></li>
+    <li><b>Le mode édition</b><span>Un onglet « Relief » dans le popup : preset, amplitude, plan net (clic dans l'image pour le choisir), durée, bouton « voir la carte ». Tout en direct, sans recalcul, comme les autres retouches.</span></li>
+    <li><b>Le biscuit</b><span>Rien à changer côté H3 : une case biscuit garde sa caméra H3 actuelle. Tant que son rendu n'est pas prêt, l'assemblage la publie en relief (carte déjà calculée), puis bascule sur la vidéo.</span></li>
+    <li><b>Plus tard : export vidéo</b><span>Pour WhatsApp et Instagram, enregistrer le mouvement d'une case ou de toute la page en MP4 vertical (rendu image par image puis ffmpeg, déjà présent).</span></li>
+  </ol>
+  <div class="block">
+    <h3>Données d'une case dans <code>manga_data.js</code></h3>
+<pre>{ "id": "p3", "rect": [x0, y0, x1, y1], "poly": [...],
+  "video": null,
+  "depth": { "img": "images/p3.jpg", "map": "depth/p3.png",
+             "preset": "respire", "amount": 0.025, "focus": 0.78, "duration": 2.0 },
+  "audio": "sons/p3.mp3", "fx": { "grade": {...}, "frame": {...} } }</pre>
+  </div>
+</section>
+
+<!-- ======================================================= WORKFLOW BISCUIT -->
+<section id="biscuit">
+  <div class="sec-head">
+    <p class="eyebrow">Le workflow qui propose</p>
+    <h2>Choisir le biscuit de chaque page</h2>
+    <p class="muted">Le Réalisateur IA ne choisit plus une caméra H3 pour chaque case : il met tout en relief et désigne le
+      ou les biscuits, avec sa raison. L'auteur garde la main.</p>
+  </div>
+  <div class="grid2">
+    <div class="block">
+      <h3>Ce qui fait un bon biscuit</h3>
+      <ul>
+        <li><b>Un instant fort et figé</b> : confettis, riz ou bonbons en l'air, mariés portés sur la chaise, bouchon de champagne → <b>orbite / arc 360</b> en temps figé.</li>
+        <li><b>Un geste qui se prolonge</b> : un rire, un voile dans le vent, des bougies soufflées → <b>H3 vie en boucle</b>.</li>
+        <li>Un sujet <b>central, détaché du fond</b>, visages assez grands (petits visages dans une foule = risque de déformation).</li>
+        <li>Une case <b>grande</b> dans la mise en page : le biscuit mérite de la place.</li>
+      </ul>
+    </div>
+    <div class="block">
+      <h3>Ce que l'application affiche</h3>
+      <ul>
+        <li>Réglage de la page : <b>biscuits par page</b> (0, 1 ou 2 ; défaut 1).</li>
+        <li>Bouton <b>« Proposer les biscuits »</b> : l'IA classe les cases et coche la meilleure, avec une phrase d'explication.</li>
+        <li>Pastille sur chaque case : <b>Relief</b> ou <b>Biscuit H3</b> / <b>Biscuit 360</b> ; un clic pour inverser.</li>
+        <li>Estimation affichée : « 1 biscuit = environ 7 min sur les machines ».</li>
+        <li>Mode automatique (client) : relief partout tout de suite, biscuits calculés en arrière-plan.</li>
+      </ul>
+    </div>
+  </div>
+  <div class="block">
+    <h3>Ajout aux consignes du Réalisateur IA (<code>director.RULES</code>)</h3>
+<pre>Every panel is shown in DEPTH RELIEF by default (camera "relief": a depth-map parallax the reader triggers by click).
+Pick at most {N} "treat" panels per page that deserve a real MiniMax H3 shot, and give each a reason:
+- a frozen peak moment (confetti, rice or candy in the air, someone lifted on a chair): frozen-kind camera (arc, orbit360) + "fige";
+- a gesture worth seeing live (laughter, veil in the wind, candles blown): "fixe" or "avancee" + "vie" (loop).
+Prefer large panels with one clear, central subject and large faces; avoid crowds of small faces.
+For every other panel return camera "relief" with a depth preset ("respire", "glisse", "tourne", "vertigo")
+matched to the composition. JSON field per panel: "treatment": "relief" | "h3" | "orbit".</pre>
+  </div>
+</section>
+
+<!-- ======================================================= QUALITE -->
+<section id="qualite">
+  <div class="sec-head">
+    <p class="eyebrow">À savoir</p>
+    <h2>Ce qui rate, et comment l'éviter</h2>
+  </div>
+  <div class="grid2">
+    <div class="block">
+      <ul>
+        <li><b>Cheveux, voiles, tulle</b> : le contour flotte. Rester sous 3 % d'amplitude, ou passer au niveau 2 (couches) pour ces cases.</li>
+        <li><b>Visages</b> : mettre le plan net sur eux. Un visage sur le plan net ne se déforme jamais.</li>
+        <li><b>Verre, miroirs, vitres</b> : la profondeur est fausse. Préférer « Respire », plus discret.</li>
+      </ul>
+    </div>
+    <div class="block">
+      <ul>
+        <li><b>Bords de case</b> : sur-cadrage de 5–6 %, sinon le vide apparaît.</li>
+        <li><b>Photos plates</b> (groupe contre un mur) : peu de relief possible ; l'IA peut proposer « Respire » ou une image fixe.</li>
+        <li><b>Mobile</b> : un seul contexte WebGL, textures limitées à 2048 px de côté.</li>
+      </ul>
+    </div>
+  </div>
+  <div class="block">
+    <h3>Critères de réussite pour la première version</h3>
+    <ul>
+      <li>Poser une image sur une case : la carte est prête en moins de 3 s et l'aperçu bouge au clic.</li>
+      <li>Une page de 8 cases en relief et 1 biscuit s'ouvre sans erreur sur iPhone, Android et ordinateur, à 60 images/s.</li>
+      <li>Aucune déchirure visible autour des personnages à l'amplitude par défaut, sur les 71 photos de démonstration.</li>
+      <li>Le livre de 10 pages ne dépasse pas la limite de contextes WebGL (test en tournant toutes les pages).</li>
+    </ul>
+  </div>
+</section>
+
+<footer>
+  <p>Sources : <a href="https://cdn.jsdelivr.net/gh/depthanything/depth-anything-v2@main/README.md">Depth Anything V2, README (licences par taille)</a> ·
+    <a href="https://huggingface.co/SpatialHub/depth-anything-3-onnx">Depth Anything 3, fiche ONNX (licences par variante)</a> ·
+    <a href="https://www.mixpeek.com/model/apple/DepthPro">Apple Depth Pro, fiche (licence, vitesse)</a>.
+    Licences à revérifier sur les dépôts officiels avant mise en production.</p>
+  <p>Alive Comics · <code>docs/PARALLAXE-RELIEF.html</code> · à lire avec <code>docs/ALIVE-COMICS-TOPO.html</code> et <code>docs/PILOTAGE-CLAUDE.html</code>.</p>
+</footer>
+</div>
+
+<script>
+/* ===================================================================================================
+   Demo de reference : scene + carte de profondeur dessinees en 2D, parallaxe en WebGL 1.
+   Convention : carte blanc = proche (1), noir = loin (0). Decalage d'un pixel = (prof - planNet) * decalage.
+   =================================================================================================== */
+(function () {
+  "use strict";
+  const W = 1200, H = 800;
+  const img = document.createElement("canvas"), dep = document.createElement("canvas");
+  img.width = dep.width = W; img.height = dep.height = H;
+  const c = img.getContext("2d"), d = dep.getContext("2d");
+  const gray = (v) => { const g = Math.round(v * 255); return `rgb(${g},${g},${g})`; };
+
+  // chaque element est dessine deux fois : en couleur sur l'image, en gris (sa profondeur) sur la carte
+  function both(depth, colorFn, shapeFn, grow) {
+    c.save(); colorFn(c); shapeFn(c, 0); c.restore();
+    d.save(); d.fillStyle = gray(depth); d.strokeStyle = gray(depth); shapeFn(d, grow || 0, true); d.restore();
+  }
+  // ciel
+  const sky = c.createLinearGradient(0, 0, 0, H * 0.6);
+  sky.addColorStop(0, "#7fa6c9"); sky.addColorStop(1, "#f1d9b0");
+  c.fillStyle = sky; c.fillRect(0, 0, W, H);
+  d.fillStyle = gray(0.02); d.fillRect(0, 0, W, H);
+  // collines lointaines
+  both(0.12, (k) => { k.fillStyle = "#8a9b7a"; }, (k) => {
+    k.beginPath(); k.moveTo(0, 430); k.bezierCurveTo(250, 340, 420, 400, 620, 360); k.bezierCurveTo(820, 320, 1000, 390, 1200, 350);
+    k.lineTo(1200, 800); k.lineTo(0, 800); k.fill(); });
+  // champs
+  both(0.3, (k) => { k.fillStyle = "#c9b46a"; }, (k) => {
+    k.beginPath(); k.moveTo(0, 500); k.bezierCurveTo(300, 470, 900, 480, 1200, 460); k.lineTo(1200, 800); k.lineTo(0, 800); k.fill(); });
+  // eglise et maisons du village
+  both(0.38, (k) => { k.fillStyle = "#d8cdb7"; }, (k, g) => {
+    k.fillRect(820 - g, 330 - g, 120 + 2 * g, 160 + g);                      // nef
+    k.fillRect(860 - g, 230 - g, 40 + 2 * g, 110 + g);                       // clocher
+    k.beginPath(); k.moveTo(855 - g, 232); k.lineTo(880, 185 - g); k.lineTo(905 + g, 232); k.fill();
+    k.fillRect(700 - g, 400 - g, 110 + 2 * g, 95 + g); k.fillRect(950 - g, 390 - g, 130 + 2 * g, 105 + g); });
+  both(0.38, (k) => { k.fillStyle = "#a8573c"; }, (k, g) => {
+    k.beginPath(); k.moveTo(690 - g, 402); k.lineTo(755, 360 - g); k.lineTo(820 + g, 402); k.fill();
+    k.beginPath(); k.moveTo(940 - g, 392); k.lineTo(1015, 345 - g); k.lineTo(1090 + g, 392); k.fill(); });
+  // arbres
+  [[180, 420, 80], [330, 440, 60], [1110, 430, 70]].forEach(([x, y, r]) =>
+    both(0.5, (k) => { k.fillStyle = "#4f6b3a"; }, (k, g) => { k.beginPath(); k.arc(x, y, r + g, 0, Math.PI * 2); k.fill(); k.fillRect(x - 8 - g, y, 16 + 2 * g, 90); }));
+  // sol du premier plan
+  both(0.62, (k) => { k.fillStyle = "#b9a98c"; }, (k) => {
+    k.beginPath(); k.moveTo(0, 560); k.bezierCurveTo(400, 540, 800, 545, 1200, 555); k.lineTo(1200, 800); k.lineTo(0, 800); k.fill(); });
+  // les maries (plan net)
+  function person(x, y, s, body, head, hair, dress) {
+    both(0.8, (k) => { k.fillStyle = body; }, (k, g) => {
+      k.beginPath();
+      if (dress) { k.moveTo(x - 26 * s - g, y + 30 * s); k.lineTo(x + 26 * s + g, y + 30 * s); k.lineTo(x + 70 * s + g, y + 230 * s + g); k.lineTo(x - 70 * s - g, y + 230 * s + g); }
+      else { k.rect(x - 34 * s - g, y + 30 * s, 68 * s + 2 * g, 200 * s + g); }
+      k.fill(); }, 3);
+    both(0.82, (k) => { k.fillStyle = head; }, (k, g) => { k.beginPath(); k.arc(x, y, 26 * s + g, 0, Math.PI * 2); k.fill(); }, 3);
+    both(0.83, (k) => { k.fillStyle = hair; }, (k, g) => { k.beginPath(); k.arc(x, y - 8 * s, 27 * s + g, Math.PI, 0); k.fill(); }, 3);
+  }
+  person(540, 400, 1.15, "#f4efe6", "#e0b08d", "#6a2a2a", true);
+  person(650, 392, 1.2, "#2c3550", "#d9a582", "#3a2e24", false);
+  // bouquet
+  both(0.86, (k) => { k.fillStyle = "#b8283a"; }, (k, g) => { k.beginPath(); k.arc(585, 520, 22 + g, 0, Math.PI * 2); k.fill(); }, 3);
+  // riz en l'air, a plusieurs profondeurs
+  let seed = 7; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  for (let i = 0; i < 140; i++) {
+    const x = 380 + rnd() * 460, y = 260 + rnd() * 240, z = 0.66 + rnd() * 0.3, r = 2 + z * 3;
+    both(z, (k) => { k.fillStyle = "#fbf7ee"; }, (k, g) => { k.beginPath(); k.arc(x, y, r + g, 0, Math.PI * 2); k.fill(); }, 2);
+  }
+  // premier plan : une main floue qui lance du riz (tres proche)
+  both(0.98, (k) => { k.fillStyle = "#c98e6c"; k.filter = "blur(6px)"; }, (k, g) => {
+    k.beginPath(); k.ellipse(120, 700, 120 + g, 70 + g, -0.5, 0, Math.PI * 2); k.fill();
+    k.beginPath(); k.ellipse(250, 640, 70 + g, 34 + g, -0.4, 0, Math.PI * 2); k.fill(); }, 6);
+  // nettoyage de la carte : flou leger (la dilatation est faite au dessin via « grow »)
+  const dep2 = document.createElement("canvas"); dep2.width = W; dep2.height = H;
+  const d2 = dep2.getContext("2d"); d2.filter = "blur(2px)"; d2.drawImage(dep, 0, 0);
+
+  // ------------------------------------------------------------------ WebGL
+  const cv = document.getElementById("gl"), stage = document.getElementById("stage");
+  const gl = cv.getContext("webgl", { premultipliedAlpha: false, antialias: false });
+  if (!gl) { stage.innerHTML = '<p class="fallback">WebGL indisponible : le lecteur afficherait l\'image fixe.</p>'; return; }
+  const VS = "attribute vec2 p; varying vec2 v; void main(){ v = p * 0.5 + 0.5; v.y = 1.0 - v.y; gl_Position = vec4(p, 0.0, 1.0); }";
+  const FS = `precision highp float;
+    varying vec2 v; uniform sampler2D uImg, uDep; uniform vec2 uOff; uniform float uDolly, uZoom, uFocus, uOver, uShow;
+    void main(){
+      vec2 s = (v - 0.5) / (uOver * uZoom) + 0.5;          // sur-cadrage + zoom global
+      vec2 uv = s;
+      for (int i = 0; i < 8; i++) {                         // point fixe : trouver le pixel source
+        float z = texture2D(uDep, uv).r - uFocus;
+        uv = (s - 0.5) / (1.0 + uDolly * z) + 0.5 - z * uOff;
+      }
+      vec4 col = texture2D(uImg, clamp(uv, 0.0, 1.0));
+      vec4 dep = vec4(vec3(texture2D(uDep, clamp(uv, 0.0, 1.0)).r), 1.0);
+      gl_FragColor = mix(col, dep, uShow);
+    }`;
+  function sh(type, src) { const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s); return s; }
+  const prog = gl.createProgram();
+  gl.attachShader(prog, sh(gl.VERTEX_SHADER, VS)); gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, FS));
+  gl.linkProgram(prog); gl.useProgram(prog);
+  const buf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1]), gl.STATIC_DRAW);
+  const loc = gl.getAttribLocation(prog, "p"); gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+  function tex(unit, source) {
+    const t = gl.createTexture(); gl.activeTexture(gl.TEXTURE0 + unit); gl.bindTexture(gl.TEXTURE_2D, t);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, source);
+  }
+  tex(0, img); tex(1, dep2);
+  const U = (n) => gl.getUniformLocation(prog, n);
+  gl.uniform1i(U("uImg"), 0); gl.uniform1i(U("uDep"), 1);
+  const uOff = U("uOff"), uDolly = U("uDolly"), uZoom = U("uZoom"), uFocus = U("uFocus"), uOver = U("uOver"), uShow = U("uShow");
+
+  // ------------------------------------------------------------------ mouvements
+  // t de 0 a 1 ; env = enveloppe douce qui part et revient a zero
+  const PRESETS = {
+    respire: { dur: 2.0, f: (t, a, env) => ({ ox: 0, oy: 0, dolly: 0.6 * env, zoom: 1 + 1.6 * a * env }) },
+    glisse:  { dur: 2.4, f: (t, a) => ({ ox: a * Math.sin(2 * Math.PI * t), oy: 0, dolly: 0, zoom: 1 }) },
+    tourne:  { dur: 2.6, f: (t, a, env) => ({ ox: a * Math.sin(2 * Math.PI * t) * env, oy: a * 0.6 * Math.cos(2 * Math.PI * t) * env, dolly: 0, zoom: 1 }) },
+    vertigo: { dur: 2.2, f: (t, a, env) => ({ ox: 0, oy: 0, dolly: -12 * a * env, zoom: 1 }) },
+  };
+  const state = { preset: "respire", amount: 0.025, focus: 0.78, show: 0, follow: false, t0: -1, mx: 0, my: 0, sx: 0, sy: 0 };
+  const smooth = (x) => x * x * (3 - 2 * x);
+
+  function resize() {
+    const r = stage.getBoundingClientRect(), dpr = Math.min(2, window.devicePixelRatio || 1);
+    cv.width = Math.round(r.width * dpr); cv.height = Math.round(r.height * dpr); gl.viewport(0, 0, cv.width, cv.height);
+  }
+  function frame(now) {
+    let m = { ox: 0, oy: 0, dolly: 0, zoom: 1 };
+    const P = PRESETS[state.preset];
+    if (state.t0 >= 0) {
+      let t = (now - state.t0) / 1000 / P.dur;
+      if (t >= 1) { t = 1; state.t0 = -1; }
+      const env = Math.sin(Math.PI * smooth(t));
+      m = P.f(smooth(t), state.amount, env);
+    }
+    // suivi du pointeur (option) : petit decalage amorti
+    state.sx += ((state.follow ? state.mx : 0) - state.sx) * 0.08;
+    state.sy += ((state.follow ? state.my : 0) - state.sy) * 0.08;
+    gl.uniform2f(uOff, m.ox + state.sx * state.amount * 0.6, m.oy + state.sy * state.amount * 0.6);
+    gl.uniform1f(uDolly, m.dolly); gl.uniform1f(uZoom, m.zoom);
+    gl.uniform1f(uFocus, state.focus); gl.uniform1f(uOver, 1.06); gl.uniform1f(uShow, state.show);
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
+    requestAnimationFrame(frame);
+  }
+  const play = () => { state.t0 = performance.now(); };
+  stage.addEventListener("click", play);
+  stage.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); play(); } });
+  stage.addEventListener("pointermove", (e) => {
+    const r = stage.getBoundingClientRect();
+    state.mx = ((e.clientX - r.left) / r.width - 0.5) * 2; state.my = ((e.clientY - r.top) / r.height - 0.5) * 2;
+  });
+  stage.addEventListener("pointerleave", () => { state.mx = state.my = 0; });
+  document.querySelectorAll("[data-preset]").forEach((b) => b.addEventListener("click", () => {
+    document.querySelectorAll("[data-preset]").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+    state.preset = b.dataset.preset; play();
+  }));
+  const toggle = (id, key, on, off) => document.getElementById(id).addEventListener("click", (e) => {
+    const b = e.currentTarget, v = b.getAttribute("aria-pressed") !== "true"; b.setAttribute("aria-pressed", String(v));
+    state[key] = v ? on : off;
+  });
+  toggle("showDepth", "show", 1, 0); toggle("follow", "follow", true, false);
+  document.getElementById("amount").addEventListener("input", (e) => { state.amount = +e.target.value; });
+  document.getElementById("focus").addEventListener("input", (e) => { state.focus = +e.target.value; });
+  window.addEventListener("resize", resize);
+  resize(); requestAnimationFrame(frame);
+  setTimeout(play, 600);
+})();
+</script>
+</body>
+</html>

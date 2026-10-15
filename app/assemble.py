@@ -20,7 +20,7 @@ import threading
 from collections import defaultdict
 from pathlib import Path
 
-from . import presets, store
+from . import depth, presets, store
 
 ROOT = Path(__file__).resolve().parent.parent
 PLAYER = ROOT / "player"
@@ -152,15 +152,18 @@ def page_key(p, d):
                 layers[layer]["mtime"] = _mtime(d / cur["file"])
         extra = [[x.get("file"), x.get("volume"), x.get("loop"), _mtime(d / x["file"]) if x.get("file") else None]
                  for x in panel.get("extraSounds") or []]
+        relief = None
+        if plan["player"] == "depth" or not chosen:      # relief, ou relief d'attente (rendu pas encore la)
+            relief = [presets.relief_cfg(panel), _mtime(d / f"start/{pid_}.png"), _mtime(d / f"depth/{pid_}.png")]
         panels[pid_] = {"player": plan["player"], "autoplay": plan["autoplay"], "loop": plan["loop"],
-                        "fx": player_fx(panel, pid_, plan), "extra": extra,
+                        "fx": player_fx(panel, pid_, plan), "extra": extra, "relief": relief,
                         "sides": [j["side"] for j in plan["jobs"]],
                         "chosen": {k: [v, _mtime(d / v)] for k, v in sorted(chosen.items())}, "layers": layers}
     ps = p.get("pageSound") or {}
     page_sound = {k: ps.get(k) for k in ("mode", "file", "volume")}
     if ps.get("file"):
         page_sound["mtime"] = _mtime(d / ps["file"])
-    blob = {"v": 4, "name": p.get("name"), "geometry": p.get("geometry"), "pageSound": page_sound,
+    blob = {"v": 5, "name": p.get("name"), "geometry": p.get("geometry"), "pageSound": page_sound,
             "stroke": (p.get("page") or {}).get("strokeWidth"), "panels": panels,
             "page": [_mtime(d / "page" / n) for n in ("page.jpg", "frames.png")],
             "player": [_mtime(PLAYER / n) for n in ("book.html", "alive-player.js", "alive-player.css")]}
@@ -181,6 +184,8 @@ def _build(pid, log=print, force=False):
     out = d / "export"
     (out / "videos").mkdir(parents=True, exist_ok=True)
     (out / "sons").mkdir(parents=True, exist_ok=True)
+    for sub in ("images", "depth"):
+        (out / sub).mkdir(parents=True, exist_ok=True)
     cache_f = out / ".cache.json"
     cache = json.loads(cache_f.read_text(encoding="utf-8")) if cache_f.exists() else {}
     pkey = page_key(p, d)
@@ -234,7 +239,23 @@ def _build(pid, log=print, force=False):
                 entry["fx"] = fx
             report.append(f"{g['id']} {plan['player']} {n} images")
         elif plan["player"] != "static" and need:
-            report.append(f"{g['id']} : rendu manquant ({', '.join(s for s in need if s not in srcs)})")
+            # rendu pas encore la : la case s'affiche en relief en attendant (carte de profondeur, ~1 s)
+            missing = ", ".join(s for s in need if s not in srcs)
+            if relief_entry(d, out, g["id"], panel, entry):
+                report.append(f"{g['id']} : rendu manquant ({missing}), en relief en attendant")
+            else:
+                report.append(f"{g['id']} : rendu manquant ({missing})")
+        elif plan["player"] == "depth":
+            if relief_entry(d, out, g["id"], panel, entry):
+                report.append(f"{g['id']} relief")
+            else:
+                report.append(f"{g['id']} : relief impossible (pas d'image dans la case)")
+        if entry.get("depth"):
+            fx = player_fx(panel, g["id"], dict(plan, autoplay=False))
+            fx.pop("shake", None)                       # le relief a son propre mouvement
+            entry.pop("fx", None)
+            if fx:
+                entry["fx"] = fx
         # ---- sons : 1 ambiance / musique (boucle), 2 voix off ou second son, 3 bruitages (foley)
         aud = panel.get("audio") or {}
         if aud.get("mode") in ("file", "generate") and aud.get("file") and (d / aud["file"]).exists():
@@ -292,8 +313,9 @@ def _build(pid, log=print, force=False):
             | {(e.get("voice") or {}).get("src") for e in data["panels"]}
             | {(e.get("foley") or {}).get("src") for e in data["panels"]}
             | {x["src"] for e in data["panels"] for x in e.get("more") or []}
+            | {(e.get("depth") or {}).get(k) for e in data["panels"] for k in ("img", "map")}
             | {(data.get("sound") or {}).get("src")})
-    for sub in ("videos", "sons"):
+    for sub in ("videos", "sons", "images", "depth"):
         for f in (out / sub).iterdir():
             if f"{sub}/{f.name}" not in used:
                 f.unlink()
@@ -302,6 +324,25 @@ def _build(pid, log=print, force=False):
     cache["_page"] = {"key": pkey, "result": result}
     cache_f.write_text(json.dumps(cache), encoding="utf-8")
     return dict(result, cached=False, encoded=encoded)
+
+
+def relief_entry(d, out, panel_id, panel, entry):
+    """Case en relief : image de la case + carte de profondeur dans l'export, reglages dans entry["depth"]."""
+    pid = d.name
+    rel = depth.ensure(pid, panel_id)
+    if not rel:
+        return False
+    from PIL import Image
+    img, mp = out / "images" / f"{panel_id}.jpg", out / "depth" / f"{panel_id}.png"
+    src = d / f"start/{panel_id}.png"
+    if not img.exists() or img.stat().st_mtime < src.stat().st_mtime:
+        Image.open(src).convert("RGB").save(img, "JPEG", quality=90)
+    shutil.copy2(d / rel, mp)
+    cfg = presets.relief_cfg(panel)
+    if "focus" not in cfg:
+        cfg["focus"] = depth.auto_focus(mp)
+    entry["depth"] = dict(cfg, img=f"images/{panel_id}.jpg", map=f"depth/{panel_id}.png")
+    return True
 
 
 def read_data(folder):
@@ -315,6 +356,7 @@ def data_files(data):
     files = [data["page"], data["frames"]] + [e[k] for e in data["panels"] for k in ("video", "audio") if e.get(k)]
     files += [e[k]["src"] for e in data["panels"] for k in ("voice", "foley") if e.get(k)]
     files += [x["src"] for e in data["panels"] for x in e.get("more") or []]
+    files += [e["depth"][k] for e in data["panels"] if e.get("depth") for k in ("img", "map")]
     if data.get("sound"):
         files.append(data["sound"]["src"])
     return files

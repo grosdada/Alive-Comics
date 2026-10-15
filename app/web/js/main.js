@@ -3,7 +3,7 @@ import { api, get, post, put, upload, uploadSound, h, toast, debounce, modal, lo
 import { compute, PRESETS, PAGE_DEFAULTS, FORMATS, pageSize, transpose, randomLayout, removeLeaf, splitLeaf, leaves, clone } from "./geometry.js";
 import { Editor, icon } from "./editor.js";
 import { startImage, pageImages } from "./exporter.js";
-import { cameraForm, actionForm, audioForm, renderSection, pageForm, statusText, sideName } from "./forms.js";
+import { cameraForm, actionForm, audioForm, renderSection, pageForm, statusText, sideName, treatmentForm } from "./forms.js";
 
 const NEW_PANEL = () => ({ camera: { id: "arc", fields: {} }, action: { id: "fige", fields: {} }, audio: { mode: "none" } });
 
@@ -434,13 +434,15 @@ class App {
     } else {
       imgBox.append(h("button.primary", { on: { click: () => this.pickImage(id) } }, icon("image"), " Importer une image"));
     }
-    this.right.append(
+    const relief = panel.treatment === "relief";        // relief : ni camera, ni action, ni rendu video
+    this.right.append(...[
       h("h3", `Case ${g ? g.order : ""}`),
       section("Image", "image", imgBox),
-      section("Caméra", "camera", cameraForm(this, id)),
-      section("Action", "action", actionForm(this, id)),
+      section("Traitement", null, treatmentForm(this, id)),
+      relief ? null : section("Caméra", "camera", cameraForm(this, id)),
+      relief ? null : section("Action", "action", actionForm(this, id)),
       section("Sons", "audio", audioForm(this, id)),
-      section("Rendus", null, renderSection(this, id)));
+      relief ? null : section("Rendus", null, renderSection(this, id))].filter(Boolean));
   }
 
   label(kind, id) {

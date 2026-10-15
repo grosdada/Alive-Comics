@@ -41,3 +41,8 @@
                                        box-shadow: inset 0 0 0 2px rgba(242, 180, 92, 0); transition: box-shadow .15s; }
 .ac-page.ac-editing .ac-panel:hover::after { box-shadow: inset 0 0 0 3px rgba(242, 180, 92, .95); }
 .ac-page.ac-editing .ac-panel.ac-sel::after { box-shadow: inset 0 0 0 3px #f2b45c, inset 0 0 0 6px rgba(0, 0, 0, .35); }
+/* cases en relief : un canevas WebGL par page, sous les cases (qui gardent les gestes) et sous les traits */
+.ac-page > canvas.ac-relief { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.ac-panel.relief { cursor: grab; }
+.ac-panel.relief:active { cursor: grabbing; }
+.ac-view canvas.ac-relief-view { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }

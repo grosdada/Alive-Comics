@@ -8,6 +8,9 @@
  *   - sons : volumes, remplacer, regenerer, voix off IA, ajouter un son, musique de la page (un son deja utilise
  *     ailleurs declenche une alerte avec les references ; un son deja importe n'est jamais copie deux fois) ;
  *   - regenerer la sequence : consigne en francais (l'IA reecrit le prompt), meme graine ou non, versions.
+ * Case en relief (carte de profondeur, sans video) : un popup dedie (mouvement, amplitude, plan net choisi d'un
+ * clic dans l'apercu, duree, declenchement, voir / recalculer la carte), couleurs, cadrage, sons, et le passage
+ * relief <-> video H3 dans les deux sens.
  * Tout est enregistre au fil de l'eau dans le projet (panel.edit...) et l'export est remis a jour (rapide).
  */
 (function () {
@@ -100,7 +103,7 @@
       pg.data = res.page;
       const stamp = String(Date.now());
       const encoded = new Set(res.encoded || []);
-      if (encoded.size || opts.sounds || opts.video) pg.stamp = stamp;      // fichiers changes : anti-cache
+      if (encoded.size || opts.sounds || opts.video || opts.relief) pg.stamp = stamp;      // fichiers changes : anti-cache
       if (cur && cur.pid === pid) { cur.project = res.project; cur.panel = res.project.panels[cur.id] || {}; }
       if (i !== C.cur() || opts.noApply) {
         return Object.assign(res, { changed: encoded.size > 0 || JSON.stringify(old) !== JSON.stringify(res.page) });
@@ -109,6 +112,13 @@
       let remount = false;
       for (const e of res.page.panels) {
         const st = inst.panels.find(s => s.p.id === e.id);
+        const isRelief = !!e.depth && !e.video;
+        if (st && !!st.relief !== isRelief) { remount = true; continue; }    // relief <-> video : on remonte la page
+        if (st && st.relief) {
+          if (opts.sounds === e.id || opts.relief === e.id) P.updateRelief(st, e, stamp);
+          if (cur && cur.st === st && opts.sounds === e.id) renderTab();
+          continue;
+        }
         const video = encoded.has(e.id) || opts.video === e.id, sounds = opts.sounds === e.id;
         if (!video && !sounds) continue;
         if (!st || !e.video) { remount = remount || !!e.video; continue; }
@@ -295,6 +305,13 @@
             pending: {}, timer: null, playing: true, sound: false };
     st.el.classList.add("ac-sel");
     P.setPinned(st, true);
+    if (st.relief) {
+      const d = st.p.depth || {};
+      cur.relief = { preset: d.preset, amount: d.amount, focus: d.focus, duration: d.duration, trigger: d.trigger };
+      cur.relief0 = clone(cur.relief);
+      cur.relief0Saved = clone((pj.panels[st.p.id] || {}).relief || {});
+      if (!["relief", "color", "frame", "sound", "treat"].includes(lastTab)) lastTab = "relief";
+    } else if (["relief", "treat"].includes(lastTab)) lastTab = "loop";
     build();
   }
 
@@ -307,6 +324,7 @@
     if (c.sound) P.setPanelSound(c.st, false);
     c.st.freeze = false; c.st.freeShake = false;
     if (c.view) P.removeView(c.st, c.view);
+    if (c.rview) c.rview.remove();
     c.st.el.classList.remove("ac-sel");
     cancelAnimationFrame(c.raf);
     if (pop) pop.remove();
@@ -345,6 +363,7 @@
     if (c.pending.volumes) body.volumes = c.pending.volumes;
     if (c.pending.extra) body.extra = c.pending.extra;
     if (c.pending.pageVolume != null) body.pageVolume = c.pending.pageVolume;
+    if (c.pending.relief) body.relief = c.relief;
     const sounds = c.pending.extra ? c.id : null;      // son ajoute retire : reconstruire les couches
     c.pending = {};
     status("enregistrement…");
@@ -365,7 +384,13 @@
     clearTimeout(c.timer);
     c.pending = {};
     status("enregistrement…");
-    saveEdit(c.i, c.id, { edit: c.edit0 }).then(() => { if (cur === c) status("✓ retouches annulées"); })
+    const body = { edit: c.edit0 };
+    if (c.st.relief) {
+      c.relief = clone(c.relief0);
+      P.setRelief(c.st, c.relief);
+      body.relief = c.relief0Saved;
+    }
+    saveEdit(c.i, c.id, body).then(() => { if (cur === c) status("✓ retouches annulées"); })
       .catch((e) => status("⚠ " + e.message, true));
     renderTab();
     drawTimeline();
@@ -390,7 +415,21 @@
     // apercu agrandi : une vue de plus sur la case, avec les memes retouches ; il suit la taille de la fenetre
     const ar = (p.rect[2] - p.rect[0]) / Math.max(1, p.rect[3] - p.rect[1]);
     const stage = h("div.ac-view.ae-stage");
-    cur.view = P.addView(st, stage);
+    if (st.relief) {                       // relief : sa propre vue WebGL ; un clic dans l'apercu choisit le plan net
+      cur.rview = P.addReliefView(st, stage);
+      stage.title = "Clic : choisir le plan net (ce qui ne bouge pas)";
+      stage.style.cursor = "crosshair";
+      stage.addEventListener("click", (e) => {
+        const r = stage.getBoundingClientRect();
+        const z = P.reliefDepthAt(st, (e.clientX - r.left) / r.width, (e.clientY - r.top) / r.height);
+        if (z == null) return;
+        changeRelief("focus", Math.round(z * 1000) / 1000);
+        if (lastTab === "relief") renderTab();
+        toast(`Plan net : ${fmt(z)} (ce point ne bouge plus, le reste tourne autour).`);
+      });
+    } else {
+      cur.view = P.addView(st, stage);
+    }
     const playBtn = h("button.ae-btn", { title: "Lecture / pause (barre espace) : en pause, le tremblé continue sur l'image fixe" });
     const syncPlay = () => {
       st.freeze = !cur.playing; st.freeShake = !cur.playing;
@@ -398,23 +437,50 @@
     };
     cur.togglePlay = () => { cur.playing = !cur.playing; syncPlay(); };
     playBtn.onclick = cur.togglePlay;
-    syncPlay();
+    if (st.relief) {
+      cur.togglePlay = () => P.reliefPlay(st);
+      playBtn.onclick = cur.togglePlay;
+      playBtn.textContent = "▶ Jouer le mouvement (espace)";
+      playBtn.title = "Un tour du mouvement, comme au clic du lecteur";
+    } else syncPlay();
     const info = h("span.ae-info");
-    const canvas = h("canvas.ae-tl", { width: 864, height: 150 });
-    canvas.style.width = "100%"; canvas.style.height = "75px";
+    const canvas = st.relief ? null : h("canvas.ae-tl", { width: 864, height: 150 });
+    if (canvas) { canvas.style.width = "100%"; canvas.style.height = "75px"; }
     const tabs = h("div.ae-tabs");
     const tabBody = h("div.ae-tab");
-    const NAMES = { loop: "Boucle", shake: "Tremblé", color: "Couleur", frame: "Cadrage", sound: "Son", regen: "Régénérer" };
+    const NAMES = st.relief ? { relief: "Relief", color: "Couleur", frame: "Cadrage", sound: "Son", treat: "Vidéo H3" }
+                            : { loop: "Boucle", shake: "Tremblé", color: "Couleur", frame: "Cadrage", sound: "Son", regen: "Régénérer" };
     for (const [k, label] of Object.entries(NAMES)) {
       tabs.append(h("button", { dataset: { tab: k }, on: { click: () => { lastTab = k; renderTab(); } } }, label));
     }
     const foot = h("div.ae-foot", h("span.ae-status", "retouches enregistrées automatiquement"), h("span.ae-sp"),
                    h("button.ae-btn", { title: "Remettre la case comme à l'ouverture du popup", on: { click: revert } }, "↺ Annuler mes retouches"),
                    h("button.ae-btn.ae-main", { on: { click: close } }, "Fermer"));
+    let extraRow = null;
+    if (st.relief) {
+      const mapBtn = h("button.ae-btn", { title: "Voir la carte de profondeur (blanc = proche)" }, "👁 Voir la carte");
+      mapBtn.onclick = () => { cur.showMap = !cur.showMap; P.reliefShowMap(st, cur.showMap); mapBtn.classList.toggle("ae-main", cur.showMap); };
+      const redo = h("button.ae-btn", { title: "Recalculer la carte de profondeur (Depth Anything V2 Small, ~1 s)" }, "↻ Recalculer la carte");
+      redo.onclick = async () => {
+        const c = cur;
+        redo.disabled = true; status("carte de profondeur…");
+        try {
+          const r = await api(`/api/projects/${c.pid}/depth/${c.id}`, { force: true });
+          await saveEdit(c.i, c.id, {}, { relief: c.id });
+          if (cur === c) status(`✓ carte recalculée en ${fmt(r.seconds, 1)} s`);
+        } catch (e) { status("⚠ " + e.message, true); }
+        redo.disabled = false;
+      };
+      extraRow = h("div.ae-row", mapBtn, redo, h("span.ae-note", "Clic dans l'image : plan net."));
+    }
     pop = h("div.ae-pop", head,
-            h("div.ae-body", h("div.ae-stagebox", stage), h("div.ae-row", playBtn, info), canvas, tabs, tabBody), foot);
+            h("div.ae-body", h("div.ae-stagebox", stage), h("div.ae-row", playBtn, info), extraRow, canvas, tabs, tabBody), foot);
     document.body.append(pop);
     Object.assign(cur, { canvas, info, tabBody, tabs });
+    if (st.relief) {                        // le relief n'a ni timeline ni compteur d'images
+      cur.canvas = null;
+      info.textContent = "photo en relief · aucun calcul vidéo";
+    }
     try {                                   // derniere taille choisie
       const sz = JSON.parse(localStorage.getItem("ae-size") || "null");
       if (sz) { pop.style.width = Math.min(sz[0], innerWidth - 16) + "px"; pop.style.height = Math.min(sz[1], innerHeight - 24) + "px"; }
@@ -456,11 +522,10 @@
       fitStage();
     };
     placePop(head);
-    bindTimeline(canvas);
-    loadTimeline();
+    if (!st.relief) { bindTimeline(canvas); loadTimeline(); }
     renderTab();
     const loop = () => {                  // tete de lecture et compteur
-      if (!cur || !pop) return;
+      if (!cur || !pop || st.relief) return;
       const f = P.frameOf(st);
       if (f !== cur.lastF) {
         cur.lastF = f;
@@ -709,7 +774,8 @@
     const box = cur.tabBody;
     box.textContent = "";
     cur.shakeInfo = null;
-    ({ loop: tabLoop, shake: tabShake, color: tabColor, frame: tabFrame, sound: tabSound, regen: tabRegen })[lastTab](box);
+    ({ loop: tabLoop, shake: tabShake, color: tabColor, frame: tabFrame, sound: tabSound, regen: tabRegen,
+       relief: tabRelief, treat: tabTreat })[lastTab](box);
   }
 
   function tabLoop(box) {
@@ -1179,8 +1245,63 @@
   }
 
   // ------------------------------------------------------------------ regenerer la sequence
+  // ------------------------------------------------------------------ relief
+  const RELIEF_MOVES = [["respire", "Respire", "petite avancée vers le sujet puis retour"],
+                        ["glisse", "Glisse", "travelling latéral aller-retour"],
+                        ["tourne", "Tourne", "petit cercle de caméra autour du sujet"],
+                        ["vertigo", "Vertigo", "le sujet garde sa taille, le fond s'éloigne"]];
+  function changeRelief(k, v) {
+    cur.relief[k] = v;
+    P.setRelief(cur.st, { [k]: v });
+    queue({ relief: true });
+  }
+  function tabRelief(box) {
+    const r = cur.relief;
+    box.append(h("div.ae-row", RELIEF_MOVES.map(([id, label, hint]) => h("button.ae-btn" + (r.preset === id ? ".ae-main" : ""),
+      { title: hint, on: { click: () => { changeRelief("preset", id); P.reliefPlay(cur.st); renderTab(); } } }, label))));
+    box.append(slider("Amplitude", () => r.amount ?? 0.025, (v) => changeRelief("amount", v),
+      { min: 0.005, max: 0.06, step: 0.001, neutral: 0.025, fmt: (v) => fmt(v * 100, 1) + " %" }));
+    box.append(slider("Plan net", () => r.focus ?? 0.7, (v) => changeRelief("focus", v),
+      { min: 0, max: 1, step: 0.01, fmt: (v) => v < 0.33 ? `${fmt(v)} (fond)` : v > 0.66 ? `${fmt(v)} (devant)` : fmt(v) }));
+    box.append(slider("Durée", () => r.duration ?? 2, (v) => changeRelief("duration", v),
+      { min: 1, max: 5, step: 0.1, fmt: (v) => fmt(v, 1) + " s" }));
+    const trig = h("select", {}, h("option", { value: "hover" }, "Au survol (en boucle douce)"), h("option", { value: "click" }, "Au clic (un tour)"));
+    trig.value = r.trigger || "hover";
+    trig.onchange = () => changeRelief("trigger", trig.value);
+    box.append(h("label.ae-sl", h("span.ae-lab", "Déclenchement"), trig, h("span.ae-val")));
+    box.append(h("p.ae-note", "Le plan net ne bouge pas : le premier plan et le fond partent en sens contraires. Le mettre sur les visages " +
+                 "évite toute déformation. Cheveux, voiles, vitres : rester sous 3 % d'amplitude. Glisser dans la case la fait aussi bouger."));
+  }
+  function tabTreat(box) {
+    const c = cur, n = ((c.panel || {}).renders || []).length;
+    box.append(h("p", "Cette case est une photo en relief : une carte de profondeur, aucun calcul vidéo."));
+    box.append(h("p.ae-note", n ? `Elle a déjà ${n} rendu(s) H3 : en repassant en vidéo, le dernier choisi s'affiche tout de suite.`
+                                : "En vidéo H3, la case sera calculée sur les machines (quelques minutes) ; elle reste en relief en attendant."));
+    const go = h("button.ae-btn.ae-main", "🎬 Passer en vidéo H3");
+    go.onclick = async () => {
+      go.disabled = true;
+      try {
+        await saveEdit(c.i, c.id, { treatment: "h3" });
+        if (!n) {
+          const res = await api(`/api/projects/${c.pid}/render`, { panels: [c.id], target: "local" });
+          toast(res.errors && res.errors.length ? "⚠ " + res.errors.join(" ; ")
+                                                : "Rendu H3 lancé : la case reste en relief jusqu'à ce qu'il soit prêt.", 6000);
+        }
+      } catch (e) { go.disabled = false; toast("⚠ " + e.message); }
+    };
+    box.append(h("div.ae-row", go));
+  }
+
   function tabRegen(box) {
     const c = cur, panel = c.panel || {}, renders = panel.renders || [], chosen = panel.chosen || {};
+    // traitement : cette case peut devenir une photo en relief (instantane, sans video)
+    const toRelief = h("button.ae-btn", { title: "Carte de profondeur calculée en ~1 s ; la vidéo reste dans le projet" }, "🏔 Passer en relief");
+    toRelief.onclick = async () => {
+      toRelief.disabled = true;
+      try { await saveEdit(c.i, c.id, { treatment: "relief" }); toast("Case en relief : la vidéo H3 reste disponible (onglet « Vidéo H3 »)."); }
+      catch (e) { toRelief.disabled = false; toast("⚠ " + e.message); }
+    };
+    box.append(h("div.ae-row", h("span.ae-note", "Traitement : vidéo H3."), toRelief));
     const sides = [...new Set(renders.map(r => r.side))].filter(s => ["L", "V", "R"].includes(s));
     const SIDE = { V: "Vidéo", L: "Côté gauche", R: "Côté droit" };
     const prompts = {};

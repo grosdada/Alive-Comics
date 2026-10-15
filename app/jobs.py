@@ -200,7 +200,7 @@ class Scheduler:
             raise FileNotFoundError("image de depart manquante pour " + panel_id)
         w, h = png_size(start)
         plan = presets.plan_panel(panel, p.get("style", ""))
-        if not plan["jobs"]:
+        if not plan["jobs"] and plan["player"] != "depth":       # relief : pas de video, seulement les sons
             raise ValueError("caméra fixe + temps figé, sans précisions : c'est une image fixe, rien à calculer "
                              "(choisis une action, un mouvement, ou écris des précisions)")
         base_seed = int(seed if seed is not None else panel.get("seed") or settings.load()["render"]["seed"])
@@ -217,7 +217,7 @@ class Scheduler:
         if voice.get("mode") in ("tts", "music") and not voice.get("file"):
             created += self.enqueue_voice(project_id, panel_id, machines)
         foley = panel.get("foley") or {}
-        if foley.get("on") and foley.get("engine", "h3") != "h3":
+        if foley.get("on") and foley.get("engine", "h3") != "h3" and plan["player"] != "depth":
             created += self.enqueue_foley(project_id, panel_id, after=[j["id"] for j in created if j["kind"] == "video"])
         return created
 
