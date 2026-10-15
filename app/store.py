@@ -50,8 +50,13 @@ def list_projects():
                 p = json.loads(f.read_text(encoding="utf-8"))
             except (OSError, ValueError):
                 continue
-            out.append({"id": p["id"], "name": p.get("name", p["id"]), "updated": p.get("updated", 0),
-                        "panels": len(p.get("panels", {})), "thumb": p.get("thumb")})
+            pg = p.get("page") or {}
+            review = {"ok": 0, "todo": 0, "redo": 0}           # pastilles du mode edition (orange = pas encore vue)
+            for panel in (p.get("panels") or {}).values():
+                review[panel.get("review") if panel.get("review") in ("ok", "redo") else "todo"] += 1
+            out.append({"id": p["id"], "name": p.get("name", p["id"]), "updated": p.get("updated", 0), "review": review,
+                        "created": p.get("created", 0), "panels": len(p.get("panels", {})), "thumb": p.get("thumb"),
+                        "w": pg.get("width"), "h": pg.get("height")})
     return sorted(out, key=lambda x: -x["updated"])
 
 

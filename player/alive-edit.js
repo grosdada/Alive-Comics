@@ -156,6 +156,7 @@
     }).catch(() => {});
   }
   C.button.addEventListener("click", () => setMode(!on));
+  if (/[?&]edit=1\b/.test(location.search)) setTimeout(() => setMode(true), 300);     // ouvert depuis l'accueil : « Éditer »
   document.addEventListener("alive-page", (e) => {
     close();
     removeDots();

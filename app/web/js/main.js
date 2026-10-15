@@ -39,44 +39,154 @@ class App {
   // ================================================================ accueil : projets et livres
   async home() {
     this.project = null; this.selected = null;
-    const [projects, books] = await Promise.all([get("projects"), get("books")]);
+    const [projects, books, jobs] = await Promise.all([get("projects"), get("books"), get("jobs?active=1").catch(() => [])]);
+    this.homeJobs = jobs.filter(j => j.status === "running" || j.status === "queued");
     this.root.textContent = "";
     this.root.append(this.topbar(true));
-    const grid = h("div.cards",
-      h("button.card.new", { on: { click: () => this.newProjectDialog() } }, h("span.plus", "+"), h("b", "Nouvelle planche")),
-      projects.map(p => h("a.card", { href: "#p=" + p.id },
-        p.thumb ? h("img", { src: p.thumb + "?t=" + Math.round(p.updated) }) : h("div.noimg"),
-        h("div", h("b", p.name), h("small", `${p.panels} cases · ${new Date(p.updated * 1000).toLocaleString("fr-FR")}`)))));
-    const bookList = h("div.books", books.length ? books.map(b => this.bookRow(b, books, projects)) : h("p.muted", "Aucun livre pour l'instant."),
-      h("button", { on: { click: async () => {
-        books.push({ id: Math.random().toString(36).slice(2, 8), title: "Nouveau livre", pages: [] });
-        await put("books", books); this.home();
-      } } }, "+ Nouveau livre"));
-    this.root.append(h("main.home", h("h2", "Planches"), grid, h("h2", "Livres (plusieurs planches à feuilleter)"), bookList));
+    let view = pref("ac-home-view", "grid"), sort = pref("ac-home-sort", "updated"), q = "";
+    const inBooks = (pid) => books.filter(b => b.pages.includes(pid)).map(b => b.title);
+    const CMP = {
+      updated: (a, b) => b.updated - a.updated,
+      created: (a, b) => (b.created || 0) - (a.created || 0),
+      created_asc: (a, b) => (a.created || 0) - (b.created || 0),
+      alpha: (a, b) => a.name.localeCompare(b.name, "fr", { numeric: true, sensitivity: "base" }),
+      best: (a, b) => (score(b.review) ?? 0) - (score(a.review) ?? 0) || b.updated - a.updated,
+      worst: (a, b) => (score(a.review) ?? 9) - (score(b.review) ?? 9) || b.updated - a.updated,
+    };
+    const holder = h("div");
+    const draw = () => {
+      const list = projects.filter(p => !q || p.name.toLowerCase().includes(q)).sort(CMP[sort] || CMP.updated);
+      holder.textContent = "";
+      holder.append(view === "list" ? this.projectList(list, inBooks) : this.projectGrid(list));
+      count.textContent = q ? `${list.length} / ${projects.length}` : String(projects.length);
+      this.paintCalc();
+    };
+    const count = h("span.muted");
+    const search = h("input.search", { type: "search", placeholder: "Rechercher une planche…" });
+    search.addEventListener("input", () => { q = search.value.trim().toLowerCase(); draw(); });
+    const sortSel = h("select", { title: "Ordre des planches" },
+      [["updated", "Modifiées récemment"], ["created", "Créées récemment"], ["created_asc", "Plus anciennes d'abord"],
+       ["alpha", "Ordre alphabétique"], ["best", "Mieux notées"], ["worst", "À retoucher d'abord"]].map(([v, l]) => h("option", { value: v }, l)));
+    sortSel.value = sort;
+    sortSel.addEventListener("change", () => { sort = sortSel.value; setPref("ac-home-sort", sort); draw(); });
+    const seg = h("div.seg", [["grid", "Vignettes"], ["list", "Liste"]].map(([k, l]) => {
+      const b = h("button" + (k === view ? ".on" : ""), { on: { click: () => {
+        view = k; setPref("ac-home-view", k);
+        seg.querySelectorAll("button").forEach(x => x.classList.toggle("on", x === b)); draw();
+      } } }, l);
+      return b;
+    }));
+    // livres : replies (titre seulement) ou deplies (pages, ajout, apercu, publication)
+    const open = new Set(JSON.parse(pref("ac-books-open", "[]")));
+    this.bookOpen = (id, on) => { if (on) open.add(id); else open.delete(id); setPref("ac-books-open", JSON.stringify([...open])); };
+    const bookList = h("div.books", books.length ? books.map(b => this.bookRow(b, books, projects, open.has(b.id)))
+                                                 : h("p.muted", "Aucun livre pour l'instant."));
+    const allBooks = (on) => { for (const b of books) this.bookOpen(b.id, on); this.home(); };
+    this.root.append(h("main.home",
+      h("div.home-tools", h("h2", "Planches"), count, h("span.sp"), search, sortSel, seg), holder,
+      h("div.home-tools", h("h2", "Livres"), h("span.muted", String(books.length)), h("span.sp"),
+        h("button.mini", { on: { click: () => allBooks(true) } }, "Tout déplier"),
+        h("button.mini", { on: { click: () => allBooks(false) } }, "Tout replier"),
+        h("button", { on: { click: async () => {
+          const id = Math.random().toString(36).slice(2, 8);
+          books.push({ id, title: "Nouveau livre", pages: [] });
+          this.bookOpen(id, true);
+          await put("books", books); this.home();
+        } } }, "+ Nouveau livre")),
+      bookList));
+    draw();
   }
 
-  bookRow(b, books, projects) {
+  projectGrid(list) {
+    return h("div.cards",
+      h("button.card.new", { on: { click: () => this.newProjectDialog() } }, h("span.plus", "+"), h("b", "Nouvelle planche")),
+      list.map(p => h("a.card", { href: "#p=" + p.id, "data-pid": p.id },
+        h("div.thumb", p.thumb ? h("img", { src: p.thumb + "?t=" + Math.round(p.updated), loading: "lazy" })
+                               : h("div.noimg", { style: ratio(p) }), h("span.calc")),
+        h("div", h("b", p.name), stars(p.review), h("small", `${p.panels} cases · ${fmtDate(p.updated)}`)))));
+  }
+
+  projectList(list, inBooks) {
+    return h("div.plist",
+      h("div.prow.head", h("span"), h("span", "Planche"), h("span", "Note"), h("span", "Cases"), h("span", "Créée"), h("span", "Modifiée"),
+        h("span", "Livres")),
+      list.map(p => h("a.prow", { href: "#p=" + p.id, "data-pid": p.id },
+        h("span.lthumb", p.thumb ? h("img", { src: p.thumb + "?t=" + Math.round(p.updated), loading: "lazy" }) : h("i")),
+        h("span.lname", h("b", p.name), h("span.calc")),
+        stars(p.review),
+        h("span", String(p.panels)),
+        h("span.muted", p.created ? fmtDate(p.created) : "—"),
+        h("span.muted", fmtDate(p.updated)),
+        h("span.muted.lbooks", inBooks(p.id).join(", ") || "—"))),
+      h("button.prow.new", { on: { click: () => this.newProjectDialog() } }, "+ Nouvelle planche"));
+  }
+
+  // pastilles « en calcul » (clignote) / « en file » sur les planches et les livres de l'accueil
+  paintCalc() {
+    if (!this.root) return;
+    const by = {};
+    for (const j of this.homeJobs || []) {
+      const o = by[j.project] = by[j.project] || { run: 0, wait: 0 };
+      if (j.status === "running") o.run++; else o.wait++;
+    }
+    const paint = (badge, c) => {
+      if (!badge) return;
+      if (!c || (!c.run && !c.wait)) { badge.className = "calc"; badge.textContent = ""; badge.title = ""; return; }
+      badge.className = "calc " + (c.run ? "run" : "wait");
+      badge.textContent = c.run ? `● calcul${c.wait ? ` · ${c.wait} en file` : ""}` : `${c.wait} en file`;
+      badge.title = `${c.run} rendu(s) en cours, ${c.wait} en file d'attente`;
+    };
+    for (const el of this.root.querySelectorAll("[data-pid]")) paint(el.querySelector(".calc"), by[el.dataset.pid]);
+    for (const el of this.root.querySelectorAll("[data-book]")) {
+      const c = { run: 0, wait: 0 };
+      for (const pid of (el.dataset.pages || "").split(",")) if (by[pid]) { c.run += by[pid].run; c.wait += by[pid].wait; }
+      paint(el.querySelector(".bhead .calc"), c);
+    }
+  }
+
+  bookRow(b, books, projects, open) {
     const save = async () => { await put("books", books); };
-    const title = h("input.btitle", { value: b.title });
-    title.addEventListener("change", () => { b.title = title.value; save(); });
-    // les pages du livre, en vignettes numerotees (ordre de lecture)
-    const pages = h("div.bpages", b.pages.length ? b.pages.map((pid, i) => {
+    let el = null;
+    const redraw = (o = open) => { const n = this.bookRow(b, books, projects, o); el.replaceWith(n); this.paintCalc(); };
+    const toggle = () => { this.bookOpen(b.id, !open); redraw(!open); };
+    const n = b.pages.length;
+    const head = h("div.bhead",
+      h("button.icon.chev", { title: open ? "Replier" : "Déplier", on: { click: toggle } }, open ? "▾" : "▸"));
+    if (open) {
+      const title = h("input.btitle", { value: b.title });
+      title.addEventListener("change", () => { b.title = title.value; save(); });
+      head.append(title);
+    } else {
+      head.append(h("b.btitle-ro", { on: { click: toggle } }, b.title));
+    }
+    const tot = { ok: 0, todo: 0, redo: 0 };
+    for (const pid of b.pages) { const r = projects.find(x => x.id === pid)?.review; if (r) for (const k in tot) tot[k] += r[k] || 0; }
+    head.append(h("span.muted", `${n} page${n > 1 ? "s" : ""}`), n ? stars(tot) : h("span"), h("span.calc"));
+    el = h("div.book" + (open ? ".open" : ""), { "data-book": b.id, "data-pages": b.pages.join(",") }, head);
+    if (!open) return el;
+    // les pages du livre, en vignettes numerotees (ordre de lecture) ; clic = ouvrir / apercu / edition
+    const move = (i, d) => { [b.pages[i + d], b.pages[i]] = [b.pages[i], b.pages[i + d]]; save().then(() => redraw()); };
+    const pages = h("div.bpages", n ? b.pages.map((pid, i) => {
       const p = projects.find(x => x.id === pid);
-      return h("div.bpage",
+      return h("div.bpage", { "data-pid": pid },
         h("span.bnum", String(i + 1)),
-        p?.thumb ? h("img", { src: p.thumb + "?t=" + Math.round(p.updated) }) : h("div.noimg"),
-        h("small", p ? p.name : pid + " (supprimée)"),
+        h("button.bthumb", { title: "Ouvrir la planche, aperçu, édition…", on: { click: (e) => this.pageMenu(e.currentTarget, b, i, pid) } },
+          p?.thumb ? h("img", { src: p.thumb + "?t=" + Math.round(p.updated), loading: "lazy" }) : h("div.noimg", { style: ratio(p) }),
+          h("span.calc")),
+        h("small", { title: p ? p.name : pid }, p ? p.name : pid + " (supprimée)"),
+        p ? stars(p.review) : null,
         h("div.row",
-          h("button.mini", { title: "Avancer", disabled: i === 0, on: { click: () => { [b.pages[i - 1], b.pages[i]] = [b.pages[i], b.pages[i - 1]]; save().then(() => this.home()); } } }, "◀"),
-          h("button.mini", { title: "Reculer", disabled: i === b.pages.length - 1, on: { click: () => { [b.pages[i + 1], b.pages[i]] = [b.pages[i], b.pages[i + 1]]; save().then(() => this.home()); } } }, "▶"),
-          h("button.mini", { title: "Retirer du livre", on: { click: () => { b.pages.splice(i, 1); save().then(() => this.home()); } } }, "✕")));
+          h("button.mini", { title: "Avancer d'une place", disabled: i === 0, on: { click: () => move(i, -1) } }, "◀"),
+          h("button.mini", { title: "Reculer d'une place", disabled: i === n - 1, on: { click: () => move(i, 1) } }, "▶"),
+          h("button.mini", { title: "Retirer du livre", on: { click: () => { b.pages.splice(i, 1); save().then(() => redraw()); } } }, "✕")));
     }) : h("p.muted", "Aucune page : ajoute des planches ci-dessous."));
-    const add = h("select", projects.map(p => h("option", { value: p.id }, p.name)));
+    const add = h("select", projects.slice().sort((x, y) => x.name.localeCompare(y.name, "fr", { numeric: true }))
+                                    .map(p => h("option", { value: p.id }, p.name)));
     const addBtn = h("button", { on: { click: async () => {
       if (!add.value) return;
       b.pages.push(add.value); await save();
       toast(`« ${add.selectedOptions[0].textContent} » ajoutée : le livre a ${b.pages.length} page${b.pages.length > 1 ? "s" : ""}.`, "ok");
-      this.home();
+      redraw();
     } } }, "+ Ajouter cette planche");
     const act = async (what) => {
       if (what === "publish" && b.pages.length < 2 && !confirm(`Ce livre n'a que ${b.pages.length} page : on ne pourra pas tourner les pages. Publier quand même ?`)) return;
@@ -88,12 +198,46 @@ class App {
         else this.publishedDialog(res.url);
       } catch (e) { if (tab) tab.close(); toast(e.message, "error", 9000); }
     };
-    return h("div.book", h("div.row", title, h("span.muted", `${b.pages.length} page${b.pages.length > 1 ? "s" : ""}`)), pages,
-      h("div.row", add, addBtn),
+    el.append(pages, h("div.row", add, addBtn),
       h("div.row",
         h("button", { on: { click: () => act("export") } }, "Aperçu"),
         h("button.primary", { on: { click: () => act("publish") } }, "Publier le livre"),
-        h("button.mini", { on: { click: async () => { if (confirm("Supprimer ce livre (les planches restent) ?")) { books.splice(books.indexOf(b), 1); await save(); this.home(); } } } }, "Supprimer le livre")));
+        h("button.mini", { on: { click: async () => {
+          if (!confirm("Supprimer ce livre (les planches restent) ?")) return;
+          books.splice(books.indexOf(b), 1); await save(); el.remove();
+        } } }, "Supprimer le livre")));
+    return el;
+  }
+
+  // clic sur une page d'un livre : l'ouvrir dans l'application, son apercu, ou l'apercu en mode edition
+  pageMenu(anchor, b, i, pid) {
+    document.querySelector(".popmenu")?.remove();
+    const go = async (what) => {
+      menu.remove();
+      if (what === "open") { location.hash = "#p=" + pid; return; }
+      const tab = openPending(what.startsWith("book") ? "Assemblage du livre…" : "Assemblage de la page…");
+      try {
+        if (what.startsWith("book")) {
+          const res = await post(`books/${b.id}/export`);
+          showIn(tab, res.url + (what === "book-edit" ? "?edit=1" : "") + "#" + (i + 1));
+        } else {
+          const res = await post(`projects/${pid}/export`);
+          showIn(tab, res.url + "?t=" + Date.now() + (what === "edit" ? "&edit=1" : ""));
+        }
+      } catch (e) { if (tab) tab.close(); toast(e.message, "error", 9000); }
+    };
+    const menu = h("div.popmenu",
+      h("button", { on: { click: () => go("open") } }, "✎ Ouvrir la planche"),
+      h("button", { on: { click: () => go("preview") } }, "▶ Aperçu de la page"),
+      h("button", { on: { click: () => go("edit") } }, "✏️ Éditer la page (aperçu)"),
+      h("button", { on: { click: () => go("book") } }, `📖 Voir dans le livre (page ${i + 1})`),
+      h("button", { on: { click: () => go("book-edit") } }, "✏️ Éditer dans le livre"));
+    document.body.append(menu);
+    const r = anchor.getBoundingClientRect();
+    menu.style.left = Math.max(8, Math.min(innerWidth - menu.offsetWidth - 8, r.left)) + "px";
+    menu.style.top = Math.min(innerHeight - menu.offsetHeight - 8, r.bottom + 4) + "px";
+    const away = (e) => { if (!menu.contains(e.target)) { menu.remove(); document.removeEventListener("pointerdown", away, true); } };
+    setTimeout(() => document.addEventListener("pointerdown", away, true), 0);
   }
 
   newProjectDialog() {
@@ -646,7 +790,14 @@ class App {
   }
 
   async pollJobs() {
-    if (!this.project) return;
+    if (!this.project) {                       // accueil : pastilles « en calcul » toutes les 4 s
+      if (!this.root?.querySelector("main.home") || (this._homeTick = (this._homeTick || 0) + 1) % 2) return;
+      try {
+        this.homeJobs = (await get("jobs?active=1")).filter(j => j.status === "running" || j.status === "queued");
+        this.paintCalc();
+      } catch (e) { /* serveur en redemarrage */ }
+      return;
+    }
     this.watchRev();
     try {
       const jobs = await get("jobs?project=" + this.project.id);
@@ -869,6 +1020,27 @@ function pickFile(accept, cb) {
 }
 
 // onglet ouvert tout de suite (geste de l'utilisateur), rempli quand la page est prete
+function pref(k, d) { try { return localStorage.getItem(k) || d; } catch (e) { return d; } }
+function setPref(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* stockage indisponible */ } }
+function fmtDate(t) {
+  return new Date(t * 1000).toLocaleString("fr-FR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+// note d'une planche d'apres ses pastilles : vert 1, orange 0,4, rouge 0 -> de 1 a 5 etoiles, par demi-etoile
+// (toutes vertes = 5 ; jamais revue, tout orange = 2,5 ; beaucoup de rouges -> 1)
+function score(r) {
+  const n = r ? (r.ok || 0) + (r.todo || 0) + (r.redo || 0) : 0;
+  if (!n) return null;
+  return Math.round((1 + 4 * ((r.ok || 0) + 0.4 * (r.todo || 0)) / n) * 2) / 2;
+}
+function stars(r) {
+  const sc = score(r);
+  if (sc == null) return h("span.stars.none", "");
+  const el = h("span.stars", { title: `${String(sc).replace(".", ",")} / 5 · ${r.ok || 0} OK, ${r.todo || 0} à voir, ${r.redo || 0} à retoucher` });
+  for (let i = 1; i <= 5; i++) el.append(h("i" + (sc >= i ? ".full" : sc >= i - 0.5 ? ".half" : ""), "★"));
+  return el;
+}
+function ratio(p) { return { aspectRatio: p && p.w && p.h ? `${p.w} / ${p.h}` : "16 / 9" }; }
+
 function openPending(message) {
   const tab = window.open("", "_blank");
   if (tab) {

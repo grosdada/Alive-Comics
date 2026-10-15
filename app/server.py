@@ -244,7 +244,10 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_json(S.workers_status())
         if head == "jobs":
             if len(parts) == 1 and m == "GET":
-                return self.send_json(S.list(q.get("project")))
+                js = S.list(q.get("project"))
+                if q.get("active"):                     # seulement ce qui calcule ou attend (pastilles de l'accueil)
+                    js = [j for j in js if j["status"] in ("queued", "running")]
+                return self.send_json(js)
             if len(parts) == 3 and parts[2] == "cancel" and m == "POST":
                 return self.send_json({"ok": S.cancel(parts[1])})
             if len(parts) == 2 and parts[1] == "clear" and m == "POST":

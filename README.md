@@ -73,7 +73,11 @@ L'interface s'ouvre sur http://127.0.0.1:8790/. Il faut Python 3.10+ et ffmpeg d
    retoucher (clic dessus pour changer) ; le compteur à côté du titre résume la page et le livre.
    Le tremblé caméra est appliqué par le lecteur (plus incrusté dans la vidéo). Pour mettre les retouches en ligne :
    republier la page ou le livre.
-9. **Livres** (page d'accueil) : enchaîner plusieurs planches, aperçu, publication.
+9. **Accueil** : les planches en vignettes (la feuille entière, à son format) ou en liste ; recherche ; tri par
+   modification, création, ordre alphabétique, note ; **étoiles** d'après les pastilles du mode édition (toutes vertes = 5,
+   jamais revue = 2,5, beaucoup de rouges = 1) ; pastille rouge qui clignote = calcul en cours, orange = en file.
+   **Livres** : repliés (titre, nombre de pages, note) ou dépliés ; ◀ ▶ changent l'ordre des pages ; clic sur une page :
+   ouvrir la planche, aperçu, édition (seule ou dans le livre) ; aperçu et publication du livre.
 
 ## Réglages (⚙)
 
