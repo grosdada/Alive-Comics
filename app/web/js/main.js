@@ -626,7 +626,8 @@ class App {
       return;
     }
     const dir = P.direction || {};
-    const opts = Object.assign({ audio: true, pageSound: true, voice: false, foley: true, render: false }, dir.options || {});
+    const opts = Object.assign({ audio: true, pageSound: true, voice: false, foley: true, render: false, treatment: "h3", treats: 1 },
+                               dir.options || {});
     const ta = h("textarea", { rows: 4, placeholder: "Ex. : une ambiance de film noir des années 70, la caméra tourne lentement autour des personnages, "
                                               + "sons inquiétants, une voix off raconte une enquête…" });
     ta.value = dir.instruction || "";
@@ -635,6 +636,16 @@ class App {
       c.addEventListener("change", () => { opts[k] = c.checked; });
       return h("label.check", c, " " + label);
     };
+    // traitement : video H3 partout, relief + quelques « biscuits » H3, ou l'IA choisit case par case
+    const tr = h("select", {}, h("option", { value: "h3" }, "Vidéo H3 partout"),
+                 h("option", { value: "relief" }, "Relief partout + biscuits H3"), h("option", { value: "mixed" }, "L'IA choisit case par case"));
+    tr.value = opts.treatment || "h3";
+    const nb = h("input", { type: "number", min: 0, max: 4, value: opts.treats ?? 1, style: { width: "56px" } });
+    const nbBox = h("label.check", "biscuits par page ", nb);
+    const syncTr = () => { opts.treatment = tr.value; nbBox.hidden = tr.value !== "relief"; };
+    tr.addEventListener("change", syncTr);
+    nb.addEventListener("change", () => { opts.treats = Math.max(0, Math.min(4, +nb.value | 0)); });
+    syncTr();
     const go = h("button.primary", { on: { click: () => this.runDirector(ta.value, opts) } }, "✨ L'IA décide tout");
     el.append(
       h("div.pop-head", h("b", "🎬 Réalisateur IA"), h("button.icon", { title: "Réduire", on: { click: () => toggle(false) } }, "–")),
@@ -644,6 +655,8 @@ class App {
         P.pageSound?.mode === "file" ? h("label.check.muted", "Son global : ton fichier est gardé") : cb("pageSound", "Son global de la page"),
         cb("foley", "Bruitages (H3)"),
         cb("voice", "Voix off qui raconte (fal)"), cb("render", "Lancer les rendus ensuite")),
+      h("div.row", h("span.muted", "Traitement :"), tr, nbBox),
+      h("p.muted", "Les plans animés suivent la compétence « boucles parfaites ». Les cases validées en vert ne sont pas touchées."),
       go,
       dir.summary ? h("p.ai-explain", dir.summary) : null);
   }
@@ -661,7 +674,8 @@ class App {
       const res = await post(`projects/${P.id}/direct`, { instruction, options: opts });
       await this.open(P.id);                     // recharge la planche avec les decisions de l'IA
       this.selected = null; this.refreshInspector();
-      toast(`L'IA a réglé ${res.panels.length} cases en ${res.seconds} s. ${res.summary || ""}`, "ok", 12000);
+      toast(`L'IA a réglé ${res.panels.length} cases en ${res.seconds} s.` + (res.locked?.length ? ` Cases vertes gardées : ${res.locked.join(", ")}.` : "")
+            + ` ${res.summary || ""}`, "ok", 12000);
       if (opts.render) {
         const ready = this.workers.filter(w => w.enabled && w.pf?.video).map(w => w.name);
         const r = await post(`projects/${P.id}/render`, { panels: res.panels, target: "local", machines: ready });

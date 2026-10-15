@@ -138,7 +138,8 @@ def suggest_panel(image, camera_id, action_id, audio_preset=None, note=""):
         + 'Answer: {"camera": {...}, "action": {...}, "audio": "...", "rigid": true|false, "explain_fr": "une phrase en '
           'français : ce que tu as vu et pourquoi ces choix"}. "rigid" = the subject is a solid object that could '
           "wrongly spin on itself (mask, statue, vehicle).")
-    return _json(chat(prompt, image=image, system=SYSTEM))
+    loop = action_id != "fige"                    # plan anime : la competence boucles s'applique
+    return _json(chat(prompt, image=image, system=SYSTEM + ("\n\n" + _loop_skill() if loop else "")))
 
 
 def voice_line(image, note="", language="French"):
@@ -192,6 +193,14 @@ def list_models(provider):
 EDIT_SYSTEM = SYSTEM.replace(" Answer with JSON only.", "")
 
 
+def _loop_skill():
+    """Competence « boucles parfaites » (app/skills/boucles.md), pour tout texte de plan anime en boucle."""
+    try:
+        return (Path(__file__).resolve().parent / "skills" / "boucles.md").read_text(encoding="utf-8")
+    except OSError:
+        return ""
+
+
 def rewrite_prompt(prompt, instruction, image=None):
     """Mode edition : integre une consigne de l'auteur (souvent en francais) au prompt qui a produit la video."""
     ask = ("This prompt produced the current video of a comic panel (its start image is attached):\n\n"
@@ -199,7 +208,7 @@ def rewrite_prompt(prompt, instruction, image=None):
            "Rewrite the prompt to include the change and keep everything else that is not contradicted (subject, camera, "
            "ending, loop or stillness instructions, final 'No cuts.'). English, about the same length. "
            "Answer with the prompt text only, no quotes, no comment.")
-    out = chat(ask, image=image, system=EDIT_SYSTEM, max_tokens=700)
+    out = chat(ask, image=image, system=EDIT_SYSTEM + "\n\n" + _loop_skill(), max_tokens=700)
     return out.strip().strip('"').strip()
 
 

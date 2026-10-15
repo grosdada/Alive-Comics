@@ -3,11 +3,17 @@ tout le reste (cameras, actions, textes, sons, voix off, bruitages, son global, 
 
 Une seule demande, toutes les cases en images (ordre de lecture) : l'IA voit la page entiere et peut
 raconter une histoire coherente d'une case a l'autre. Les images ne sont jamais touchees.
+
+Competences (skills) lues a chaque demande : app/skills/boucles.md (ecrire des boucles parfaites pour H3, tire de
+docs/BOUCLES-IA.html). Traitement par case : video H3, ou relief (photo en relief, carte de profondeur) avec quelques
+« biscuits » H3 par page (docs/PARALLAXE-RELIEF.html). Les cases validees par l'auteur (pastille verte) ne sont jamais
+modifiees.
 """
 
 import io
 import json
 import time
+from pathlib import Path
 
 from . import llm, presets, store
 
@@ -16,6 +22,15 @@ CAMERA_IDS = {c["id"] for c in presets.CAMERAS}
 ACTION_IDS = {a["id"] for a in presets.ACTIONS}
 AUDIO_IDS = {a["id"] for a in presets.AUDIO}
 VOICE_IDS = {v["id"] for v in presets.VOICES}
+SKILLS = Path(__file__).resolve().parent / "skills"
+
+
+def skill(name):
+    """Texte d'une competence (relu a chaque demande : on peut l'ameliorer sans redemarrer)."""
+    try:
+        return (SKILLS / f"{name}.md").read_text(encoding="utf-8")
+    except OSError:
+        return ""
 
 
 def _small(path, side=1024):
@@ -52,6 +67,10 @@ How the player works:
 - Any camera with an action other than "fige" = a living shot that plays by itself (loop by default). Use "fixe",
   "grue", "avancee", "epaule" or "custom" for living moments; a frozen-kind camera + action = one animated take.
 - Camera "fixe" + action "fige" = a still image (avoid unless it is a deliberate pause).
+- LIVING SHOTS MUST LOOP PERFECTLY: follow the attached SKILL "writing perfect loops" for every living panel. Default
+  living panel = camera "fixe" + action "custom" with "loop": true and the full English sentence in action.fields.text
+  (an engine: flow, relay, cycle or rhythm, a living idle on every character, the closing loop sentence, no banned
+  word, no negation). Put at least one orbit360 in the largest panel of the page when its image suits it.
 Rules learned by testing MiniMax H3:
 - Field values are inserted into English sentences: "subject" is a short noun phrase ("the golden mask");
   "left"/"right"/"ending"/"close"/"wide"/"toward" are NOUN PHRASES describing the final view ("a three-quarter view
@@ -69,15 +88,30 @@ Sound design:
 - "pageSound" = the background sound of the whole page (preset id + English extra).
 Answer with JSON only."""
 
+RELIEF_RULES = """TREATMENT OF EACH PANEL ("treatment" field):
+- "relief" = DEPTH RELIEF: no video at all, a depth-map parallax of the photo (instant, free, faces stay exactly the
+  author's). The reader hovers or clicks and the camera moves a few percent. Pick a relief preset matched to the
+  composition: "respire" (small push toward the subject: portraits, couples, details), "glisse" (lateral travelling:
+  groups, landscapes, tables), "tourne" (small circle around a central subject well detached from the background),
+  "vertigo" (subject keeps its size while the background recedes: strong moments).
+- "h3" = a real MiniMax H3 shot (a "treat"): about 7 minutes of GPU per panel, so it must be worth it:
+  a frozen peak moment (confetti, rice or candy in the air, someone lifted up): frozen-kind camera (orbit360, arc) +
+  "fige"; or a gesture worth seeing live (laughter, veil in the wind, candles blown): a looping living shot written
+  with the loop skill. Prefer large panels with one clear central subject and large faces; avoid crowds of small faces.
+- For relief panels still fill "camera"/"action" with sensible values (kept for a later switch to video), but they
+  are not rendered."""
+
+
 
 def direct(pid, instruction, options):
     p = store.get(pid)
+    locked = {k for k, v in (p.get("panels") or {}).items() if v.get("review") == "ok"}   # pastille verte : intouchable
     geo = {g["id"]: g for g in (p.get("geometry") or {}).get("panels", [])}
     images, order = [], []
     for g in sorted(geo.values(), key=lambda x: x.get("order", 99)):
         panel = p["panels"].get(g["id"]) or {}
         start = store.path(pid, f"start/{g['id']}.png")
-        if not panel.get("image") or not start.exists():
+        if not panel.get("image") or not start.exists() or g["id"] in locked:
             continue
         w = g["rect"][2] - g["rect"][0]
         h = g["rect"][3] - g["rect"][1]
@@ -85,14 +119,17 @@ def direct(pid, instruction, options):
         images.append((f"Panel {g['id']} (reading order {g.get('order')}, {shape} frame):", _small(start)))
         order.append(g["id"])
     if not images:
-        raise ValueError("aucune case avec une image : importer des images d'abord")
+        raise ValueError("aucune case à régler : poser des images (les cases validées en vert ne sont pas modifiées)")
+    mode = options.get("treatment") if options.get("treatment") in ("h3", "relief", "mixed") else "h3"
+    treats = max(0, min(4, int(options.get("treats", 1) or 0)))
     want = {"audio": options.get("audio", True), "voice": options.get("voice", False),
             "foley": options.get("foley", True), "pageSound": options.get("pageSound", True)}
     schema = {
         "summary_fr": "2-3 phrases en français : l'idée d'ensemble",
         "style": "one English sentence for the common film look of the page (or empty)",
         "pageSound": {"preset": "audio preset id", "extra": "English sentence"} if want["pageSound"] else None,
-        "panels": {pid_: {"camera": {"id": "...", "fields": {}, "amplitude": "petit|moyen|grand", "rigid": False,
+        "panels": {pid_: {"treatment": "h3|relief", "relief": {"preset": "respire|glisse|tourne|vertigo"},
+                          "camera": {"id": "...", "fields": {}, "amplitude": "petit|moyen|grand", "rigid": False,
                                      "extra": "optional English precision"},
                           "action": {"id": "...", "fields": {}, "loop": True, "extra": "optional English precision"},
                           "audio": {"preset": "...", "extra": "..."} if want["audio"] else None,
@@ -106,12 +143,20 @@ def direct(pid, instruction, options):
               + "\nWhat to decide: cameras and actions" + (", per-panel ambience" if want["audio"] else "")
               + (", French voice-off narration" if want["voice"] else "") + (", foley" if want["foley"] else "")
               + (", page background sound" if want["pageSound"] else "") + "."
+              + {"h3": "\nTreatment: every panel is \"h3\" (a MiniMax H3 video).",
+                 "relief": f"\nTreatment: every panel is \"relief\", except at most {treats} \"h3\" treat panel(s) on this page "
+                           "(the ones that deserve a real shot; say why in explain_fr).",
+                 "mixed": "\nTreatment: choose per panel between \"h3\" and \"relief\" (relief when a video would add little; "
+                          "h3 when a real shot is worth 7 minutes of GPU)."}[mode]
               + "\n\nReturn JSON exactly shaped like this (one entry per panel id, here shown for the first):\n"
               + json.dumps(schema, ensure_ascii=False))
     t0 = time.time()
-    raw = llm.chat(prompt, images=images, system=RULES, max_tokens=12000, timeout=300)
+    system = RULES + "\n\n" + RELIEF_RULES + "\n\n" + skill("boucles")
+    raw = llm.chat(prompt, images=images, system=system, max_tokens=12000, timeout=300)
     plan = llm._json(raw)
+    want["treatment"], want["treats"] = mode, treats
     summary = apply(pid, plan, want, instruction, order)
+    summary["locked"] = sorted(locked)
     summary["seconds"] = round(time.time() - t0, 1)
     return summary
 
@@ -136,6 +181,14 @@ def apply(pid, plan, want, instruction, order):
             panel["action"] = {"id": act.get("id") if act.get("id") in ACTION_IDS else "fige",
                                "fields": _clean_fields(act.get("fields")),
                                "loop": act.get("loop", True) is not False, "extra": (act.get("extra") or "").strip()}
+            # traitement : video H3 ou relief (carte de profondeur), selon le mode choisi par l'auteur
+            tr = d.get("treatment") if d.get("treatment") in ("h3", "relief") else "h3"
+            if want.get("treatment") == "h3":
+                tr = "h3"
+            panel["treatment"] = tr
+            if tr == "relief":
+                pre = (d.get("relief") or {}).get("preset")
+                panel["relief"] = dict(panel.get("relief") or {}, preset=pre if pre in presets.RELIEF_IDS else "respire")
             if want["audio"] and (panel.get("audio") or {}).get("mode") != "file":   # un son importe n'est jamais remplace
                 a = d.get("audio")
                 old = panel.get("audio") or {}
