@@ -2,7 +2,9 @@
 
 Rien a installer cote client (bibliotheque standard). Cote worker : ComfyUI >= 0.33, le noeud
 comfyui-h3-orbital (H3OrbitalConditioning), le LoRA 360 Orbit et, pour le son, MiniMax Music 3.
-Relief en couches : Qwen-Image-Edit 2509 fp8 (Apache-2.0) et, pour aller 3 fois plus vite, sa LoRA Lightning 8 pas.
+Relief en couches : SAM 3.1 (detourage par personne) et BiRefNet (bords doux), natifs dans ComfyUI >= 0.33 ;
+Qwen-Image-Edit 2509 fp8 (Apache-2.0) et sa LoRA Lightning 8 pas pour le decor cache ; LaMa (comfyui-art-venture) en
+repli. Installation : docs/INSTALL-MODELES-RELIEF.md.
 """
 
 import json
@@ -27,6 +29,9 @@ QWEN_UNET = "qwen_image_edit_2509_fp8_e4m3fn.safetensors"            # Apache-2.
 QWEN_LORA = "Qwen-Image-Edit-2509-Lightning-8steps-V1.0-bf16.safetensors"   # Apache-2.0 (lightx2v)
 QWEN_CLIP = "qwen_2.5_vl_7b_fp8_scaled.safetensors"
 QWEN_VAE = "qwen_image_vae.safetensors"
+SAM3_CKPT = "sam3.1_multiplex_fp16.safetensors"                       # SAM License (Meta)
+BIREFNET = "birefnet.safetensors"                                     # MIT
+LAMA = "big-lama.pt"                                                  # Apache-2.0
 
 
 class ComfyError(RuntimeError):
@@ -179,6 +184,66 @@ def qwen_edit_graph(image_name, passes, seed, prefix, fast=True, megapixels=1.0)
     return g, outs
 
 
+def _sam(g, base, image, prompt, prefix):
+    """SAM 3.1 sur image : un masque par objet trouve (prompt « person:20 » = jusqu'a 20 personnes), en PNG."""
+    b = int(base)
+    g.update({
+        str(b): {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": SAM3_CKPT}},
+        str(b + 1): {"class_type": "CLIPTextEncode", "inputs": {"clip": [str(b), 1], "text": prompt}},
+        str(b + 2): {"class_type": "SAM3_Detect", "inputs": {"model": [str(b), 0], "image": image,
+                                                             "conditioning": [str(b + 1), 0], "threshold": 0.4,
+                                                             "refine_iterations": 2, "individual_masks": True}},
+        str(b + 3): {"class_type": "MaskToImage", "inputs": {"mask": [str(b + 2), 0]}},
+        str(b + 4): {"class_type": "SaveImage", "inputs": {"images": [str(b + 3), 0], "filename_prefix": prefix}},
+    })
+    return str(b + 4)
+
+
+def segment_graph(image_name, prefix, prompt):
+    """Detourage : SAM 3.1 (un masque par personne, noeud de sortie « 6 ») et BiRefNet (alpha doux de tout ce qui
+    est saillant, objets tenus compris, noeud de sortie « 10 »)."""
+    g = {"1": {"class_type": "LoadImage", "inputs": {"image": image_name}}}
+    _sam(g, 2, ["1", 0], prompt, prefix + "_sam")
+    g.update({
+        "7": {"class_type": "LoadBackgroundRemovalModel", "inputs": {"bg_removal_name": BIREFNET}},
+        "8": {"class_type": "RemoveBackground", "inputs": {"bg_removal_model": ["7", 0], "image": ["1", 0]}},
+        "9": {"class_type": "MaskToImage", "inputs": {"mask": ["8", 0]}},
+        "10": {"class_type": "SaveImage", "inputs": {"images": ["9", 0], "filename_prefix": prefix + "_birefnet"}},
+    })
+    return g
+
+
+def fill_graph(image_name, prompt, seed, prefix, fast):
+    """Decor cache : Qwen-Image-Edit remplit la zone peinte. Renvoie (graphe, noeud de l'image)."""
+    g, outs = qwen_edit_graph(image_name, [("fill", prompt, None)], seed, prefix, fast)
+    return g, outs["fill"]
+
+
+def sam_graph(image_name, prefix, prompt):
+    """SAM 3.1 seul (controle d'une plaque : y a-t-il des personnes ?). Sortie : noeud « 6 ». Aucune personne :
+    ComfyUI rend une erreur (lot de masques vide), voir no_detection()."""
+    g = {"1": {"class_type": "LoadImage", "inputs": {"image": image_name}}}
+    _sam(g, 2, ["1", 0], prompt, prefix)
+    return g
+
+
+def no_detection(exc):
+    """L'erreur ComfyUI est-elle celle de SAM 3.1 qui ne trouve rien (lot de masques vide) ?"""
+    return "out of bounds for dimension 0 with size 0" in str(exc)
+
+
+def lama_graph(image_name, mask_name, prefix):
+    """Repli sans invention (mais flou) : LaMa remplit le masque blanc. Sortie : noeud « 5 »."""
+    return {
+        "1": {"class_type": "LoadImage", "inputs": {"image": image_name}},
+        "2": {"class_type": "LoadImage", "inputs": {"image": mask_name}},
+        "3": {"class_type": "ImageToMask", "inputs": {"image": ["2", 0], "channel": "red"}},
+        "4": {"class_type": "LoadLaMaModel", "inputs": {"model_name": LAMA}},
+        "6": {"class_type": "LaMaInpaint", "inputs": {"image": ["1", 0], "mask": ["3", 0], "lama_model": ["4", 0]}},
+        "5": {"class_type": "SaveImage", "inputs": {"images": ["6", 0], "filename_prefix": prefix}},
+    }
+
+
 # ------------------------------------------------------------------ execution
 def submit(server, graph):
     try:
@@ -238,7 +303,7 @@ def cancel(server, prompt_id):
 def preflight(server):
     """{online, version, video: bool, music: bool, missing: [...], load} pour l'interface et le planificateur."""
     out = {"online": False, "version": "", "video": False, "music": False, "h3audio": False, "missing": [], "load": 0,
-           "gpu": "", "qwen": False, "qwen_fast": False}
+           "gpu": "", "qwen": False, "qwen_fast": False, "sam3": False, "lama": False, "layers": False}
     try:
         stats = http_json(server.rstrip("/") + "/system_stats", timeout=6)
     except (OSError, ValueError) as exc:
@@ -261,7 +326,8 @@ def preflight(server):
         if node not in info:
             return False
         if field:
-            opts = info[node]["input"]["required"][field][0]
+            spec = info[node]["input"]["required"][field]
+            opts = spec[1].get("options", []) if spec[0] == "COMBO" else spec[0]   # format v3 : ["COMBO", {options}]
             return fname in opts
         return True
 
@@ -282,6 +348,11 @@ def preflight(server):
         ("TextEncodeQwenImageEditPlus",), ("UNETLoader", "unet_name", QWEN_UNET), ("CLIPLoader", "clip_name", QWEN_CLIP),
         ("VAELoader", "vae_name", QWEN_VAE)])
     out["qwen_fast"] = out["qwen"] and has("LoraLoaderModelOnly", "lora_name", QWEN_LORA)
+    out["sam3"] = not out["missing"] and all(has(*c) for c in [
+        ("SAM3_Detect",), ("CheckpointLoaderSimple", "ckpt_name", SAM3_CKPT), ("RemoveBackground",),
+        ("LoadBackgroundRemovalModel", "bg_removal_name", BIREFNET)])
+    out["lama"] = has("LaMaInpaint") and has("LoadLaMaModel", "model_name", LAMA)
+    out["layers"] = out["qwen"] and out["sam3"]
     out["missing"] += miss_v + miss_m
     try:
         out["load"] = queue_load(server)

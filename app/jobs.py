@@ -26,7 +26,7 @@ JOBS_FILE = Path(os.environ.get("ALIVE_JOBS_FILE") or DATA / "jobs.json")   # in
 AUTO_FAL_AFTER = 120          # s d'attente avant qu'une tache « auto » parte sur fal
 POLL_COMFY = 4
 POLL_FAL = 5
-CAPS = {"video": "video", "audio": "music", "layers": "qwen"}   # tache -> capacite du worker (preflight)
+CAPS = {"video": "video", "audio": "music", "layers": "layers"}   # tache -> capacite du worker (preflight)
 
 
 def png_size(path):
@@ -151,7 +151,7 @@ class Scheduler:
         with self.lock:
             for j in self.jobs.values():
                 if j["status"] == "running":
-                    if j.get("handle"):
+                    if j.get("handle") and j["kind"] != "layers":     # couches : etapes courtes, on recommence
                         w = self.workers.get(j.get("worker") or "")
                         if w:
                             w["job"], w["last_kind"] = j["id"], j["kind"]
@@ -264,7 +264,8 @@ class Scheduler:
         return [job]
 
     def enqueue_layers(self, project_id, panel_id, machines=None, seed=None):
-        """Relief en couches d'une case (Qwen-Image-Edit sur un PC, puis decoupe ici). Pas de doublon en file."""
+        """Relief en couches d'une case (SAM 3.1, BiRefNet et Qwen-Image-Edit sur un PC, puis decoupe ici).
+        Pas de doublon en file."""
         start = store.path(project_id, f"start/{panel_id}.png")
         if not start.exists():
             raise FileNotFoundError("image de depart manquante pour " + panel_id)
@@ -275,17 +276,17 @@ class Scheduler:
             for j in self.jobs.values():
                 if (j["project"], j["panel"], j["kind"]) == (project_id, panel_id, "layers") and j["status"] in ("queued", "running"):
                     return [dict(j)]
-            return [self._add(project_id, panel_id, layers.SIDE, "layers", "local", self.qwen_machines(machines), spec)]
+            return [self._add(project_id, panel_id, layers.SIDE, "layers", "local", self.layer_machines(machines), spec)]
 
-    def qwen_machines(self, machines):
-        """Parmi les machines choisies, celles qui ont Qwen-Image-Edit ; aucune : toutes celles qui l'ont (None)."""
+    def layer_machines(self, machines):
+        """Parmi les machines choisies, celles qui savent faire les couches ; aucune : toutes celles-la (None)."""
         with self.lock:
-            ok = [m for m in machines or [] if (self.workers.get(m) or {}).get("pf", {}).get("qwen")]
+            ok = [m for m in machines or [] if (self.workers.get(m) or {}).get("pf", {}).get("layers")]
         return ok or None
 
     def can_layers(self):
         with self.lock:
-            return any(w["enabled"] and (w["pf"] or {}).get("qwen") for w in self.workers.values())
+            return any(w["enabled"] and (w["pf"] or {}).get("layers") for w in self.workers.values())
 
     def _add(self, project_id, panel_id, side, kind, target, machines, spec):
         job = {"id": secrets.token_hex(5), "project": project_id, "panel": panel_id, "side": side, "kind": kind,
@@ -464,17 +465,16 @@ class Scheduler:
             steps = settings.load()["render"].get("steps", 28)
             spec["h3audio"] = bool((w["pf"] or {}).get("h3audio"))
             graph = comfy.h3_graph(spec, names, prefix, steps, audio=spec["h3audio"])
-        elif job["kind"] == "layers":
-            self._set(job, progress="l'IA regarde la case")
-            passes, info = layers.passes(store.path(pid, spec["start"]), spec.get("info"))
-            spec.update(info=info, passes=passes, worker=w["name"])
-            if not passes:                              # l'IA ne voit aucun sujet : pas de calcul sur la machine
-                m = layers.build(pid, job["panel"], dict(spec, skip=True))
-                return self._finish_layers(job, m)
-            spec["src_mtime"] = store.path(pid, spec["start"]).stat().st_mtime   # image changee d'ici la fin : refus
-            name = comfy.upload(w["url"], store.path(pid, spec["start"]), sub)
-            graph, spec["outs"] = comfy.qwen_edit_graph(name, passes, spec["seed"], prefix,
-                                                        fast=bool((w["pf"] or {}).get("qwen_fast")))
+        elif job["kind"] == "layers":                   # plusieurs graphes courts, enchaines par layers.compute
+            spec["worker"] = w["name"]
+            try:
+                m = layers.compute(w["url"], pid, job["panel"], spec, progress=lambda t: self._set(job, progress=t),
+                                   cancelled=lambda: job["id"] in self.cancel_flags,
+                                   fast=bool((w["pf"] or {}).get("qwen_fast")), lama=bool((w["pf"] or {}).get("lama")))
+            except InterruptedError:
+                self._set(job, status="cancelled", finished=time.time())
+                return
+            return self._finish_layers(job, m)
         else:
             graph = comfy.music_graph(spec["caption"], spec["lyrics"], spec["seed"], spec["seconds"], prefix)
         prompt_id = comfy.submit(w["url"], graph)
@@ -505,15 +505,6 @@ class Scheduler:
                 break
             self._set(job, progress="calcul %d s" % (time.time() - t0)) if int(time.time() - t0) % 20 < POLL_COMFY else None
             time.sleep(POLL_COMFY)
-        if job["kind"] == "layers":                     # plusieurs images : une par passe Qwen
-            for old in layers.raw_path(job["project"], job["panel"], "x").parent.glob("*.png"):
-                old.unlink()                            # jamais de sortie d'un calcul precedent
-            for key, nid in (job["spec"].get("outs") or {}).items():
-                imgs = ((entry.get("outputs") or {}).get(nid) or {}).get("images") or []
-                if imgs:
-                    comfy.download(h["server"], imgs[0], layers.raw_path(job["project"], job["panel"], key))
-            self._set(job, progress="découpe des calques")
-            return self._finish_layers(job, layers.build(job["project"], job["panel"], job["spec"]))
         exts = (".mp4", ".webm", ".mov") if job["kind"] == "video" else (".mp3", ".flac", ".wav", ".ogg")
         items = list(comfy.outputs(entry, exts))
         if not items:

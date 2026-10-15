@@ -12,7 +12,7 @@
  * clic dans l'apercu, duree, declenchement, voir / recalculer la carte), couleurs, cadrage, sons, et le passage
  * relief <-> video H3 dans les deux sens.
  * Relief en couches : l'onglet Relief montre l'etat des couches (fond sans les sujets + sujets detoures, calcules par
- * Qwen-Image-Edit sur une machine), les lance ou les relance, et la vue « Calques » les montre en couleur.
+ * SAM 3.1 + Qwen-Image-Edit sur une machine), les lance ou les relance, et la vue « Calques » les montre en couleur.
  * Tout est enregistre au fil de l'eau dans le projet (panel.edit...) et l'export est remis a jour (rapide).
  */
 (function () {
@@ -1327,19 +1327,20 @@
     const on = layersUsed(c.panel || {}), shown = !!((c.st.p.depth || {}).layers);     // dans l'export de la page
     if (el.isConnected) {
       let line;
-      if (job) line = job.status === "queued" ? "⏳ En file d'attente (une machine libre avec Qwen-Image-Edit)…"
+      if (job) line = job.status === "queued" ? "⏳ En file d'attente (une machine libre avec les modèles des couches)…"
                                               : `⚙ Calcul sur ${job.worker} : ${job.progress || "en cours"}…`;
       else if (m && m.n > 0) line = `✓ ${m.n} sujet${m.n > 1 ? "s" : ""} détouré${m.n > 1 ? "s" : ""} + le fond reconstruit` +
                                     (m.n > 1 ? (m.groups === "profondeur" ? " (devant / derrière selon la profondeur)"
                                                                           : " (devant / derrière vus par l'IA)") : "")
+                                    + (m.crowd ? " · foule : seul le premier plan est détaché" : "")
                                     + (on ? "" : (c.panel || {}).review === "ok" && (c.panel || {}).couches == null
                                          ? " · case validée : cocher pour les utiliser" : " · non utilisées (nappe simple)")
                                     + (m.last_try ? ` · dernier essai raté (${m.last_try.reason}), couches précédentes gardées` : "");
       else if (m) line = "✗ Pas de couches : " + (m.reason || "découpe impossible") + ". La case garde la nappe simple.";
       else line = r.possible ? "Pas encore calculées : la case utilise la nappe simple (elle peut onduler au bord des sujets)."
-                             : "Aucune machine n'a Qwen-Image-Edit 2509 : la case garde la nappe simple.";
+                             : "Aucune machine n'a les modèles des couches (SAM 3.1, Qwen-Image-Edit) : la case garde la nappe simple.";
       const go = h("button.ae-btn" + (m ? "" : ".ae-main"), { disabled: !!job || !r.possible,
-        title: "Qwen-Image-Edit enlève les sujets, les détoure sur fond vert, puis l'app découpe les calques (~1 min)" },
+        title: "SAM 3.1 détoure chaque personne, Qwen-Image-Edit reconstruit le décor caché, puis l'app découpe les calques (~1 min)" },
         m ? "↻ Recalculer (autre essai)" : "🧩 Calculer les couches");
       go.onclick = async () => {
         go.disabled = true;

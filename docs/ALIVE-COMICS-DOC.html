@@ -237,7 +237,7 @@ copy "\\PC-SOURCE\E$\Codex projects\Alive-Comics\local_settings.json" .</code></
               start/&lt;case&gt;.png   image de départ envoyée à H3 (et base du relief)
               renders/&lt;case&gt;/    toutes les variantes rendues
               depth/&lt;case&gt;.png   nappe de profondeur (relief, apercu immediat et repli)
-              layers/&lt;case&gt;/      relief en couches : raw/ (sorties Qwen), bg.jpg, l1.webp, l2.webp, ld.png, meta.json
+              layers/&lt;case&gt;/      relief en couches : raw/ (SAM, BiRefNet, profondeur, plaque Qwen), bg.jpg, l1.webp, l2.webp, ld.png, meta.json
               page/              page.jpg, frames.png (traits), thumb.jpg
               export/            la page jouable : index.html, book.js, manga_data.js, videos/, sons/, images/, depth/</code></pre>
 </section>
@@ -310,28 +310,36 @@ page : { page: "page.jpg", frames: "frames.png", size: [W, H], fps: 24, sound: {
       photo. En attendant les couches (ou si la case ne se découpe pas), une <b>nappe</b> de profondeur sans pli sert de relief.
       Détails : <code>docs/PARALLAXE-RELIEF.html</code>, <code>app/layers.py</code>.</p></div>
   <div class="block">
-    <h3>Les couches (tâche « Couches relief » de la file, ~45 s à chaud, ~5 min si le modèle est froid)</h3>
+    <h3>Les couches, version 2 (tâche « Couches relief » de la file, ~1 min à chaud, ~3 min si les modèles sont froids)</h3>
     <ol>
-      <li>L'IA de l'app décrit les sujets de la case (personnes, animaux, véhicules ; devant ou derrière ; un cadre
-        approximatif pour chacun). Sans clé d'IA : prompts génériques. Si l'IA ne voit aucun sujet détaché, rien n'est
-        calculé. Seules les silhouettes dans ces cadres deviennent des calques : quelqu'un que Qwen garde ou redessine de
-        lui-même reste dans le décor (sinon il serait en double).</li>
-      <li><b>Qwen-Image-Edit 2509</b> (fp8, licence Apache 2.0, + LoRA Lightning 8 pas), en un graphe sur une machine :
-        « fond vert » (tout sauf les sujets en vert pur : les masques), puis épluchage : « avant » (sans les sujets de devant)
-        et « plaque » (sans les autres, à partir de l'image précédente).</li>
-      <li>Sur ce PC (~6 s) : recalage des images générées sur la photo (ECC), masques doux, contrôle (un sujet que l'IA n'a pas
-        retiré reste dans le fond), couleurs des sujets sans liseré, ombre portée prolongée sous le sujet, profondeur de chaque
-        calque (Depth Anything V2 Small) à l'échelle de la photo, pente bornée.</li>
+      <li><b>Détourage</b> sur une machine ComfyUI : <b>SAM 3.1</b> (« person », un masque exact par personne) et
+        <b>BiRefNet</b> (bord doux des cheveux, objets tenus). Un objet va à la personne qu'il touche s'il ne touche qu'elle
+        et reste petit devant elle (valise, verre, téléphone) ; un gâteau entouré d'invités ou un banc restent au décor.</li>
+      <li><b>Profondeur</b> sur ce PC : <b>Depth Pro</b> d'Apple (carte du GPU s'il reste 6 Go, sinon processeur), à défaut
+        Depth Anything V2 Small. Sujets = personnes sur 0,4 % de la case au moins.</li>
+      <li><b>Foules</b> (sujets sur plus de 45 % de la case) : seul le <b>premier plan net</b> est détaché (les plus proches,
+        séparés de la personne suivante par un écart de profondeur, sur 35 % de la case au plus) ; le reste de la foule reste
+        dans le décor. Pas de premier plan net : la nappe simple.</li>
+      <li><b>Décor caché</b> : une forme magenta est peinte à la place des sujets (forme convexe ; foule : silhouette élargie et
+        arrondie) et <b>Qwen-Image-Edit 2509</b> (fp8 + LoRA Lightning 8 pas) la remplit. Contrôles : SAM 3.1 sur la plaque
+        (personne inventée dans la forme ; foule : sujet redessiné à sa place), photo recomposée (écart hors de la forme),
+        magenta restant. Essai raté : autre graine (3 essais), puis <b>LaMa</b> (flou mais sans invention).</li>
+      <li>Sur ce PC (~5 s) : groupes devant / derrière par écart de profondeur, plaque recalée (ECC) et accordée en couleur,
+        ombre portée prolongée sous le sujet, couleurs des sujets sans liseré, sujets en cartes à peine bombées, profondeur du
+        fond calculée sur la plaque, pente bornée.</li>
       <li>Export : <code>images/&lt;case&gt;_bg.jpg</code>, <code>_l1.webp</code>, <code>_l2.webp</code> (RGBA),
         <code>depth/&lt;case&gt;_ld.png</code> (R = fond, G = l1, B = l2), environ 0,25 Mo par case.</li>
     </ol>
-    <p><b>Foules et gros plans</b> : quand les sujets couvrent environ la moitié de la case ou plus (mesuré : bonnes cases
-      14 à 37 %, foules 54 à 62 %), la case garde la nappe simple ; Qwen y réinvente trop le décor. Une vidéo H3 leur va mieux.</p>
+    <p>Mesuré (planche 15, Heures creuses 3) : bonnes cases 14 à 37 % de sujets, foules 54 à 67 % ; en foule, le premier plan
+      détaché couvre 12 à 30 % de la case. Fichiers bruts dans <code>layers/&lt;case&gt;/raw/</code> (masques SAM, BiRefNet,
+      profondeur, forme peinte, plaque) ; <code>meta.json</code> garde les essais (<code>fill</code>) et les temps (<code>timing</code>).</p>
     <p>Lancement : « Calculer » (cases en relief, sauf les vertes et celles déjà calculées) ou, dans l'aperçu en mode édition,
       onglet Relief : « Calculer les couches » / « Recalculer (autre essai) », « Utiliser les couches », vue « 🧩 Calques »
       (bleu = sujet du fond, orange = sujet de devant).</p>
-    <div class="warn">Licences : Qwen-Image-Edit (Apache 2.0) uniquement pour les plaques. Jamais FLUX.1/FLUX.2 dev, RMBG,
-      ObjectClear, MatAnyone, MiniMax-Remover (non commerciaux), ni Lyra-2 ou SHARP (recherche).</div>
+    <div class="warn">Licences (choix de David le 15/10/2026 : la précision d'abord) : BiRefNet MIT, Qwen-Image-Edit et LaMa
+      Apache 2.0, mais <b>SAM 3.1</b> (SAM License de Meta) et <b>Depth Pro</b> (licence de recherche Apple) sont à revoir
+      avant tout usage commercial. Jamais FLUX.1/FLUX.2 dev, RMBG, ObjectClear, MatAnyone, MiniMax-Remover (non commerciaux),
+      ni Lyra-2 ou SHARP (recherche). Installation des modèles : <code>docs/INSTALL-MODELES-RELIEF.md</code>.</div>
   </div>
   <div class="grid2">
     <div class="block">
@@ -391,7 +399,7 @@ page : { page: "page.jpg", frames: "frames.png", size: [W, H], fps: 24, sound: {
         <li>Reprise après redémarrage : les rendus en cours se rebranchent sur ComfyUI.</li>
         <li>Erreur de mémoire passagère : une relance, ailleurs si possible ; machine muette : nouveaux essais pendant 15 min.</li>
         <li>Indice de mouvement après chaque rendu : &lt; 0,3 presque immobile ; 1,5 à 4,5 une case qui vit bien.</li>
-        <li>Une case en relief : sa nappe est calculée tout de suite, ses couches passent par la file (Qwen-Image-Edit).</li>
+        <li>Une case en relief : sa nappe est calculée tout de suite, ses couches passent par la file (SAM 3.1, Qwen-Image-Edit).</li>
       </ul>
     </div>
   </div>
@@ -590,7 +598,7 @@ page : { page: "page.jpg", frames: "frames.png", size: [W, H], fps: 24, sound: {
     <li><b>Réseaux sociaux</b> : une planche ne joue pas dans le fil de X ou Instagram. À faire : un export vidéo de la page
       (MP4 carré, 9:16, 16:9, toutes les cases animées, avec le son) et des aperçus de lien (balises Open Graph, robots des
       réseaux autorisés tout en gardant Google dehors).</li>
-    <li><b>Relief niveau 3</b> : un calque par objet proche (banc, table) ; maillages en couches avec vraie caméra perspective (vertigo plus fort) ; détourage BiRefNet (MIT) quand l'image « fond vert » rate ; double-clic agrandi pour les cases en relief.</li>
+    <li><b>Relief niveau 3</b> : un calque par objet proche (banc, table) ; maillages en couches avec vraie caméra perspective (vertigo plus fort) ; profondeur MoGe-3 (MIT) + Marigold quand ComfyUI sera en 0.37+ ; double-clic agrandi pour les cases en relief.</li>
     <li><b>Biscuits automatiques</b> : bouton « Proposer les biscuits » sur la page, estimation de durée, biscuits en arrière-plan.</li>
     <li>Musiques générées prioritaires quand une page attend seulement ses sons.</li>
     <li>Republier d'un clic les livres en ligne après des retouches.</li>

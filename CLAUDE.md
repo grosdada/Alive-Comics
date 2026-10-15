@@ -24,8 +24,11 @@ Pilotage par API (une autre instance de Claude fabrique les livres) : `docs/PILO
   Pas d'aller-retour, pas de mots mous (slowly, small…), pas de négation, un idle vivant sur chaque personnage.
 - Cartes de profondeur : uniquement des modèles à licence distribuable (Depth Anything V2 **Small**, Apache 2.0).
   Les tailles Base / Large / Giant sont CC-BY-NC : interdites.
-- Relief en couches (`app/layers.py`) : plaques et masques par **Qwen-Image-Edit 2509** (Apache 2.0) seulement. Jamais
-  FLUX dev, RMBG, ObjectClear, MatAnyone, MiniMax-Remover (non commerciaux), ni Lyra-2 / SHARP (recherche) dans l'app.
+- Relief en couches (`app/layers.py`, v2) : détourage **SAM 3.1** (SAM License de Meta) + **BiRefNet** (MIT), décor caché
+  **Qwen-Image-Edit 2509** (Apache 2.0), repli **LaMa** (Apache 2.0), profondeur **Depth Pro** (licence de recherche Apple).
+  Choix de David le 15/10/2026 : la précision d'abord, les licences plus tard ; Depth Pro et SAM sont à revoir avant
+  tout usage commercial (piste : MoGe-3, MIT, quand ComfyUI sera en 0.37+). Toujours jamais FLUX dev, RMBG,
+  ObjectClear, MatAnyone, MiniMax-Remover (non commerciaux), ni Lyra-2 / SHARP (recherche) dans l'app.
 - Licence MiniMax H3 : elle exclut l'UE, le Royaume-Uni, les USA et la Corée, y compris l'affichage des vidéos produites
   (§ V.4). David publie depuis la France : ne pas présenter H3 comme « sans risque » ; c'est à lui de trancher.
 - Sons importés : jamais deux fois le même fichier (app/sounds.py) ; un son déjà utilisé déclenche une alerte.

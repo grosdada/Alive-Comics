@@ -512,7 +512,8 @@ class Handler(BaseHTTPRequestHandler):
                 prev = (panel.get("layers") or {}).get("seed")
                 seed = b.get("seed") if b.get("seed") is not None else (int(prev) + 7 if prev is not None else None)
                 if not S.can_layers():
-                    raise ApiError("aucune machine n'a Qwen-Image-Edit (2509 fp8) : couches impossibles pour l'instant")
+                    raise ApiError("aucune machine n'a les modèles des couches (SAM 3.1, BiRefNet, Qwen-Image-Edit 2509 : "
+                                   "docs/INSTALL-MODELES-RELIEF.md) : couches impossibles pour l'instant")
                 return self.send_json({"jobs": S.enqueue_layers(pid, parts[3], b.get("machines"), seed)})
             job = next((j for j in sorted(S.list(pid), key=lambda j: -j["created"])
                         if j["panel"] == parts[3] and j["kind"] == "layers"), None)

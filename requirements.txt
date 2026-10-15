@@ -2,3 +2,5 @@ pillow>=10
 numpy>=1.26
 onnxruntime>=1.17
 opencv-contrib-python-headless>=4.8   # relief en couches (recalage ECC, lissage guide) ; Apache 2.0
+# facultatif, profondeur Depth Pro des couches (sinon Depth Anything V2 Small) : torch, transformers>=4.51
+#   + python tools/install_relief_models.py "<models ComfyUI>" --extra

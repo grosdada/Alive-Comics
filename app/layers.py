@@ -4,30 +4,47 @@ Pourquoi : une seule image tordue par une seule carte de profondeur se replie au
 n'a rien a montrer derriere eux. Ici, chaque calque a sa propre profondeur, sans rupture, et c'est son alpha qui gere
 qui cache quoi. Le lecteur dessine les calques du fond vers l'avant (player/alive-player.js).
 
-Calcul (une tache « couches » de la file, sur un PC ComfyUI qui a Qwen-Image-Edit 2509, licence Apache-2.0) :
-1. l'IA de l'app (si une cle est reglee) decrit les sujets de la case ; sinon prompts generiques ;
-2. Qwen-Image-Edit, en un seul graphe : « fond vert » (tout sauf les sujets en vert pur -> masques automatiques),
-   « plaque » (la scene sans les sujets) et, s'il y a des sujets devant et derriere, « avant » (sans le plus proche) ;
-3. ici, sur le processeur (quelques secondes) : recalage des images generees sur la photo (ECC), masques doux,
-   controle (un sujet que l'IA n'a pas retire reste dans le fond), couleurs du sujet sans lisere, profondeur de chaque
-   calque (Depth Anything V2 Small) ramenee a l'echelle de la photo, pente bornee.
-Au repos, l'image est celle de la photo : l'IA ne sert que DANS la place des sujets (composition, pas confiance).
+Version 2 (detourage de precision) : une tache « couches » de la file, sur un PC ComfyUI qui a SAM 3.1, BiRefNet et
+Qwen-Image-Edit 2509 (voir docs/INSTALL-MODELES-RELIEF.md) :
+1. ComfyUI : SAM 3.1 (« person ») donne un masque exact par personne ; BiRefNet donne le bord doux (cheveux) et les
+   objets tenus (une valise accrochee a la main appartient a la personne).
+2. Ici : profondeur de la photo (Depth Pro d'Apple si present, sinon Depth Anything V2 Small). Sujets = les personnes
+   assez grandes ; foule (sujets sur plus de 45 % de la case) : seulement le premier plan net (les plus proches, bien
+   separes du reste en profondeur), le reste de la foule reste dans le decor ; aucun premier plan net : nappe simple.
+3. Une forme neutre (magenta) est peinte a la place des sujets : forme convexe (peinte en silhouette, Qwen redessinait
+   des jambes ou des gens) ; foule : silhouette elargie et arrondie, Qwen y prolonge les gens de derriere.
+4. ComfyUI : Qwen-Image-Edit remplit la forme avec le decor cache, et SAM 3.1 controle la plaque dans le meme graphe :
+   une personne inventee dans la forme (pas une personne de la photo prolongee) -> autre graine, puis LaMa (flou mais
+   sans invention).
+5. Ici : groupes devant / derriere par ecart de profondeur, plaque recalee, lumiere prolongee sous les sujets, couleurs
+   des sujets sans lisere, sujets en cartes a peine bombees, profondeur du fond calculee sur la plaque.
+Au repos, l'image est celle de la photo : l'IA ne sert que DANS la place des sujets.
 
-Fichiers : projects/<id>/layers/<case>/ : raw/ (sorties Qwen), bg.jpg (fond sans les sujets), l1.webp et l2.webp
-(sujets RGBA, du plus loin au plus proche), ld.png (profondeurs : R = fond, G = l1, B = l2, demi-resolution),
-meta.json (n calques, profondeurs, plan net conseille, controles, prompts).
+Fichiers : projects/<id>/layers/<case>/ : raw/ (sam_XX.png, birefnet.png, depth.npy, painted.png, plate.png), bg.jpg (fond sans
+les sujets), l1.webp et l2.webp (sujets RGBA, du plus loin au plus proche), ld.png (profondeurs : R = fond, G = l1,
+B = l2, demi-resolution), meta.json (n calques, profondeurs, plan net conseille, controles).
 """
 
 import json
 import time
-from pathlib import Path
 
 from . import depth, store
 
-VERSION = 1
+VERSION = 2
 SIDE = "C"                     # tache « couches » dans la file de rendus
-REMOVED = 0.08                 # ecart moyen minimal (0-1) pour dire qu'un sujet a bien ete retire d'une plaque
-GENERIC = "the people, animals and main subjects standing in the foreground"
+SAM_PROMPT = "person:20"       # SAM 3.1 : jusqu'a 20 personnes, un masque chacune
+MIN_AREA = 0.004               # un sujet couvre au moins 0,4 % de la case (les silhouettes lointaines restent au decor)
+CROWD = 0.45                   # mesure : bonnes cases 14-37 % de sujets, foules 54-67 %
+FRONT_MAX = 0.35               # foule : premier plan detache sur 35 % de la case au plus...
+FRONT_GAP = 0.08               # ... et seulement s'il est net (ecart de profondeur avec la personne suivante)
+FILL_PROMPT = ("Fill the magenta area with the background that is hidden behind it: continue the walls, the floor and "
+               "the scenery around it, so that the magenta area disappears completely. The area must contain only empty "
+               "scenery, no person, no body part, no clothes, no animal. Keep everything else exactly identical: the "
+               "framing, the perspective, the light, the colours and the grain.")
+FILL_PROMPT_CROWD = ("Fill the magenta area with what is hidden behind it: continue the people, the walls, the floor and "
+                     "the scenery around it, so that the magenta area disappears completely. Do not add anyone new in "
+                     "the foreground. Keep everything else exactly identical: the framing, the perspective, the light, "
+                     "the colours and the grain.")
 
 
 def folder(pid, panel_id):
@@ -63,96 +80,16 @@ def ready(pid, panel_id):
     return m if m and m.get("n", 0) > 0 else None
 
 
-# ------------------------------------------------------------------ prompts
-def _the(name):
-    name = name.strip().rstrip(".")
-    return name if name.split(" ", 1)[0].lower() in ("the", "a", "an", "his", "her", "their", "two", "three") else "the " + name
-
-
-def _join(names):
-    names = [_the(n) for n in names if n and n.strip()]
-    if not names:
-        return ""
-    return names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
-
-
-def describe(start):
-    """Sujets de la case vus par l'IA de l'app : {"subjects": [{"name", "plane"}], "background", "style"} ou None."""
-    from . import llm
-    if not any(llm.available().values()):
+def files(pid, panel_id):
+    """Fichiers des couches prets pour l'export : {"bg", "fg": [..], "ld"} (chemins absolus), ou None."""
+    m = ready(pid, panel_id)
+    if not m:
         return None
-    ask = ('This image is one panel of a comic page. We will cut it into layers like a pop-up book. List the subjects '
-           'that stand clearly in front of the background: people, animals, creatures or vehicles only (never furniture, '
-           'walls, plants or buildings), at most 3, the most important first. Name each one with a short precise visual '
-           'description in English starting with "the" (clothes, colours, position in the frame), so that an image editor '
-           'can find it; what a person holds or wears belongs to that person. Give its plane: "front" for the subjects '
-           'closest to the camera, "back" for the subjects clearly further away, and its rough bounding box in percent of '
-           'the image width and height: [left, top, right, bottom], generous rather than tight. Also describe in a few English words what '
-           'is behind the subjects (the background to rebuild), and the style: "photo" or "drawing". If nothing stands out '
-           'from the background (landscape, empty room, close-up texture), return an empty subject list. Answer with JSON '
-           'only: {"subjects": [{"name": "the ...", "plane": "front", "box": [10, 5, 45, 100]}], "background": "...", '
-           '"style": "photo"}')
-    try:
-        out = llm._json(llm.chat(ask, image=start, max_tokens=600, timeout=90))
-    except Exception:                                   # noqa: BLE001 - l'IA est un plus, pas une condition
+    d = folder(pid, panel_id)
+    out = {"bg": d / "bg.jpg", "fg": [d / f"l{i}.webp" for i in range(1, m["n"] + 1)], "ld": d / "ld.png", "meta": m}
+    if not all(p.exists() for p in [out["bg"], out["ld"], *out["fg"]]):
         return None
-    if not isinstance(out, dict) or not isinstance(out.get("subjects"), list):
-        return None
-    def box(b):
-        try:
-            v = [float(x) for x in b][:4]
-            if len(v) == 4 and max(v) <= 1.0:            # cadre donne en fractions et non en pourcents
-                v = [x * 100 for x in v]
-            v = [max(0.0, min(100.0, x)) for x in v]
-            return v if len(v) == 4 and v[2] > v[0] and v[3] > v[1] else None
-        except (TypeError, ValueError):
-            return None
-    subs = [{"name": str(x.get("name") or "").strip()[:160], "plane": "back" if x.get("plane") == "back" else "front",
-             "box": box(x.get("box") or [])}
-            for x in out["subjects"][:3] if isinstance(x, dict) and str(x.get("name") or "").strip()]
-    return {"subjects": subs, "background": str(out.get("background") or "").strip()[:160],
-            "style": "drawing" if out.get("style") == "drawing" else "photo"}
-
-
-def passes(start, note=None):
-    """[(cle, prompt, source)] pour Qwen-Image-Edit, plus la description. Epluchage : s'il y a des sujets devant et
-    derriere, « front » retire ceux de devant, puis « plate » retire les autres DE CETTE IMAGE (prompts courts et
-    precis : un prompt qui demande tout d'un coup en oublie). note : description deja connue (relance)."""
-    info = note if note is not None else describe(start)
-    if info is not None and not info["subjects"] and not info.get("generic"):
-        return [], info                                 # l'IA ne voit aucun sujet detache : rien a calculer
-    info = info or {"subjects": [], "background": "", "style": "photo", "generic": True}
-    keep = "the framing, the perspective, the light, the colours and the grain"
-    if info.get("style") == "drawing":
-        keep += ", in the same drawing style and line weight"
-    behind = f": {info['background']}" if info.get("background") else ""
-    subs = [x["name"] for x in info["subjects"]]
-    who = _join(subs) or GENERIC
-
-    def remove(names, others=None, where=behind):
-        k = f"including {others}, " if others else ""
-        return (f"Remove {names}. Fill their place with what is behind them{where}, consistent with the rest of the image, "
-                f"without adding any new person or object. Keep everything else exactly identical, {k}{keep}.")
-    out = [("green", f"Replace everything except {who} by a flat pure green background (#00FF00), with no shadow: the "
-                     f"floor, the walls, the furniture, the tables and every other object become green. Keep "
-                     f"{who} exactly identical: same position, same size, same pose, same framing, with the clothes they "
-                     f"wear and what they hold in their hands.", None)]
-    if not subs:                                        # sans description : le plus proche, puis tous les autres
-        out += [("front", remove("only the person or subject closest to the camera", "the other people further away", ""),
-                 None),
-                ("plate", remove("all the remaining people and animals"), "front")]
-        return out, info
-    # un sujet par passe (une demande groupee en oublie) : ceux de devant d'abord, chaque passe repart de la precedente
-    order = [x for x in info["subjects"] if x["plane"] == "front"] + [x for x in info["subjects"] if x["plane"] == "back"]
-    nfront = sum(1 for x in order if x["plane"] == "front")
-    src = None
-    for i, x in enumerate(order):
-        last = i == len(order) - 1
-        key = "plate" if last else ("front" if i == nfront - 1 else f"r{i + 1}")
-        rest = _join([y["name"] for y in order[i + 1:]]) or None
-        out.append((key, remove(_the(x["name"]), rest, behind if last else ""), src))
-        src = key
-    return out, info
+    return out
 
 
 # ------------------------------------------------------------------ outils image
@@ -210,16 +147,6 @@ def _color_match(ref, mov, keep):
     return np.clip(out, 0, 1)
 
 
-def _guided(rgb, p, r=6, eps=1e-3):
-    """Filtre guide (He et al.) : un masque suit les bords de l'image (cheveux, contours)."""
-    import cv2
-    g = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
-    mean = lambda x: cv2.boxFilter(x, -1, (r, r))     # noqa: E731
-    mI, mp = mean(g), mean(p)
-    a = (mean(g * p) - mI * mp) / (mean(g * g) - mI * mI + eps)
-    return (mean(a) * g + mean(mp - a * mI)).clip(0, 1)
-
-
 def _grow(a, px):
     """Zone a remplacer par la plaque : le sujet (alpha > 0,02) elargi de px, bord adouci."""
     import cv2
@@ -264,7 +191,6 @@ def _decontam(img, a, bg):
 
 def _extend(F, a):
     """Couleurs prolongees sous l'alpha nul (le filtrage du lecteur ne ramene pas de noir au bord du sujet)."""
-    import cv2
     import numpy as np
     core = (a > 0.5).astype(np.float32)
     out = np.zeros_like(F)
@@ -315,139 +241,283 @@ def _fit_depth(d_plate, d_ref, keep):
     return np.clip(d_plate * s + t, 0, 1).astype(np.float32)
 
 
-def _chroma(G):
-    """Alpha du sujet sur l'image « fond vert » : distance a la couleur du fond vert mesuree dans l'image (et non la
-    « verdeur » : Qwen teinte parfois un vetement blanc en vert pale, qui doit rester du sujet ; et son vert est parfois
-    terne, vers (0,35 ; 0,6 ; 0,3)). La couleur est estimee sur le vert franc, a defaut sur les bords de l'image, puis
-    affinee sur les pixels proches : un vetement kaki ou vert olive ne la tire pas vers lui."""
+# ------------------------------------------------------------------ sujets (SAM 3.1 + BiRefNet)
+def _sam_masks(rd, W, H):
+    """Masques SAM 3.1 ranges dans rd (un par personne, petites comprises), doublons fusionnes."""
     import numpy as np
-    g = G[..., 1] - np.maximum(G[..., 0], G[..., 2])
-    strong = (g > 0.2) & (G[..., 1] > 0.3)
-    border = np.concatenate([G[:8].reshape(-1, 3), G[-8:].reshape(-1, 3), G[:, :8].reshape(-1, 3), G[:, -8:].reshape(-1, 3)])
-    bgreen = border[(border[:, 1] - np.maximum(border[:, 0], border[:, 2])) > 0.08]
-    if strong.sum() >= 0.05 * g.size:
-        key = np.median(G[strong], axis=0)
-    elif len(bgreen) >= 200:
-        key = np.median(bgreen, axis=0)
-    else:
-        wide = (g > 0.12) & (G[..., 1] > 0.3)
-        key = np.median(G[wide], axis=0) if wide.sum() >= 0.05 * g.size else np.array([0.0, 1.0, 0.0], np.float32)
-    near = np.sqrt(((G - key) ** 2).sum(axis=2)) < 0.15
-    if near.sum() >= 0.05 * g.size:
-        key = np.median(G[near], axis=0)
-    dist = np.sqrt(((G - key) ** 2).sum(axis=2))
-    return np.clip((dist - 0.12) / 0.18, 0, 1).astype(np.float32)
-
-
-def _clean(mask, W, H):
-    """Masque binaire : composantes minuscules retirees, petits trous bouches."""
-    import cv2
-    import numpy as np
-    m = cv2.morphologyEx(mask.astype(np.uint8), cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
-    n, lab, st, _ = cv2.connectedComponentsWithStats(m)
-    keep = np.zeros_like(m)
-    for i in range(1, n):
-        if st[i, cv2.CC_STAT_AREA] >= 0.003 * W * H:
-            keep[lab == i] = 1
-    n, lab, st, _ = cv2.connectedComponentsWithStats(1 - keep)
-    for i in range(1, n):                               # trous : composantes de fond qui ne touchent pas le bord
-        x, y, w, h, area = st[i]
-        if area < 0.0015 * W * H and x > 0 and y > 0 and x + w < W and y + h < H:
-            keep[lab == i] = 1
-    return keep
-
-
-def _soft(rgb, mask):
-    """Masque binaire -> alpha doux qui suit les bords de l'image."""
-    import numpy as np
-    return np.clip((_guided(rgb, mask.astype(np.float32)) - 0.2) / 0.6, 0, 1)
-
-
-def _removed(im, Q, within, W, H):
-    """Partie de la zone des sujets que l'IA a vraiment effacee dans Q (deja recalee). On ne cherche pas la preuve de
-    l'effacement (une cape blanche unie devant un mur clair change a peine) mais la preuve du contraire : des zones
-    nettement IDENTIQUES a la photo (meme structure, meme couleur), assez grandes pour etre un sujet laisse par l'IA ou un
-    objet garde par le « fond vert » (table, cabine). Tout le reste de la zone compte comme efface."""
-    import cv2
-    import numpy as np
-    zone = within.astype(bool)
-    # comparaison a l'echelle des formes (flou de 4 px) : un objet que l'IA a seulement redessine (paille, chemise, decor
-    # legerement decale) garde ses formes et ses couleurs ; une personne retiree laisse place a tout autre chose
-    a = cv2.GaussianBlur(cv2.cvtColor(im, cv2.COLOR_RGB2GRAY), (0, 0), 4)
-    b = cv2.GaussianBlur(cv2.cvtColor(Q, cv2.COLOR_RGB2GRAY), (0, 0), 4)
-    mu = lambda x: cv2.GaussianBlur(x, (0, 0), 8)       # noqa: E731
-    ma, mb = mu(a), mu(b)
-    va, vb = mu(a * a) - ma * ma, mu(b * b) - mb * mb
-    ncc = (mu(a * b) - ma * mb) / np.sqrt(np.maximum(va * vb, 1e-8))
-    textured = np.minimum(va, vb) > 1e-4
-    diff = np.abs(cv2.GaussianBlur(Q, (0, 0), 4) - cv2.GaussianBlur(im, (0, 0), 4)).max(axis=2)
-    same = np.where(textured, (ncc > 0.6) & (diff < 0.2), diff < 0.06) & zone
-    same = cv2.morphologyEx(same.astype(np.uint8), cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (15, 15)))
-    n, lab, st, _ = cv2.connectedComponentsWithStats(same)
-    kept = np.zeros(same.shape, bool)
-    for i in range(1, n):
-        if st[i, cv2.CC_STAT_AREA] >= 0.004 * W * H:     # un vrai morceau garde, pas des taches de ressemblance
-            kept |= lab == i
-    kept = cv2.dilate(kept.astype(np.uint8), cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))) > 0
-    return zone & ~kept
-
-
-def _recover(im, Q, hard, d_im, W, H):
-    """Sujets que le « fond vert » a oublies mais qu'une passe d'effacement a retires : grandes zones nettement changees
-    (au moins 1 % de la case), loin des sujets deja trouves, et plus proches que ce qui les entoure (un mur redessine
-    par l'IA ne passe pas ce test)."""
-    import cv2
-    import numpy as np
-    diff = np.abs(cv2.GaussianBlur(Q, (0, 0), 3) - cv2.GaussianBlur(im, (0, 0), 3)).max(axis=2)
-    cand = (diff > 0.15) & ~(cv2.dilate(hard, np.ones((15, 15), np.uint8)) > 0)
-    cand = cv2.morphologyEx(cand.astype(np.uint8), cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (21, 21)))
-    cand = cv2.morphologyEx(cand, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7)))
-    n, lab, st, _ = cv2.connectedComponentsWithStats(cand)
-    out = np.zeros(hard.shape, bool)
-    for i in range(1, n):
-        if st[i, cv2.CC_STAT_AREA] < 0.01 * W * H:
+    from PIL import Image
+    masks = []
+    for f in sorted(rd.glob("sam_*.png")):
+        m = np.asarray(Image.open(f).convert("L").resize((W, H), Image.NEAREST)) > 127
+        if m.sum() < 50:
             continue
-        m = np.zeros(hard.shape, np.uint8)
-        cnts, _ = cv2.findContours((lab == i).astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        cv2.drawContours(m, cnts, -1, 1, -1)
-        ring = (cv2.dilate(m, np.ones((31, 31), np.uint8)) > 0) & (m == 0)
-        if ring.any() and np.median(d_im[m > 0]) > np.median(d_im[ring]) + 0.08:
-            out |= m > 0
-    return out
+        for j, o in enumerate(masks):                     # SAM rend parfois deux fois la meme personne : on fusionne
+            inter = int((m & o).sum())
+            if inter > 0.6 * int((m | o).sum()) or inter > 0.85 * min(int(m.sum()), int(o.sum())):
+                masks[j] = m | o
+                break
+        else:
+            masks.append(m)
+    return masks
 
 
-def _gate(info, W, H):
-    """Masque des cadres des sujets decrits par l'IA (elargis de 4 %), ou None (pas de cadres : pas de filtre)."""
-    import numpy as np
-    subs = (info or {}).get("subjects") or []
-    if not subs or any(not x.get("box") for x in subs):   # un sujet sans cadre : on ne filtre pas (il serait ecarte)
-        return None
-    boxes = [x["box"] for x in subs]
-    g = np.zeros((H, W), bool)
-    for x0, y0, x1, y1 in boxes:
-        g[max(0, int((y0 - 4) * H / 100)):min(H, int((y1 + 4) * H / 100) + 1),
-          max(0, int((x0 - 4) * W / 100)):min(W, int((x1 + 4) * W / 100) + 1)] = True
-    return g
-
-
-def _keep_in(mask, gate, frac=0.3):
-    """Composantes du masque dont au moins frac de la surface est dans les cadres (toutes si pas de cadres)."""
+def _subjects(im, d):
+    """Sujets de la case a partir des sorties ComfyUI rangees dans raw/ -> ([{mask, soft, region, area}], tous les
+    masques de personnes). mask = masque exact de SAM 3.1 ; region = la personne + ce qu'elle tient (objets vus par
+    BiRefNet qui ne touchent qu'elle) ; soft = alpha doux (BiRefNet) limite a la region, sans les autres personnes, coeur de la
+    personne toujours opaque. Sujet = personne sur MIN_AREA de la case au moins."""
     import cv2
     import numpy as np
-    if gate is None or not mask.any():
-        return mask
-    n, lab = cv2.connectedComponents(mask.astype(np.uint8))
-    out = np.zeros_like(mask)
-    for i in range(1, n):
-        m = lab == i
-        if gate[m].mean() >= frac:
-            out[m] = 1
-    return out
+    from PIL import Image
+    H, W = im.shape[:2]
+    rd = d / "raw"
+    people = _sam_masks(rd, W, H)
+    masks = [m for m in people if m.mean() >= MIN_AREA]
+    bn = rd / "birefnet.png"
+    alpha = np.asarray(Image.open(bn).convert("L").resize((W, H), Image.BILINEAR), np.float32) / 255 if bn.exists() \
+        else np.zeros((H, W), np.float32)
+    k = lambda r: cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (r, r))  # noqa: E731
+    # objets tenus : ce que BiRefNet voit en plus des personnes (valise, verre, telephone), objet par objet. Un objet va a
+    # la personne qu'il touche s'il ne touche qu'elle et reste petit devant elle (mesure : valise 16 % de la taille de
+    # l'homme, telephones 1-3 %) ; un gateau touche par quatre invites ou un banc (92 %) restent au decor.
+    anyone = cv2.dilate(np.any(people or [np.zeros((H, W), bool)], axis=0).astype(np.uint8), k(5)) > 0
+    n, lab, stats, _ = cv2.connectedComponentsWithStats(((alpha > 0.5) & ~anyone).astype(np.uint8))
+    near = [cv2.dilate(o.astype(np.uint8), k(15)) > 0 for o in people]
+    owner = {}
+    for c in range(1, n):
+        if stats[c, 4] < 30:
+            continue
+        comp = lab == c
+        touch = [int((comp & z).sum()) for z in near]
+        if not touch or max(touch) == 0:
+            continue
+        j = int(np.argmax(touch))
+        alone = sum(touch) - touch[j] < 0.2 * touch[j]
+        if alone and stats[c, 4] <= 0.35 * people[j].sum():
+            owner.setdefault(j, []).append(comp)
+    out = []
+    for i, m in enumerate(masks):
+        region = m.copy()
+        for comp in owner.get(next(j for j, o in enumerate(people) if o is m), []):
+            region |= comp
+        others = np.any([o for o in people if o is not m] or [np.zeros_like(m)], axis=0) & ~region
+        zone = (cv2.dilate(region.astype(np.uint8), k(9)) > 0) & ~others      # jamais un bout du voisin
+        soft = np.maximum(alpha * zone, (cv2.erode(m.astype(np.uint8), k(5)) > 0).astype(np.float32))
+        out.append({"mask": m, "region": region, "soft": soft.astype(np.float32), "area": float(m.mean())})
+    return out, people
 
 
-# ------------------------------------------------------------------ construction des calques
+def _depth(im, d):
+    """Profondeur 0-1 de la photo (brute gardee dans raw/depth.npy : compute et build lisent la meme)."""
+    import numpy as np
+    f = d / "raw" / "depth.npy"
+    try:
+        r = np.load(f)
+        if r.shape == im.shape[:2]:
+            return depth.normalize(r)
+    except (OSError, ValueError):
+        pass
+    r = depth.raw_best(im).astype(np.float32)
+    f.parent.mkdir(parents=True, exist_ok=True)
+    np.save(f, r)
+    return depth.normalize(r)
+
+
+def _plan(subs, d_im):
+    """Sujets a detacher, du plus proche au plus loin -> (sujets, foule ?, part de la case couverte par tous).
+    Case normale : tous. Foule (plus de CROWD de la case) : le premier plan seulement, c.-a-d. les plus proches,
+    separes de la personne suivante par FRONT_GAP de profondeur au moins et sur FRONT_MAX de la case au plus ; le
+    reste de la foule reste dans le decor. Aucun premier plan net : [] (la nappe simple)."""
+    import cv2
+    import numpy as np
+    for s in subs:
+        core = cv2.erode(s["mask"].astype(np.uint8), np.ones((7, 7), np.uint8)) > 0
+        s["z"] = float(np.median(d_im[core if core.any() else s["mask"]]))
+    subs = sorted(subs, key=lambda s: -s["z"])
+    acc, covers = np.zeros(d_im.shape, bool), []
+    for s in subs:
+        acc |= s["soft"] > 0.5
+        covers.append(float(acc.mean()))
+    if covers[-1] <= CROWD:
+        return subs, False, covers[-1]
+    k = 0
+    for i in range(1, len(subs)):
+        if covers[i - 1] > FRONT_MAX:
+            break
+        if subs[i - 1]["z"] - subs[i]["z"] >= FRONT_GAP:
+            k = i
+    return subs[:k], True, covers[-1]
+
+
+def _painted(im, subs, crowd=False):
+    """Image a remplir -> (image peinte, forme). Case normale : une forme convexe elargie (magenta) par sujet, Qwen n'y
+    voit plus de silhouette a imiter. Foule : la silhouette elargie et arrondie (une forme convexe couvrirait la foule
+    entiere, et Qwen y dessinait un mur vide) ; la consigne lui fait prolonger les gens de derriere."""
+    import cv2
+    import numpy as np
+    k = lambda r: cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (r, r))  # noqa: E731
+    blob = np.zeros(im.shape[:2], np.uint8)
+    for s in subs:
+        if crowd:
+            blob |= s["region"].astype(np.uint8)
+            continue
+        cnts, _ = cv2.findContours(s["region"].astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if cnts:
+            cv2.fillConvexPoly(blob, cv2.convexHull(np.concatenate(cnts)), 1)
+    if crowd:
+        blob = cv2.morphologyEx(cv2.dilate(blob, k(31)), cv2.MORPH_CLOSE, k(max(15, round(0.05 * im.shape[1])) | 1))
+    else:
+        blob = cv2.dilate(blob, k(41))
+    painted = (np.clip(im, 0, 1) * 255).astype(np.uint8)
+    painted[blob > 0] = (255, 0, 255)
+    return painted, blob > 0
+
+
+def _plate_faults(im, plate, blob):
+    """Defauts d'une plaque rendue par Qwen -> (ecart median hors de la forme, part de magenta restant dans la forme).
+    Mesure : bonnes plaques 0,005-0,03 d'ecart ; une photo entierement recomposee (autre cadrage, fond magenta) 0,28+."""
+    import cv2
+    import numpy as np
+    H, W = im.shape[:2]
+    P = _load(plate, (W, H))
+    keep = ~(cv2.dilate(blob.astype(np.uint8), np.ones((31, 31), np.uint8)) > 0)
+    diff = np.abs(cv2.GaussianBlur(im.mean(2), (0, 0), 3) - cv2.GaussianBlur(P.mean(2), (0, 0), 3))
+    hsv = cv2.cvtColor((P * 255).astype(np.uint8), cv2.COLOR_RGB2HSV)       # teinte OpenCV 0-180 : magenta ~150
+    mag = (hsv[..., 0] > 135) & (hsv[..., 0] < 168) & (hsv[..., 1] > 115) & (hsv[..., 2] > 64)
+    return (float(np.median(diff[keep])) if keep.any() else 0.0), (float(mag[blob].mean()) if blob.any() else 0.0)
+
+
+# ------------------------------------------------------------------ calcul complet (tache de la file)
+def _run(server, graph, cancelled):
+    from . import comfy
+    pid = comfy.submit(server, graph)
+    while True:
+        if cancelled():
+            comfy.cancel(server, pid)
+            raise InterruptedError("annule")
+        e = comfy.poll(server, pid)
+        if e:
+            return e
+        time.sleep(1.5)
+
+
+def _images(entry, node):
+    return ((entry.get("outputs") or {}).get(node) or {}).get("images") or []
+
+
+def compute(server, pid, panel_id, spec, progress=print, cancelled=lambda: False, fast=True, lama=True):
+    """La tache entiere sur la machine server (ComfyUI) puis ici. -> meta (n = 0 et reason si pas de calques)."""
+    import cv2
+    import numpy as np
+    from PIL import Image
+    from . import comfy
+    src = store.path(pid, f"start/{panel_id}.png")
+    spec["src_mtime"] = src.stat().st_mtime
+    d = folder(pid, panel_id)
+    rd = d / "raw"
+    rd.mkdir(parents=True, exist_ok=True)
+    for old in [*rd.glob("*.png"), *rd.glob("*.npy")]:
+        old.unlink()                                      # jamais de sortie d'un calcul precedent
+    sub, prefix = f"alivecomics/{pid}", f"AliveComics/{pid}/{panel_id}_C"
+    seed = int(spec.get("seed") or 20261015)
+
+    t0 = time.time()
+    timing = spec["timing"] = {}
+    progress("détourage (SAM 3.1, BiRefNet)")
+    name = comfy.upload(server, src, sub)
+    try:
+        e = _run(server, comfy.segment_graph(name, prefix, SAM_PROMPT), cancelled)
+    except comfy.ComfyError as exc:
+        if not comfy.no_detection(exc):
+            raise
+        return build(pid, panel_id, dict(spec, skip="aucune personne dans la case"))
+    for i, it in enumerate(_images(e, "6")):
+        comfy.download(server, it, rd / f"sam_{i:02d}.png")
+    for it in _images(e, "10"):
+        comfy.download(server, it, rd / "birefnet.png")
+
+    timing["segment"] = round(time.time() - t0, 1)
+    im = np.asarray(Image.open(src).convert("RGB"), np.float32) / 255
+    H, W = im.shape[:2]
+    subs, people = _subjects(im, d)
+    if not subs:
+        return build(pid, panel_id, dict(spec, skip="aucune personne assez grande dans la case"))
+    progress("profondeur")
+    subs, crowd, _ = _plan(subs, _depth(im, d))
+    timing["depth"] = round(time.time() - t0 - timing["segment"], 1)
+    if not subs:
+        return build(pid, panel_id, spec)                 # verdict « foule » ecrit par build
+    painted, blob = _painted(im, subs, crowd)
+    Image.fromarray(painted).save(rd / "painted.png")
+    pname = comfy.upload(server, rd / "painted.png", sub)
+    # personnes de la photo laissees dans le decor (petites, ou la foule derriere le premier plan) : les prolonger
+    # dans la forme n'est pas « inventer quelqu'un »
+    known = np.zeros((H, W), np.uint8)
+    for m in people:
+        if not any(m is s["mask"] for s in subs):
+            known |= m.astype(np.uint8)
+    known = cv2.dilate(known, np.ones((9, 9), np.uint8)) > 0
+
+    # controle de la plaque. Case normale : une personne dans la forme qui n'est pas une personne de la photo est
+    # inventee (score = sa part dans la forme). Foule : des invites prolonges ou ajoutes derriere sont attendus ; seul
+    # le sujet redessine a sa place est une faute (score = recouvrement avec son masque).
+    limit = 0.6 if crowd else 0.3
+    tries = []
+    for attempt in range(3):                              # plaque : Qwen ; une personne inventee -> autre graine
+        progress("décor caché (Qwen-Image-Edit)" + (f", essai {attempt + 1}" if attempt else ""))
+        g, node = comfy.fill_graph(pname, FILL_PROMPT_CROWD if crowd else FILL_PROMPT, seed + 101 * attempt,
+                                   prefix + "_fill", fast)
+        e = _run(server, g, cancelled)
+        plate = comfy.download(server, _images(e, node)[0], rd / f"plate_{attempt}.png")
+        try:                                              # SAM 3.1 sur la plaque : qui y voit-on ?
+            check = comfy.sam_graph(comfy.upload(server, plate, sub), prefix + "_check", SAM_PROMPT)
+            e = _run(server, check, cancelled)
+        except comfy.ComfyError as exc:
+            if not comfy.no_detection(exc):
+                raise
+            e = {}                                        # personne : parfait
+        bad = 0.0
+        for i, it in enumerate(_images(e, "6")):
+            p = rd / f"check_{i:02d}.png"
+            comfy.download(server, it, p)
+            m = np.asarray(Image.open(p).convert("L").resize((W, H), Image.NEAREST)) > 127
+            p.unlink()
+            if m.mean() < MIN_AREA / 2:
+                continue
+            if crowd:
+                bad = max([bad] + [float((m & s["mask"]).sum() / max(1, (m | s["mask"]).sum())) for s in subs])
+            elif (m & known).sum() < 0.4 * m.sum():
+                bad = max(bad, float((m & blob).sum() / max(1, m.sum())))
+        drift, magenta = _plate_faults(im, rd / f"plate_{attempt}.png", blob)
+        if drift > 0.06 or magenta > 0.05:                # photo recomposee ou forme mal remplie : essai rate
+            bad = 1.0
+        tries.append({"seed": seed + 101 * attempt, "invented": round(bad, 2), "drift": round(drift, 3),
+                      "magenta": round(magenta, 3)})
+        if bad < limit:
+            break
+    best = min(range(len(tries)), key=lambda i: tries[i]["invented"])
+    (rd / f"plate_{best}.png").replace(rd / "plate.png")
+    if tries[best]["invented"] >= limit and lama:         # toujours quelqu'un d'invente : LaMa (flou, sans invention)
+        progress("décor caché (LaMa)")
+        try:
+            Image.fromarray((blob * 255).astype(np.uint8)).save(rd / "hole.png")
+            g = comfy.lama_graph(name, comfy.upload(server, rd / "hole.png", sub), prefix + "_lama")
+            e = _run(server, g, cancelled)
+            comfy.download(server, _images(e, "5")[0], rd / "plate.png")
+            tries.append({"lama": True})
+        except comfy.ComfyError as exc:                   # LaMa absent ou en erreur : le moins mauvais essai Qwen
+            tries.append({"lama": False, "error": str(exc)[:200]})
+    for old in rd.glob("plate_*.png"):
+        old.unlink()
+    spec["fill"] = tries
+    timing["fill"] = round(time.time() - t0 - timing["segment"] - timing["depth"], 1)
+    progress("découpe des calques")
+    return build(pid, panel_id, spec)
+
+
+# ------------------------------------------------------------------ construction des calques (sur ce PC)
 def build(pid, panel_id, spec=None):
-    """Sorties Qwen (raw/) -> calques. Renvoie meta (n = 0 et reason si la case ne se decoupe pas)."""
+    """Sorties ComfyUI (raw/) -> calques. Renvoie meta (n = 0 et reason si la case ne se decoupe pas)."""
     import cv2
     import numpy as np
     from PIL import Image
@@ -458,7 +528,7 @@ def build(pid, panel_id, spec=None):
     im = np.asarray(Image.open(src).convert("RGB"), np.float32) / 255
     H, W = im.shape[:2]
     base = {"v": VERSION, "size": [W, H], "src": src.stat().st_mtime, "created": time.time(),
-            "seed": spec.get("seed"), "info": spec.get("info"), "worker": spec.get("worker")}
+            "seed": spec.get("seed"), "worker": spec.get("worker"), "fill": spec.get("fill"), "timing": spec.get("timing")}
 
     def give_up(reason, final=False, **qc):
         m = dict(base, n=0, reason=reason, qc=qc, seconds=round(time.time() - t0, 1))
@@ -472,215 +542,83 @@ def build(pid, panel_id, spec=None):
     if spec.get("src_mtime") and abs(src.stat().st_mtime - float(spec["src_mtime"])) > 1:
         return give_up("l'image de la case a changé pendant le calcul : relancer")
     if spec.get("skip"):
-        return give_up("l'IA ne voit aucun sujet détaché du fond")
-    if not raw_path(pid, panel_id, "green").exists() or not raw_path(pid, panel_id, "plate").exists():
-        return give_up("sorties de l'IA manquantes")
-    raw_im = depth.raw(im)
-    d_im = depth.normalize(raw_im)
+        return give_up(spec["skip"], True)
 
-    # 1) masques : l'image « fond vert », recalee sur la photo par la zone du sujet
-    G = _load(raw_path(pid, panel_id, "green"), (W, H))
-    hard = _clean(_chroma(G) > 0.5, W, H)
-    cover = float(hard.mean())
-    if cover < 0.01:
-        return give_up("aucun sujet détaché du fond (paysage, gros plan…)", cover=round(cover, 3))
-    if cover > 0.8:
-        return give_up("l'IA n'a pas remplacé le fond par du vert", cover=round(cover, 3))
-    G, mG = _align(im, G, cv2.erode(hard, np.ones((11, 11), np.uint8)).astype(np.float32))   # sans le bord
-    key = _chroma(G)
-    hard = _clean(key > 0.5, W, H)
-    # creux de la silhouette ou le « fond vert » garde une trace de sujet (vetement clair rendu translucide par l'IA) :
-    # combles ; un vrai interstice (entre le bras et le corps) est vert pur et reste ouvert
-    hard = _clean((hard > 0) | ((cv2.morphologyEx(hard, cv2.MORPH_CLOSE, cv2.getStructuringElement(
-        cv2.MORPH_ELLIPSE, (41, 41))) > 0) & (key > 0.12)), W, H)
-    # seules les silhouettes qui recouvrent le cadre d'un sujet demande comptent : quelqu'un que Qwen a garde de lui-meme
-    # dans le « fond vert » (puis redessine dans la plaque) reste dans le decor, sinon il serait en double
-    gate = _gate(spec.get("info"), W, H)
-    pre = hard.copy()                                     # avant filtre : ce qui est ecarte ne doit jamais revenir
-    hard = _keep_in(hard, gate)
-    dropped = cv2.dilate(((pre > 0) & (hard == 0)).astype(np.uint8), np.ones((15, 15), np.uint8)) > 0
-    if not hard.any():
-        return give_up("l'IA n'a pas détouré les sujets demandés", cover=round(cover, 3))
-    soft = cv2.erode(_soft(im, hard), np.ones((3, 3), np.uint8))   # bord ronge d'un pixel : le fond y deborde toujours
-    green = np.clip((soft - 0.12) / 0.76, 0, 1)
+    # 1) sujets : masques exacts (SAM 3.1), bords doux (BiRefNet)
+    subs, _ = _subjects(im, d)
+    if not subs:
+        return give_up("aucune personne assez grande dans la case", True)
+    n_all = len(subs)
+    d_im = _depth(im, d)
+    subs, crowd, cover = _plan(subs, d_im)                # du plus proche au plus loin
+    if not subs:
+        return give_up("foule sans premier plan net : les personnes couvrent la moitié de la case ou plus, à des "
+                       "profondeurs voisines ; la nappe simple convient mieux", True, subjects=round(cover, 3), n=n_all)
+    a_all = np.max([s["soft"] for s in subs], axis=0)
+    fill = float((a_all > 0.5).mean())
+    plate = d / "raw" / "plate.png"
+    if not plate.exists():
+        return give_up("plaque de fond manquante")
 
-    # 2) plaque recalee sur ce qui n'a pas change ; seul ce que l'IA a vraiment efface devient un calque
-    margin = max(6, round(0.012 * W))
-    M = _grow(green, margin)
-    P = _load(raw_path(pid, panel_id, "plate"), (W, H))
-    P, _ = _align(im, P, (M < 0.01).astype(np.float32))
-    P = _color_match(im, P, M < 0.01)
-    # sujet entier oublie par le « fond vert » (ca arrive) mais efface par une passe : on le rattrape
-    found = _recover(im, P, pre, d_im, W, H)
-    if raw_path(pid, panel_id, "front").exists():
-        F0, _ = _align(im, _load(raw_path(pid, panel_id, "front"), (W, H)), (M < 0.01).astype(np.float32))
-        found |= _recover(im, _color_match(im, F0, M < 0.01), pre, d_im, W, H)
-    found = (_keep_in(found.astype(np.uint8), gate) > 0) & ~dropped
-    if found.any():
-        hard = (hard | found).astype(np.uint8)
-        green = np.maximum(green, _soft(im, found))
-    # ce que la plaque a nettement efface juste autour d'un sujet, mais que le « fond vert » a manque (pli de cape teinte
-    # en vert par l'IA…) : c'est du sujet ; sinon ce morceau resterait colle au fond et se detacherait en mouvement
-    chg = (np.abs(cv2.GaussianBlur(P, (0, 0), 3) - cv2.GaussianBlur(im, (0, 0), 3)).max(axis=2) > 0.15) & (hard == 0) & ~dropped \
-        & (cv2.dilate(hard, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (61, 61))) > 0)
-    chg = cv2.morphologyEx(chg.astype(np.uint8), cv2.MORPH_OPEN, np.ones((5, 5), np.uint8))
-    if chg.any():
-        nl, ll = cv2.connectedComponents(((chg > 0) | (hard > 0)).astype(np.uint8))
-        touch = [i for i in np.unique(ll[hard > 0]) if i]
-        extra = np.isin(ll, touch) & (chg > 0)
-        # ... et a la profondeur du sujet voisin (un coin de table redessine par l'IA n'en fait pas partie)
-        nh, lh = cv2.connectedComponents(hard)
-        zc = np.array([0.0] + [float(np.median(d_im[lh == i])) for i in range(1, nh)], np.float32)
-        _, near = cv2.distanceTransformWithLabels((hard == 0).astype(np.uint8), cv2.DIST_L2, 5,
-                                                  labelType=cv2.DIST_LABEL_PIXEL)
-        owner = lh[hard > 0][np.clip(near - 1, 0, int((hard > 0).sum()) - 1)]
-        extra &= np.abs(d_im - zc[owner]) < 0.15
-        hard = (hard | extra).astype(np.uint8)
-        green = np.maximum(green, _soft(im, extra))
-    remP = _removed(im, P, hard, W, H)
-    # dans une meme silhouette « fond vert » (ex. une femme dans une cabine), un morceau efface bien plus petit que le
-    # sujet principal est un objet redessine par l'IA (enseigne, reflet) : il reste dans le fond
-    ng, lg = cv2.connectedComponents(hard)
-    nr, lr_, sr, _ = cv2.connectedComponentsWithStats(remP.astype(np.uint8))
-    for g in range(1, ng):
-        ids = [i for i in np.unique(lr_[(lg == g) & remP]) if i]
-        if ids:
-            big = max(sr[i, cv2.CC_STAT_AREA] for i in ids)
-            for i in ids:
-                if sr[i, cv2.CC_STAT_AREA] < 0.2 * big:
-                    remP[lr_ == i] = False
-    alpha = green * _soft(im, cv2.dilate(remP.astype(np.uint8), np.ones((9, 9), np.uint8)) > 0)
-    n0, lab0, st0, _ = cv2.connectedComponentsWithStats(hard)
-    qc_green = [{"area": round(float(st0[i, cv2.CC_STAT_AREA]) / (W * H), 4),
-                 "removed": round(float(remP[lab0 == i].mean()), 3)} for i in range(1, n0)
-                if st0[i, cv2.CC_STAT_AREA] >= 0.003 * W * H]
-    hard2 = _clean(alpha > 0.5, W, H)
-    # petits creux et encoches dans une silhouette : combles (sinon un morceau du sujet reste fige dans le fond)
-    # ... a la profondeur du sujet (un vrai jour entre le bras et le corps montre le fond, bien plus loin : il reste ouvert)
-    closed = cv2.morphologyEx(hard2, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (41, 41)))
-    gap = (closed > 0) & (hard2 == 0)
-    if gap.any():
-        nh, lh = cv2.connectedComponents(hard2)
-        zc = np.array([0.0] + [float(np.median(d_im[lh == i])) for i in range(1, nh)], np.float32)
-        _, near = cv2.distanceTransformWithLabels((hard2 == 0).astype(np.uint8), cv2.DIST_L2, 5,
-                                                  labelType=cv2.DIST_LABEL_PIXEL)
-        owner = lh[hard2 > 0][np.clip(near - 1, 0, int((hard2 > 0).sum()) - 1)]
-        gap &= np.abs(cv2.GaussianBlur(d_im, (0, 0), 3) - zc[owner]) < 0.12
-        closed = ((hard2 > 0) | gap).astype(np.uint8)
-        alpha = np.maximum(alpha, _soft(im, closed) * gap)
-    hard2 = _clean(alpha > 0.5, W, H)
-    alpha *= cv2.dilate(hard2, np.ones((9, 9), np.uint8)) > 0       # miettes retirees
-    n, lab, st, _ = cv2.connectedComponentsWithStats(hard2)
-    comps = [{"id": i, "z": float(np.median(d_im[lab == i])), "area": round(float(st[i, cv2.CC_STAT_AREA]) / (W * H), 4)}
-             for i in range(1, n)]
-    if not comps:
-        return give_up("l'IA n'a pas retiré les sujets de la case", cover=round(cover, 3), green=qc_green)
-    comps.sort(key=lambda c: -c["z"])                     # du plus proche au plus loin
-    fill = float((hard2 > 0).mean())
-    if fill > 0.45:                                      # mesure : bonnes cases 0,14-0,37 ; foules 0,54-0,62
-        return give_up("foule ou gros plan : les sujets couvrent la moitié de la case ou presque, la nappe simple convient mieux", True,
-                       cover=round(cover, 3), subjects=round(fill, 3), green=qc_green)
-    M = _grow(alpha, margin)
-    edge = max(4, round(0.008 * W))                       # le bord du sujet ne doit pas rester dans le fond
-    hole = _grow(alpha, edge)                             # sous le sujet et son halo : la seule zone inventee
-    bg = _fill_plate(im, P, hole)
-
-    # 3) devant / derriere : ce que la passe « avant » a efface (pixel par pixel), sinon l'ecart de profondeur
-    a_front, a_back, F, how = alpha, None, None, "un seul plan"
-    if raw_path(pid, panel_id, "front").exists():
-        F = _load(raw_path(pid, panel_id, "front"), (W, H))
-        F, _ = _align(im, F, (M < 0.01).astype(np.float32))
-        F = _color_match(im, F, M < 0.01)
-        remF = _removed(im, F, hard2, W, H)
-        rest = (hard2 > 0) & ~remF
-        if remF.any() and rest.any():                    # coherence : « devant » = plus proche des sujets de devant
-            ds = cv2.GaussianBlur(d_im, (0, 0), 3)
-            zf, zb = float(np.median(ds[remF])), float(np.median(ds[rest]))
-            nf, lf = cv2.connectedComponents(remF.astype(np.uint8))     # par morceau : un chapeau reste a son porteur
-            for i in range(1, nf):
-                zi = float(np.median(ds[lf == i]))
-                if abs(zi - zf) >= abs(zi - zb):
-                    remF[lf == i] = False
-        fa = alpha * _soft(im, cv2.dilate(remF.astype(np.uint8), np.ones((9, 9), np.uint8)) > 0)
-        ba_hard =_clean(cv2.morphologyEx((np.clip(alpha - fa, 0, 1) > 0.5).astype(np.uint8), cv2.MORPH_OPEN,
-                                          np.ones((5, 5), np.uint8)), W, H)
-        ba = np.clip(alpha - fa, 0, 1) * (cv2.dilate(ba_hard, np.ones((7, 7), np.uint8)) > 0)
-        fa_hard = (fa > 0.5).astype(np.uint8)
-        solid = cv2.morphologyEx(fa_hard, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (13, 13)))
-        # un vrai sujet de devant est massif : des bandes fines (bord d'un objet redessine par l'IA) ne font pas un calque
-        if fa_hard.mean() > 0.005 and solid.sum() > 0.5 * fa_hard.sum() and ba_hard.mean() > 0.002 \
-                and np.median(d_im[fa > 0.5]) > np.median(d_im[ba_hard > 0]) + 0.12:   # sinon : meme parallaxe, un calque
-            a_front, a_back, how = fa, ba, "IA (passe avant)"
-        else:
-            F = None
-    if a_back is None and len(comps) > 1:
-        zs = [c["z"] for c in comps]
+    # 2) groupes devant / derriere par ecart de profondeur
+    front, back, how = subs, [], "un seul plan"
+    if len(subs) > 1:
+        zs = [s["z"] for s in subs]
         gaps = [zs[i] - zs[i + 1] for i in range(len(zs) - 1)]
         k = int(np.argmax(gaps))
         if gaps[k] > 0.12:
-            near = lambda cs: cv2.dilate(np.isin(lab, [c["id"] for c in cs]).astype(np.uint8),   # noqa: E731
-                                         np.ones((15, 15), np.uint8)) > 0
-            a_front, a_back, how = alpha * near(comps[:k + 1]), alpha * near(comps[k + 1:]), "profondeur"
+            front, back, how = subs[:k + 1], subs[k + 1:], "profondeur"
+    a_front = np.max([s["soft"] for s in front], axis=0)
+    a_back = np.max([s["soft"] for s in back], axis=0) if back else None
+    if a_back is not None:                                # un pixel ne sert qu'a un calque : celui de devant gagne
+        a_back = a_back * (1 - a_front)
+
+    # 3) plaque : recalee hors de la forme peinte, lumiere de la photo prolongee sous les sujets
+    margin = max(6, round(0.012 * W))
+    edge = max(4, round(0.008 * W))
+    _, blob = _painted(im, subs, crowd)
+    P = _load(plate, (W, H))
+    keep = ~(cv2.dilate(blob.astype(np.uint8), np.ones((15, 15), np.uint8)) > 0)
+    P, mP = _align(im, P, keep.astype(np.float32))
+    P = _color_match(im, P, keep)
+    hole = _grow(a_all, edge)
+    bg = _fill_plate(im, P, hole)
+    M = _grow(a_all, margin)
+
+    # 4) calques : couleurs sans lisere, profondeur de chaque sujet (carte a peine bombee)
     layers = []                                           # (couleur, alpha, profondeur), du plus loin au plus proche
     if a_back is not None:
-        MF = _grow(a_front, margin)
-        if F is not None:                                 # ce que cache le sujet de devant : vu par l'IA
-            SB = _fill_plate(im, F, _grow(a_front, edge))
-            hid = (np.abs(SB - bg).max(axis=2) > 0.10) & (MF > 0.5)
-            hid = cv2.morphologyEx(hid.astype(np.uint8), cv2.MORPH_OPEN, np.ones((5, 5), np.uint8))
-            u = ((a_back > 0.5) | (hid > 0)).astype(np.uint8)
-            nn, ll = cv2.connectedComponents(u)
-            touch = set(np.unique(ll[a_back > 0.5])) - {0}
-            ext = np.isin(ll, list(touch)) & (hid > 0)
-            a_back_full = np.maximum(a_back, _soft(SB, ext) * (MF > 0.5))
-        else:
-            SB, a_back_full = im, a_back
-        FB = _extend(_decontam(SB, a_back_full, bg), a_back_full)
-        layers.append((FB, a_back_full, _subject_depth(d_im, a_back, a_back_full)))
-        FF = _extend(_decontam(im, a_front, SB), a_front)
+        layers.append((_extend(_decontam(im, a_back, bg), a_back), a_back, _subject_depth(d_im, a_back)))
+        behind = bg * (1 - a_back[..., None]) + im * a_back[..., None]
     else:
-        FF = _extend(_decontam(im, a_front, bg), a_front)
-    layers.append((FF, a_front, _subject_depth(d_im, a_front)))
+        behind = bg
+    layers.append((_extend(_decontam(im, a_front, behind), a_front), a_front, _subject_depth(d_im, a_front)))
 
-    # 4) profondeur du fond : calculee sur la plaque, a l'echelle de la photo, jamais devant les sujets
-    d_bg = _fit_depth(depth.raw(bg), d_im, M < 0.01)       # M (plus large) : pixels surs, loin des sujets
+    # 5) profondeur du fond : calculee sur la plaque, a l'echelle de la photo, jamais devant les sujets
+    d_bg = _fit_depth(depth.raw_best(bg), d_im, M < 0.01)
     for _, a, dz in layers:
         inside = _grow(a, margin) > 0.5
         d_bg[inside] = np.minimum(d_bg[inside], dz[inside] - 0.03)
     d_bg = depth.bound_slope(depth.smooth_edges(np.clip(d_bg, 0, 1), bg))
 
-    # 5) fichiers
+    # 6) fichiers
     d.mkdir(parents=True, exist_ok=True)
     u8 = lambda x: (np.clip(x, 0, 1) * 255 + 0.5).astype(np.uint8)   # noqa: E731
     Image.fromarray(u8(bg)).save(d / "bg.jpg", "JPEG", quality=90)
     for i, (Fi, ai, _) in enumerate(layers, 1):
-        Image.fromarray(np.dstack([u8(Fi), u8(ai)])).save(d / f"l{i}.webp", "WEBP", quality=90, exact=True,
-                                                                    method=4)
+        Image.fromarray(np.dstack([u8(Fi), u8(ai)])).save(d / f"l{i}.webp", "WEBP", quality=90, exact=True, method=4)
     for old in d.glob("l*.webp"):
         if old.stem not in {f"l{i}" for i in range(1, len(layers) + 1)}:
             old.unlink()
     zero = np.zeros((H, W), np.float32)
     maps = [d_bg] + [x[2] for x in layers] + [zero] * (2 - len(layers))
-    ld = Image.fromarray(np.dstack([u8(x) for x in maps[:3]]))
-    ld.resize((max(2, W // 2), max(2, H // 2)), Image.BILINEAR).save(d / "ld.png", optimize=True)
+    Image.fromarray(np.dstack([u8(x) for x in maps[:3]])).resize((max(2, W // 2), max(2, H // 2)), Image.BILINEAR) \
+        .save(d / "ld.png", optimize=True)
     zs = [round(float(np.median(d_bg[M > 0.5])) if (M > 0.5).any() else float(np.median(d_bg)), 3)]
     zs += [round(float(np.median(x[2][x[1] > 0.5])), 3) for x in layers]
-    m = dict(base, n=len(layers), z=zs, focus=zs[-1], groups=how,
-             qc={"cover": round(cover, 3), "green": qc_green, "subjects": [{"z": round(c["z"], 3), "area": c["area"]}
-                                                                          for c in comps],
-                 "aligned": mG is not None},
+    m = dict(base, n=len(layers), z=zs, focus=zs[-1], groups=how, crowd=crowd, depth_model=depth.best_name(),
+             qc={"subjects": [{"z": round(s["z"], 3), "area": round(s["area"], 4)} for s in subs],
+                 "people": n_all, "cover": round(cover, 3), "fill": round(fill, 3), "aligned": mP is not None},
              seconds=round(time.time() - t0, 1))
     (d / "meta.json").write_text(json.dumps(m, ensure_ascii=False, indent=1), encoding="utf-8")
     return m
-
-
-def files(pid, panel_id):
-    """Fichiers des couches prets pour l'export : {"bg", "fg": [..], "ld"} (chemins absolus), ou None."""
-    m = ready(pid, panel_id)
-    if not m:
-        return None
-    d = folder(pid, panel_id)
-    out = {"bg": d / "bg.jpg", "fg": [d / f"l{i}.webp" for i in range(1, m["n"] + 1)], "ld": d / "ld.png", "meta": m}
-    if not all(p.exists() for p in [out["bg"], out["ld"], *out["fg"]]):
-        return None
-    return out

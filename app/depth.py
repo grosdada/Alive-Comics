@@ -9,6 +9,9 @@ Carte « nappe sans pli » (v2) : niveaux de gris, blanc = proche, noir = loin, 
 lissee en suivant les bords de l'image (Fast Global Smoother d'OpenCV), puis pente bornee : la nappe ne peut plus se
 replier sur elle-meme, donc plus de bords dedoubles (la v1 dilatait la carte, ce qui collait une bande de fond au sujet).
 Le vrai relief sans etirement vient des couches (app/layers.py) ; cette nappe sert d'apercu immediat et de repli.
+Couches : raw_best() prend Depth Pro d'Apple (bords nets ; licence de recherche Apple, a revoir avant un usage
+commercial) s'il est dans data/models/hf (tools/install_relief_models.py --extra) et si torch + transformers sont la ;
+sinon Depth Anything V2 Small.
 Rangement : projects/<id>/depth/<case>.png, recalculee si l'image de depart est plus recente ou si la carte est d'une
 ancienne version (texte PNG « alive-depth »).
 """
@@ -27,8 +30,11 @@ LICENSE = ("Depth Anything V2 Small (Apache License 2.0) : https://huggingface.c
 MEAN, STD = (0.485, 0.456, 0.406), (0.229, 0.224, 0.225)
 SHEET_VERSION = "2"
 K_REF = 0.05          # deplacement maximal (en largeur de case) par unite de profondeur : sert a borner la pente
+DEPTH_PRO = store.ROOT / "data" / "models" / "hf" / "apple__DepthPro-hf"
 _lock = threading.Lock()
 _sess = None
+_dp_lock = threading.Lock()
+_dp = None
 
 
 def _session():
@@ -59,6 +65,57 @@ def raw(rgb):
     sess = _session()
     d = sess.run(None, {sess.get_inputs()[0].name: x.transpose(2, 0, 1)[None].astype(np.float32)})[0][0]
     return np.asarray(Image.fromarray(d.astype(np.float32), "F").resize((w, h), Image.BICUBIC), np.float32)
+
+
+def _depth_pro():
+    """(processeur, modele) Depth Pro en fp16, garde en memoire vive ; None s'il manque quelque chose."""
+    global _dp
+    if _dp is None:
+        try:
+            if not (DEPTH_PRO / "config.json").exists():
+                raise FileNotFoundError(DEPTH_PRO)
+            import torch
+            from transformers import DepthProForDepthEstimation, DepthProImageProcessorFast
+            proc = DepthProImageProcessorFast.from_pretrained(DEPTH_PRO)
+            model = DepthProForDepthEstimation.from_pretrained(DEPTH_PRO, torch_dtype=torch.float16).eval()
+            _dp = (proc, model)
+        except Exception as exc:                        # noqa: BLE001 - repli sur Depth Anything V2 Small
+            print("Depth Pro indisponible :", str(exc)[:200])
+            _dp = False
+    return _dp or None
+
+
+def best_name():
+    with _dp_lock:
+        return "depth-pro" if _depth_pro() else MODEL_ID
+
+
+def raw_best(rgb):
+    """Disparite brute (grand = proche) par le meilleur modele present : Depth Pro (carte du GPU s'il reste au moins
+    6 Go libres, rendu le temps du calcul ; sinon processeur, ~20 s), a defaut Depth Anything V2 Small."""
+    import numpy as np
+    with _dp_lock:
+        dp = _depth_pro()
+        if not dp:
+            return raw(rgb)
+        import torch
+        from PIL import Image
+        proc, model = dp
+        h, w = rgb.shape[:2]
+        im = Image.fromarray((np.clip(rgb, 0, 1) * 255).astype(np.uint8))
+        gpu = torch.cuda.is_available() and torch.cuda.mem_get_info()[0] > 6e9
+        dev, dt = ("cuda", torch.float16) if gpu else ("cpu", torch.float32)
+        try:
+            model.to(dev, dt)
+            with torch.no_grad():
+                inp = proc(images=im, return_tensors="pt").to(dev, dt)
+                out = proc.post_process_depth_estimation(model(**inp), target_sizes=[(h, w)])
+                d = out[0]["predicted_depth"].float().cpu().numpy()
+        finally:
+            model.to("cpu", torch.float16)
+            if gpu:
+                torch.cuda.empty_cache()
+        return (1.0 / np.maximum(d, 1e-3)).astype(np.float32)
 
 
 def normalize(d, ref=None):

@@ -8,6 +8,7 @@
 """
 
 import json
+import os
 import re
 import secrets
 import shutil
@@ -119,9 +120,11 @@ def write_file(pid, sub, name, data):
 
 
 def path(pid, rel):
-    """Chemin absolu d'un fichier du projet, sans sortir du dossier."""
+    """Chemin absolu d'un fichier du projet, sans sortir du dossier. Normalisation lexicale (les « .. » sont
+    resolus) : resolve() sur un chemin qu'un autre fil est en train de creer rend parfois un faux resultat sous
+    Windows (taches de couches en parallele)."""
     d = pdir(pid).resolve()
-    f = (d / rel).resolve()
+    f = Path(os.path.normpath(d / rel))
     if d not in f.parents and f != d:
         raise PermissionError(rel)
     return f
