@@ -86,17 +86,29 @@ def describe(start):
            'walls, plants or buildings), at most 3, the most important first. Name each one with a short precise visual '
            'description in English starting with "the" (clothes, colours, position in the frame), so that an image editor '
            'can find it; what a person holds or wears belongs to that person. Give its plane: "front" for the subjects '
-           'closest to the camera, "back" for the subjects clearly further away. Also describe in a few English words what '
+           'closest to the camera, "back" for the subjects clearly further away, and its rough bounding box in percent of '
+           'the image width and height: [left, top, right, bottom], generous rather than tight. Also describe in a few English words what '
            'is behind the subjects (the background to rebuild), and the style: "photo" or "drawing". If nothing stands out '
            'from the background (landscape, empty room, close-up texture), return an empty subject list. Answer with JSON '
-           'only: {"subjects": [{"name": "the ...", "plane": "front"}], "background": "...", "style": "photo"}')
+           'only: {"subjects": [{"name": "the ...", "plane": "front", "box": [10, 5, 45, 100]}], "background": "...", '
+           '"style": "photo"}')
     try:
         out = llm._json(llm.chat(ask, image=start, max_tokens=600, timeout=90))
     except Exception:                                   # noqa: BLE001 - l'IA est un plus, pas une condition
         return None
     if not isinstance(out, dict) or not isinstance(out.get("subjects"), list):
         return None
-    subs = [{"name": str(x.get("name") or "").strip()[:160], "plane": "back" if x.get("plane") == "back" else "front"}
+    def box(b):
+        try:
+            v = [float(x) for x in b][:4]
+            if len(v) == 4 and max(v) <= 1.0:            # cadre donne en fractions et non en pourcents
+                v = [x * 100 for x in v]
+            v = [max(0.0, min(100.0, x)) for x in v]
+            return v if len(v) == 4 and v[2] > v[0] and v[3] > v[1] else None
+        except (TypeError, ValueError):
+            return None
+    subs = [{"name": str(x.get("name") or "").strip()[:160], "plane": "back" if x.get("plane") == "back" else "front",
+             "box": box(x.get("box") or [])}
             for x in out["subjects"][:3] if isinstance(x, dict) and str(x.get("name") or "").strip()]
     return {"subjects": subs, "background": str(out.get("background") or "").strip()[:160],
             "style": "drawing" if out.get("style") == "drawing" else "photo"}
@@ -119,8 +131,8 @@ def passes(start, note=None):
 
     def remove(names, others=None, where=behind):
         k = f"including {others}, " if others else ""
-        return (f"Remove {names}. Fill their place with what is behind them{where}, consistent with the rest of the image. "
-                f"Keep everything else exactly identical, {k}{keep}.")
+        return (f"Remove {names}. Fill their place with what is behind them{where}, consistent with the rest of the image, "
+                f"without adding any new person or object. Keep everything else exactly identical, {k}{keep}.")
     out = [("green", f"Replace everything except {who} by a flat pure green background (#00FF00), with no shadow: the "
                      f"floor, the walls, the furniture, the tables and every other object become green. Keep "
                      f"{who} exactly identical: same position, same size, same pose, same framing, with the clothes they "
@@ -305,11 +317,24 @@ def _fit_depth(d_plate, d_ref, keep):
 
 def _chroma(G):
     """Alpha du sujet sur l'image « fond vert » : distance a la couleur du fond vert mesuree dans l'image (et non la
-    « verdeur » : Qwen teinte parfois un vetement blanc en vert pale, qui doit rester du sujet)."""
+    « verdeur » : Qwen teinte parfois un vetement blanc en vert pale, qui doit rester du sujet ; et son vert est parfois
+    terne, vers (0,35 ; 0,6 ; 0,3)). La couleur est estimee sur le vert franc, a defaut sur les bords de l'image, puis
+    affinee sur les pixels proches : un vetement kaki ou vert olive ne la tire pas vers lui."""
     import numpy as np
     g = G[..., 1] - np.maximum(G[..., 0], G[..., 2])
-    cand = g > 0.25
-    key = np.median(G[cand], axis=0) if cand.sum() > 1000 else np.array([0.0, 1.0, 0.0], np.float32)
+    strong = (g > 0.2) & (G[..., 1] > 0.3)
+    border = np.concatenate([G[:8].reshape(-1, 3), G[-8:].reshape(-1, 3), G[:, :8].reshape(-1, 3), G[:, -8:].reshape(-1, 3)])
+    bgreen = border[(border[:, 1] - np.maximum(border[:, 0], border[:, 2])) > 0.08]
+    if strong.sum() >= 0.05 * g.size:
+        key = np.median(G[strong], axis=0)
+    elif len(bgreen) >= 200:
+        key = np.median(bgreen, axis=0)
+    else:
+        wide = (g > 0.12) & (G[..., 1] > 0.3)
+        key = np.median(G[wide], axis=0) if wide.sum() >= 0.05 * g.size else np.array([0.0, 1.0, 0.0], np.float32)
+    near = np.sqrt(((G - key) ** 2).sum(axis=2)) < 0.15
+    if near.sum() >= 0.05 * g.size:
+        key = np.median(G[near], axis=0)
     dist = np.sqrt(((G - key) ** 2).sum(axis=2))
     return np.clip((dist - 0.12) / 0.18, 0, 1).astype(np.float32)
 
@@ -346,15 +371,17 @@ def _removed(im, Q, within, W, H):
     import cv2
     import numpy as np
     zone = within.astype(bool)
-    a = cv2.GaussianBlur(cv2.cvtColor(im, cv2.COLOR_RGB2GRAY), (0, 0), 1.5)
-    b = cv2.GaussianBlur(cv2.cvtColor(Q, cv2.COLOR_RGB2GRAY), (0, 0), 1.5)
-    mu = lambda x: cv2.GaussianBlur(x, (0, 0), 5)       # noqa: E731
+    # comparaison a l'echelle des formes (flou de 4 px) : un objet que l'IA a seulement redessine (paille, chemise, decor
+    # legerement decale) garde ses formes et ses couleurs ; une personne retiree laisse place a tout autre chose
+    a = cv2.GaussianBlur(cv2.cvtColor(im, cv2.COLOR_RGB2GRAY), (0, 0), 4)
+    b = cv2.GaussianBlur(cv2.cvtColor(Q, cv2.COLOR_RGB2GRAY), (0, 0), 4)
+    mu = lambda x: cv2.GaussianBlur(x, (0, 0), 8)       # noqa: E731
     ma, mb = mu(a), mu(b)
     va, vb = mu(a * a) - ma * ma, mu(b * b) - mb * mb
     ncc = (mu(a * b) - ma * mb) / np.sqrt(np.maximum(va * vb, 1e-8))
-    textured = np.minimum(va, vb) > 2.5e-4
-    diff = np.abs(cv2.GaussianBlur(Q, (0, 0), 3) - cv2.GaussianBlur(im, (0, 0), 3)).max(axis=2)
-    same = np.where(textured, (ncc > 0.7) & (diff < 0.15), diff < 0.05) & zone
+    textured = np.minimum(va, vb) > 1e-4
+    diff = np.abs(cv2.GaussianBlur(Q, (0, 0), 4) - cv2.GaussianBlur(im, (0, 0), 4)).max(axis=2)
+    same = np.where(textured, (ncc > 0.6) & (diff < 0.2), diff < 0.06) & zone
     same = cv2.morphologyEx(same.astype(np.uint8), cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (15, 15)))
     n, lab, st, _ = cv2.connectedComponentsWithStats(same)
     kept = np.zeros(same.shape, bool)
@@ -389,6 +416,35 @@ def _recover(im, Q, hard, d_im, W, H):
     return out
 
 
+def _gate(info, W, H):
+    """Masque des cadres des sujets decrits par l'IA (elargis de 4 %), ou None (pas de cadres : pas de filtre)."""
+    import numpy as np
+    subs = (info or {}).get("subjects") or []
+    if not subs or any(not x.get("box") for x in subs):   # un sujet sans cadre : on ne filtre pas (il serait ecarte)
+        return None
+    boxes = [x["box"] for x in subs]
+    g = np.zeros((H, W), bool)
+    for x0, y0, x1, y1 in boxes:
+        g[max(0, int((y0 - 4) * H / 100)):min(H, int((y1 + 4) * H / 100) + 1),
+          max(0, int((x0 - 4) * W / 100)):min(W, int((x1 + 4) * W / 100) + 1)] = True
+    return g
+
+
+def _keep_in(mask, gate, frac=0.3):
+    """Composantes du masque dont au moins frac de la surface est dans les cadres (toutes si pas de cadres)."""
+    import cv2
+    import numpy as np
+    if gate is None or not mask.any():
+        return mask
+    n, lab = cv2.connectedComponents(mask.astype(np.uint8))
+    out = np.zeros_like(mask)
+    for i in range(1, n):
+        m = lab == i
+        if gate[m].mean() >= frac:
+            out[m] = 1
+    return out
+
+
 # ------------------------------------------------------------------ construction des calques
 def build(pid, panel_id, spec=None):
     """Sorties Qwen (raw/) -> calques. Renvoie meta (n = 0 et reason si la case ne se decoupe pas)."""
@@ -404,9 +460,9 @@ def build(pid, panel_id, spec=None):
     base = {"v": VERSION, "size": [W, H], "src": src.stat().st_mtime, "created": time.time(),
             "seed": spec.get("seed"), "info": spec.get("info"), "worker": spec.get("worker")}
 
-    def give_up(reason, **qc):
+    def give_up(reason, final=False, **qc):
         m = dict(base, n=0, reason=reason, qc=qc, seconds=round(time.time() - t0, 1))
-        old = ready(pid, panel_id)
+        old = None if final else ready(pid, panel_id)   # verdict definitif (foule) : pas d'anciennes couches gardees
         if old and files(pid, panel_id):                  # un nouvel essai rate ne jette pas des couches qui marchaient
             m = dict(old, last_try={"reason": reason, "created": m["created"], "seed": m.get("seed")})
         d.mkdir(parents=True, exist_ok=True)
@@ -437,7 +493,15 @@ def build(pid, panel_id, spec=None):
     # combles ; un vrai interstice (entre le bras et le corps) est vert pur et reste ouvert
     hard = _clean((hard > 0) | ((cv2.morphologyEx(hard, cv2.MORPH_CLOSE, cv2.getStructuringElement(
         cv2.MORPH_ELLIPSE, (41, 41))) > 0) & (key > 0.12)), W, H)
-    soft =cv2.erode(_soft(im, hard), np.ones((3, 3), np.uint8))   # bord ronge d'un pixel : le fond y deborde toujours
+    # seules les silhouettes qui recouvrent le cadre d'un sujet demande comptent : quelqu'un que Qwen a garde de lui-meme
+    # dans le « fond vert » (puis redessine dans la plaque) reste dans le decor, sinon il serait en double
+    gate = _gate(spec.get("info"), W, H)
+    pre = hard.copy()                                     # avant filtre : ce qui est ecarte ne doit jamais revenir
+    hard = _keep_in(hard, gate)
+    dropped = cv2.dilate(((pre > 0) & (hard == 0)).astype(np.uint8), np.ones((15, 15), np.uint8)) > 0
+    if not hard.any():
+        return give_up("l'IA n'a pas détouré les sujets demandés", cover=round(cover, 3))
+    soft = cv2.erode(_soft(im, hard), np.ones((3, 3), np.uint8))   # bord ronge d'un pixel : le fond y deborde toujours
     green = np.clip((soft - 0.12) / 0.76, 0, 1)
 
     # 2) plaque recalee sur ce qui n'a pas change ; seul ce que l'IA a vraiment efface devient un calque
@@ -447,16 +511,17 @@ def build(pid, panel_id, spec=None):
     P, _ = _align(im, P, (M < 0.01).astype(np.float32))
     P = _color_match(im, P, M < 0.01)
     # sujet entier oublie par le « fond vert » (ca arrive) mais efface par une passe : on le rattrape
-    found = _recover(im, P, hard, d_im, W, H)
+    found = _recover(im, P, pre, d_im, W, H)
     if raw_path(pid, panel_id, "front").exists():
         F0, _ = _align(im, _load(raw_path(pid, panel_id, "front"), (W, H)), (M < 0.01).astype(np.float32))
-        found |= _recover(im, _color_match(im, F0, M < 0.01), hard, d_im, W, H)
+        found |= _recover(im, _color_match(im, F0, M < 0.01), pre, d_im, W, H)
+    found = (_keep_in(found.astype(np.uint8), gate) > 0) & ~dropped
     if found.any():
         hard = (hard | found).astype(np.uint8)
         green = np.maximum(green, _soft(im, found))
     # ce que la plaque a nettement efface juste autour d'un sujet, mais que le « fond vert » a manque (pli de cape teinte
     # en vert par l'IA…) : c'est du sujet ; sinon ce morceau resterait colle au fond et se detacherait en mouvement
-    chg = (np.abs(cv2.GaussianBlur(P, (0, 0), 3) - cv2.GaussianBlur(im, (0, 0), 3)).max(axis=2) > 0.15) & (hard == 0) \
+    chg = (np.abs(cv2.GaussianBlur(P, (0, 0), 3) - cv2.GaussianBlur(im, (0, 0), 3)).max(axis=2) > 0.15) & (hard == 0) & ~dropped \
         & (cv2.dilate(hard, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (61, 61))) > 0)
     chg = cv2.morphologyEx(chg.astype(np.uint8), cv2.MORPH_OPEN, np.ones((5, 5), np.uint8))
     if chg.any():
@@ -511,6 +576,10 @@ def build(pid, panel_id, spec=None):
     if not comps:
         return give_up("l'IA n'a pas retiré les sujets de la case", cover=round(cover, 3), green=qc_green)
     comps.sort(key=lambda c: -c["z"])                     # du plus proche au plus loin
+    fill = float((hard2 > 0).mean())
+    if fill > 0.45:                                      # mesure : bonnes cases 0,14-0,37 ; foules 0,54-0,62
+        return give_up("foule ou gros plan : les sujets couvrent la moitié de la case ou presque, la nappe simple convient mieux", True,
+                       cover=round(cover, 3), subjects=round(fill, 3), green=qc_green)
     M = _grow(alpha, margin)
     edge = max(4, round(0.008 * W))                       # le bord du sujet ne doit pas rester dans le fond
     hole = _grow(alpha, edge)                             # sous le sujet et son halo : la seule zone inventee

@@ -312,8 +312,10 @@ page : { page: "page.jpg", frames: "frames.png", size: [W, H], fps: 24, sound: {
   <div class="block">
     <h3>Les couches (tâche « Couches relief » de la file, ~45 s à chaud, ~5 min si le modèle est froid)</h3>
     <ol>
-      <li>L'IA de l'app décrit les sujets de la case (personnes, animaux, véhicules ; devant ou derrière). Sans clé d'IA :
-        prompts génériques. Si l'IA ne voit aucun sujet détaché, rien n'est calculé.</li>
+      <li>L'IA de l'app décrit les sujets de la case (personnes, animaux, véhicules ; devant ou derrière ; un cadre
+        approximatif pour chacun). Sans clé d'IA : prompts génériques. Si l'IA ne voit aucun sujet détaché, rien n'est
+        calculé. Seules les silhouettes dans ces cadres deviennent des calques : quelqu'un que Qwen garde ou redessine de
+        lui-même reste dans le décor (sinon il serait en double).</li>
       <li><b>Qwen-Image-Edit 2509</b> (fp8, licence Apache 2.0, + LoRA Lightning 8 pas), en un graphe sur une machine :
         « fond vert » (tout sauf les sujets en vert pur : les masques), puis épluchage : « avant » (sans les sujets de devant)
         et « plaque » (sans les autres, à partir de l'image précédente).</li>
@@ -323,6 +325,8 @@ page : { page: "page.jpg", frames: "frames.png", size: [W, H], fps: 24, sound: {
       <li>Export : <code>images/&lt;case&gt;_bg.jpg</code>, <code>_l1.webp</code>, <code>_l2.webp</code> (RGBA),
         <code>depth/&lt;case&gt;_ld.png</code> (R = fond, G = l1, B = l2), environ 0,25 Mo par case.</li>
     </ol>
+    <p><b>Foules et gros plans</b> : quand les sujets couvrent environ la moitié de la case ou plus (mesuré : bonnes cases
+      14 à 37 %, foules 54 à 62 %), la case garde la nappe simple ; Qwen y réinvente trop le décor. Une vidéo H3 leur va mieux.</p>
     <p>Lancement : « Calculer » (cases en relief, sauf les vertes et celles déjà calculées) ou, dans l'aperçu en mode édition,
       onglet Relief : « Calculer les couches » / « Recalculer (autre essai) », « Utiliser les couches », vue « 🧩 Calques »
       (bleu = sujet du fond, orange = sujet de devant).</p>

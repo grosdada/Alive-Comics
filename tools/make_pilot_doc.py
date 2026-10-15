@@ -450,7 +450,8 @@ au clic, et suit le glisser. Une case H3 dont le rendu n'est pas encore là s'af
 (sans les personnages) et 1 ou 2 calques de personnages détourés, chacun avec sa profondeur, comme un livre pop-up.
 Qwen-Image-Edit 2509 (Apache 2.0) sur une machine, ~45 s par case à chaud ; tâche « Couches relief » dans la file.
 {code("meta.n")} = nombre de calques ; {code("n = 0")} avec {code("reason")} : la case ne se découpe pas (paysage, foule…),
-elle garde la nappe simple. Marche le mieux avec 1 à 3 sujets bien séparés. À contrôler dans l'aperçu (mode édition,
+elle garde la nappe simple. Marche le mieux avec 1 à 3 sujets bien séparés ; foules et gros plans (sujets sur environ la
+moitié de la case ou plus) gardent la nappe simple : préférer une vidéo H3 pour ces cases. À contrôler dans l'aperçu (mode édition,
 onglet Relief, vue « Calques »).</p>
 <ul>
 <li>Réglages : {code('panels[case].relief = {"preset": "respire|glisse|tourne|vertigo", "amount": 0.025, "focus": 0..1, "duration": 2, "trigger": "hover|click"}')}.
