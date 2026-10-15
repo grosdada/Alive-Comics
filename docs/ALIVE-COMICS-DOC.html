@@ -1,0 +1,569 @@
+<meta charset="utf-8">
+<title>Alive Comics, documentation</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@112,500;112,800;125,900&family=Source+Sans+3:ital,wght@0,400;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Documentation de reference : meme charte que le topo (encre, ambre). Une colonne de lecture, un sommaire en tete,
+   des tableaux pour tout ce qui se consulte (cles, routes, fichiers). */
+:root {
+  --bg: #f3f2ef; --panel: #ffffff; --ink: #18160f; --muted: #686258; --line: #d9d5cc; --stroke: #18160f;
+  --accent: #a3650c; --accent-soft: #f2b45c; --accent-ink: #1b150c; --code: #efece6;
+  --ok: #2f8f4e; --todo: #c97f12; --redo: #c8382e;
+  --display: "Archivo", "Arial Black", "Helvetica Neue", sans-serif;
+  --body: "Source Sans 3", "Segoe UI", system-ui, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, Consolas, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #121212; --panel: #1b1b1b; --ink: #ece8e1; --muted: #9a948a; --line: #2e2e2e; --stroke: #000000;
+    --accent: #f2b45c; --accent-soft: #f2b45c; --accent-ink: #1b150c; --code: #232120;
+    --ok: #45b56a; --todo: #f2a33c; --redo: #e0483e; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #121212; --panel: #1b1b1b; --ink: #ece8e1; --muted: #9a948a; --line: #2e2e2e; --stroke: #000000;
+  --accent: #f2b45c; --accent-soft: #f2b45c; --accent-ink: #1b150c; --code: #232120;
+  --ok: #45b56a; --todo: #f2a33c; --redo: #e0483e; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--ink); font: 17px/1.58 var(--body); margin: 0; }
+.wrap { max-width: 1040px; margin: 0 auto; padding-inline: 20px; padding-block: 28px 72px; }
+h1, h2, h3 { font-family: var(--display); text-wrap: balance; margin: 0; }
+h1 { font-weight: 900; font-stretch: 125%; font-size: clamp(32px, 5.6vw, 58px); line-height: 1; text-transform: uppercase; }
+h2 { font-weight: 800; font-stretch: 112%; font-size: clamp(22px, 3vw, 30px); line-height: 1.1; text-transform: uppercase; }
+h3 { font-weight: 800; font-stretch: 112%; font-size: 16px; letter-spacing: .02em; text-transform: uppercase; margin-top: 6px; }
+p { margin: 0; max-width: 72ch; }
+a { color: var(--accent); }
+.eyebrow { font: 600 12px/1.2 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
+.lead { font-size: clamp(18px, 2vw, 20px); line-height: 1.5; max-width: 66ch; }
+.muted { color: var(--muted); }
+code { font-family: var(--mono); font-size: .84em; background: var(--code); padding: 1px 5px; border-radius: 3px; overflow-wrap: anywhere; }
+pre { margin: 0; background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 12px 14px; overflow-x: auto;
+      font: 13px/1.55 var(--mono); }
+pre code { background: none; padding: 0; font-size: inherit; }
+header.hero { display: grid; gap: 18px; padding-block: 12px 22px; }
+.stats { display: flex; flex-wrap: wrap; gap: 10px 28px; font-variant-numeric: tabular-nums; }
+.stat b { display: block; font: 900 28px/1 var(--display); font-stretch: 125%; }
+.stat span { font-size: 13px; color: var(--muted); }
+nav.toc { background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 14px 18px; }
+nav.toc ol { margin: 6px 0 0; padding-left: 22px; columns: 2 260px; column-gap: 32px; }
+nav.toc li { margin: 2px 0; break-inside: avoid; }
+nav.toc a { color: var(--ink); text-decoration: none; }
+nav.toc a:hover { color: var(--accent); }
+section { padding-block: 30px 4px; border-top: 3px solid var(--stroke); margin-top: 32px; display: grid; gap: 14px; }
+.sec-head { display: grid; gap: 6px; }
+ul, ol { margin: 0; padding-left: 22px; display: grid; gap: 4px; }
+li { max-width: 72ch; }
+li::marker { color: var(--accent); }
+.steps { list-style: none; padding: 0; counter-reset: s; display: grid; gap: 10px; }
+.steps > li { counter-increment: s; display: grid; grid-template-columns: 34px minmax(0, 1fr); gap: 4px 10px; max-width: none;
+              background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 12px 14px; }
+.steps > li::before { content: counter(s); font: 900 24px/1 var(--display); font-stretch: 125%; color: var(--accent); grid-row: span 2; }
+.steps > li > b { font-size: 16px; }
+.steps > li > div { min-width: 0; display: grid; gap: 6px; }
+.tbl { overflow-x: auto; border: 1px solid var(--line); border-radius: 4px; background: var(--panel); }
+table { border-collapse: collapse; width: 100%; font-size: 15px; }
+th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font: 600 11.5px/1.3 var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); white-space: nowrap; }
+tr:last-child td { border-bottom: 0; }
+td:first-child { white-space: nowrap; }
+td code { white-space: nowrap; }
+.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px 28px; }
+.block { display: grid; gap: 8px; align-content: start; min-width: 0; }
+.note { border-left: 4px solid var(--accent); padding: 10px 14px; background: var(--panel); border-radius: 0 4px 4px 0; }
+.warn { border-left: 4px solid var(--redo); padding: 10px 14px; background: var(--panel); border-radius: 0 4px 4px 0; }
+.dot { display: inline-block; width: 11px; height: 11px; border-radius: 50%; vertical-align: -1px; margin-right: 3px; }
+.dot.ok { background: var(--ok); } .dot.todo { background: var(--todo); } .dot.redo { background: var(--redo); }
+.diagram { background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 10px; overflow-x: auto; }
+.diagram svg { display: block; width: 100%; min-width: 680px; height: auto; }
+.diagram text { font-family: var(--body); fill: var(--ink); font-size: 14px; }
+.diagram .q { fill: var(--muted); font-size: 12px; }
+.diagram .bx { fill: none; stroke: var(--ink); stroke-width: 1.4; }
+.diagram .hot { fill: color-mix(in srgb, var(--accent-soft) 30%, transparent); stroke: var(--accent); stroke-width: 2; }
+.diagram .ln { fill: none; stroke: var(--muted); stroke-width: 1.4; }
+.diagram .ah { fill: var(--muted); }
+footer { margin-top: 40px; padding-top: 16px; border-top: 1px solid var(--line); font-size: 14px; color: var(--muted); display: grid; gap: 6px; }
+</style>
+
+<div class="wrap">
+<header class="hero">
+  <p class="eyebrow">Alive Comics · documentation de référence · état au 15 octobre 2026</p>
+  <h1>Alive Comics,<br>la documentation</h1>
+  <p class="lead">Tout ce qu'il faut pour utiliser, faire évoluer ou reprendre l'application sur un autre PC : le concept, l'installation,
+    l'architecture, le modèle de données, chaque fonction, l'API complète et les leçons apprises. À lire avec
+    <code>CLAUDE.md</code> (consignes pour Claude Code) et <code>docs/PILOTAGE-CLAUDE.html</code> (pilotage par API).</p>
+  <div class="stats">
+    <div class="stat"><b>73</b><span>planches</span></div>
+    <div class="stat"><b>6</b><span>livres, 4 publiés</span></div>
+    <div class="stat"><b>370+</b><span>vidéos H3 rendues</span></div>
+    <div class="stat"><b>2</b><span>traitements par case : vidéo H3 ou relief</span></div>
+    <div class="stat"><b>~0,7 s</b><span>pour une carte de profondeur</span></div>
+  </div>
+  <nav class="toc" aria-label="Sommaire">
+    <p class="eyebrow">Sommaire</p>
+    <ol>
+      <li><a href="#concept">Le concept</a></li>
+      <li><a href="#passation">Passer sur un autre PC</a></li>
+      <li><a href="#architecture">Architecture et fichiers</a></li>
+      <li><a href="#donnees">Modèle de données</a></li>
+      <li><a href="#planche">Fabriquer une planche</a></li>
+      <li><a href="#relief">Le relief (parallaxe)</a></li>
+      <li><a href="#rendus">Les rendus H3 et la file</a></li>
+      <li><a href="#sons">Les sons</a></li>
+      <li><a href="#ia">L'intelligence et le réalisateur</a></li>
+      <li><a href="#lecteur">Le lecteur</a></li>
+      <li><a href="#edition">Le mode édition</a></li>
+      <li><a href="#accueil">L'accueil et les livres</a></li>
+      <li><a href="#publication">La publication</a></li>
+      <li><a href="#api">L'API complète</a></li>
+      <li><a href="#pilotage">Travailler avec une autre instance</a></li>
+      <li><a href="#lecons">Leçons apprises</a></li>
+      <li><a href="#suite">Limites et pistes</a></li>
+    </ol>
+  </nav>
+</header>
+
+<!-- ============================================================ CONCEPT -->
+<section id="concept">
+  <div class="sec-head"><p class="eyebrow">1 · Le concept</p><h2>Entre la bande dessinée et le cinéma</h2></div>
+  <p>Une planche vivante garde tout ce qui fait une page de BD : des cases, des gouttières, un ordre de lecture, des images qu'on
+    regarde à son rythme. Mais chaque case contient quelques secondes de temps, qui se réveillent sous la main du lecteur.</p>
+  <ul>
+    <li><b>Une planche reste une planche</b> : au repos, la page est calme et se lit comme sur papier.</li>
+    <li><b>Deux façons de faire vivre une case</b> : une <b>vidéo MiniMax H3</b> en boucle (~5 s, la dernière image rejoint
+      la première), ou une <b>photo en relief</b> (une carte de profondeur, la caméra bouge de quelques pour cent).</li>
+    <li><b>Le lecteur réveille les cases</b> : rien ne bouge avant le survol ; certaines cases figent l'instant et laissent
+      tourner la caméra au glisser.</li>
+    <li><b>Le son vient avec le regard</b> : voix off, ambiance, bruitages par case, musique de page dessous.</li>
+    <li><b>L'auteur réalise, la machine exécute</b> : images et voix de l'auteur, mouvement calculé sur ses PC ; retouches
+      sans recalcul ; un thème entier peut être confié à une autre instance de Claude.</li>
+    <li><b>Un lien suffit</b> : une page web autonome, publiée sur <code>alive-comics.placenta.tv</code>, page seule ou livre.</li>
+  </ul>
+</section>
+
+<!-- ============================================================ PASSATION -->
+<section id="passation">
+  <div class="sec-head"><p class="eyebrow">2 · Reprendre ailleurs</p><h2>Passer sur un autre PC</h2>
+    <p class="muted">Le code est sur GitHub ; les planches, les réglages et les clés ne le sont pas. Dans l'ordre :</p></div>
+  <ol class="steps">
+    <li><b>Installer les outils</b><div><p>Python 3.11 ou plus, Git, et <b>ffmpeg dans le PATH</b> (export, analyse des vidéos).</p></div></li>
+    <li><b>Récupérer le code</b><div><pre><code>git clone https://github.com/grosdada/Alive-Comics.git
+cd Alive-Comics
+pip install -r requirements.txt        # pillow, numpy, onnxruntime</code></pre></div></li>
+    <li><b>Copier ce qui n'est pas dans Git</b><div>
+      <p>Depuis <code>E:\Codex projects\Alive-Comics</code> sur ce PC (par le réseau ou un disque) :</p>
+      <div class="tbl"><table>
+        <thead><tr><th>Quoi</th><th>Taille</th><th>Contenu</th><th>Indispensable</th></tr></thead>
+        <tbody>
+          <tr><td><code>projects/</code></td><td>5,7 Go</td><td>toutes les planches : project.json, images, rendus, cartes, exports</td><td>oui</td></tr>
+          <tr><td><code>local_settings.json</code></td><td>quelques Ko</td><td>clés Anthropic et fal, machines ComfyUI, réglages de publication</td><td>oui</td></tr>
+          <tr><td><code>data/books.json</code>, <code>published.json</code>, <code>user_presets.json</code></td><td>petits</td><td>livres, registre des publications, préréglages de tremblé</td><td>oui</td></tr>
+          <tr><td><code>data/jobs.json</code>, <code>sound_index.json</code></td><td>petits</td><td>file de rendus (historique), empreintes des sons</td><td>utile</td></tr>
+          <tr><td><code>data/books/</code></td><td>2,3 Go</td><td>livres assemblés</td><td>non : « Aperçu » les refait</td></tr>
+          <tr><td><code>data/models/</code></td><td>95 Mo</td><td>Depth Anything V2 Small</td><td>non : retéléchargé au premier relief</td></tr>
+        </tbody>
+      </table></div>
+      <pre><code>robocopy "\\PC-SOURCE\E$\Codex projects\Alive-Comics\projects" projects /E /MT:16
+robocopy "\\PC-SOURCE\E$\Codex projects\Alive-Comics\data" data /E /XD books models
+copy "\\PC-SOURCE\E$\Codex projects\Alive-Comics\local_settings.json" .</code></pre>
+      <p class="muted">Adapter le chemin source. Ne jamais mettre <code>local_settings.json</code>, <code>projects/</code> ni <code>data/</code> dans Git.</p></div></li>
+    <li><b>Vérifier le réseau</b><div><p>Le nouveau PC doit joindre les trois machines ComfyUI (HITCHCOCK, CASSAVETES, FORD) :
+      leurs adresses sont dans Réglages › Machines. Dans l'en-tête de l'appli, une pastille verte par machine.</p></div></li>
+    <li><b>Publier depuis ce PC</b><div><p>Chaque PC a sa propre clé SSH. Réglages › Publication affiche la clé publique du poste :
+      David l'ajoute dans hPanel (Hostinger, accès SSH), puis « Tester la connexion ».</p></div></li>
+    <li><b>Lancer</b><div><p><code>Lancer_Alive_Comics.bat</code> (ou <code>python -m app</code>) puis
+      <code>http://127.0.0.1:8790</code>. Un second lancement ouvre juste le navigateur (port exclusif).</p></div></li>
+    <li><b>Claude Code</b><div><p>Ouvrir le dossier du dépôt : <code>CLAUDE.md</code> et la compétence
+      <code>.claude/skills/boucle-parfaite</code> (avec <code>loopcheck.py</code> et <code>loopfix.py</code>) sont chargés
+      d'office. L'instance qui fabrique les livres se branche sur l'API du PC qui fait tourner le serveur.</p></div></li>
+    <li><b>Contrôler</b><div><p>Réglages : tester l'IA, fal, la publication ; ouvrir une planche, « Aperçu », puis
+      « ✏️ Éditer ». Pour le relief : passer une case en relief, la carte arrive en environ une seconde (le premier usage
+      télécharge le modèle).</p></div></li>
+  </ol>
+</section>
+
+<!-- ============================================================ ARCHITECTURE -->
+<section id="architecture">
+  <div class="sec-head"><p class="eyebrow">3 · Architecture</p><h2>Comment c'est construit</h2>
+    <p>Un serveur Python local (bibliothèque standard, plus Pillow, NumPy et onnxruntime), une interface web sans compilation,
+      un lecteur autonome copié dans chaque export. Les calculs vidéo partent sur des machines ComfyUI du réseau, ou sur fal.</p></div>
+  <div class="diagram">
+    <svg viewBox="0 0 1000 300" role="img" aria-label="Interface vers serveur ; serveur vers file de rendus (ComfyUI, fal), relief (onnxruntime), IA (LLM) ; assemblage vers export puis publication">
+      <defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah" d="M0 0L10 5L0 10z"/></marker></defs>
+      <rect class="bx" x="10" y="20" width="170" height="64" rx="6"/><text x="95" y="48" text-anchor="middle" font-weight="700">Interface</text><text class="q" x="95" y="68" text-anchor="middle">app/web · éditeur</text>
+      <rect class="bx hot" x="240" y="20" width="200" height="64" rx="6"/><text x="340" y="48" text-anchor="middle" font-weight="700">Serveur 127.0.0.1:8790</text><text class="q" x="340" y="68" text-anchor="middle">app/server.py · API JSON</text>
+      <rect class="bx" x="500" y="10" width="220" height="50" rx="6"/><text x="610" y="32" text-anchor="middle" font-weight="700">File de rendus</text><text class="q" x="610" y="50" text-anchor="middle">ComfyUI ×3 · fal</text>
+      <rect class="bx" x="500" y="74" width="220" height="50" rx="6"/><text x="610" y="96" text-anchor="middle" font-weight="700">Relief</text><text class="q" x="610" y="114" text-anchor="middle">Depth Anything V2 Small, CPU</text>
+      <rect class="bx" x="500" y="138" width="220" height="50" rx="6"/><text x="610" y="160" text-anchor="middle" font-weight="700">IA (LLM)</text><text class="q" x="610" y="178" text-anchor="middle">Anthropic · OpenAI · Google · DeepSeek</text>
+      <rect class="bx hot" x="240" y="200" width="200" height="64" rx="6"/><text x="340" y="228" text-anchor="middle" font-weight="700">Assemblage</text><text class="q" x="340" y="248" text-anchor="middle">export/ : lecteur + données</text>
+      <rect class="bx" x="780" y="200" width="200" height="64" rx="6"/><text x="880" y="228" text-anchor="middle" font-weight="700">Publication</text><text class="q" x="880" y="248" text-anchor="middle">alive-comics.placenta.tv</text>
+      <rect class="bx" x="10" y="200" width="170" height="64" rx="6"/><text x="95" y="228" text-anchor="middle" font-weight="700">Aperçu + édition</text><text class="q" x="95" y="248" text-anchor="middle">player/ · alive-edit.js</text>
+      <path class="ln" d="M180 52H238" marker-end="url(#ah)"/>
+      <path class="ln" d="M440 45H498" marker-end="url(#ah)"/>
+      <path class="ln" d="M440 60L498 99" marker-end="url(#ah)"/>
+      <path class="ln" d="M440 70L498 160" marker-end="url(#ah)"/>
+      <path class="ln" d="M340 84V198" marker-end="url(#ah)"/>
+      <path class="ln" d="M440 232H778" marker-end="url(#ah)"/>
+      <path class="ln" d="M240 232H182" marker-end="url(#ah)"/>
+    </svg>
+  </div>
+  <div class="tbl"><table>
+    <thead><tr><th>Fichier</th><th>Rôle</th></tr></thead>
+    <tbody>
+      <tr><td><code>app/server.py</code></td><td>Serveur HTTP (port exclusif, journal <code>data/server.log</code>, QuickEdit coupé), fichiers avec requêtes Range, toute l'API.</td></tr>
+      <tr><td><code>app/store.py</code></td><td>Projets : un dossier par planche, <code>project.json</code> source de vérité, enregistrement sous verrou, numéro <code>rev</code>.</td></tr>
+      <tr><td><code>app/presets.py</code></td><td>Caméras, actions, sons, voix, tremblé, presets du relief, et <code>plan_panel</code> (ce qu'une case doit calculer).</td></tr>
+      <tr><td><code>app/jobs.py</code></td><td>File de rendus : un fil par machine ComfyUI et des fils fal, reprise après redémarrage, relances, indice de mouvement.</td></tr>
+      <tr><td><code>app/comfy.py</code></td><td>Graphes ComfyUI (H3 figé et animé, LoRA 360 Orbit, audio H3, MiniMax Music 3), envoi, suivi, téléchargement.</td></tr>
+      <tr><td><code>app/falapi.py</code></td><td>fal : H3 (et LoRA), voix MiniMax Speech, bruitages Hunyuan / MMAudio, envoi de fichiers.</td></tr>
+      <tr><td><code>app/compose.py</code>, <code>geometry.py</code></td><td>Images de départ à la taille H3, page et traits, vignette ; géométrie des cases identique au JavaScript.</td></tr>
+      <tr><td><code>app/assemble.py</code></td><td>Export d'une page (vidéos tout-intra, sons égalisés, relief, données du lecteur), cache par empreinte, livres.</td></tr>
+      <tr><td><code>app/depth.py</code></td><td>Cartes de profondeur (Depth Anything V2 Small en ONNX, Apache 2.0), plan net automatique.</td></tr>
+      <tr><td><code>app/edit.py</code></td><td>Mode édition : retouches bornées, volumes, sons ajoutés, relief, régénérations, préréglages.</td></tr>
+      <tr><td><code>app/sounds.py</code></td><td>Sons sans doublon : empreinte SHA-1, alerte si déjà utilisé, réemploi d'un fichier déjà importé.</td></tr>
+      <tr><td><code>app/director.py</code>, <code>app/skills/boucles.md</code></td><td>Réalisateur IA (une demande, toutes les cases en images) et sa compétence « boucles parfaites ».</td></tr>
+      <tr><td><code>app/llm.py</code>, <code>settings.py</code>, <code>publish.py</code></td><td>Fournisseurs d'IA ; réglages (<code>local_settings.json</code>) ; publication SSH et étagère.</td></tr>
+      <tr><td><code>app/web/</code></td><td>Interface : <code>main.js</code> (accueil, espace de travail), <code>forms.js</code>, <code>editor.js</code> (cadres), <code>api.js</code>.</td></tr>
+      <tr><td><code>player/</code></td><td>Lecteur (<code>alive-player.js</code>), livre (<code>book.html</code>), mode édition (<code>alive-edit.js/.css</code>), étagère.</td></tr>
+      <tr><td><code>tools/</code></td><td><code>dev_instance.py</code> (port 8791), <code>make_pilot_doc.py</code>, <code>build_book.py</code>, <code>deploy.py</code>…</td></tr>
+      <tr><td><code>docs/</code></td><td>Cette doc, le topo, le pilotage, <code>PARALLAXE-RELIEF.html</code>, <code>BOUCLES-IA.html</code>.</td></tr>
+    </tbody>
+  </table></div>
+  <h3>Rangement d'une planche</h3>
+  <pre><code>projects/&lt;id&gt;/project.json      la planche (source de vérité)
+              assets/            images et sons importés
+              start/&lt;case&gt;.png   image de départ envoyée à H3 (et base du relief)
+              renders/&lt;case&gt;/    toutes les variantes rendues
+              depth/&lt;case&gt;.png   carte de profondeur (relief)
+              page/              page.jpg, frames.png (traits), thumb.jpg
+              export/            la page jouable : index.html, book.js, manga_data.js, videos/, sons/, images/, depth/</code></pre>
+</section>
+
+<!-- ============================================================ DONNEES -->
+<section id="donnees">
+  <div class="sec-head"><p class="eyebrow">4 · Modèle de données</p><h2>Les clés d'une case</h2></div>
+  <div class="tbl"><table>
+    <thead><tr><th>Clé de <code>panels[case]</code></th><th>Contenu</th></tr></thead>
+    <tbody>
+      <tr><td><code>image</code>, <code>view</code></td><td>Image importée ; recadrage <code>{zoom, ox, oy}</code>.</td></tr>
+      <tr><td><code>treatment</code></td><td><code>"h3"</code> (défaut) ou <code>"relief"</code>.</td></tr>
+      <tr><td><code>relief</code></td><td><code>{preset: respire|glisse|tourne|vertigo, amount, focus, duration, trigger: hover|click}</code>.</td></tr>
+      <tr><td><code>camera</code>, <code>action</code></td><td><code>{id, fields, amplitude, rigid, extra}</code> ; action <code>{id, fields, loop, extra}</code> (<code>custom</code> : <code>fields.text</code>).</td></tr>
+      <tr><td><code>seed</code>, <code>prompt_override</code></td><td>Graine ; prompt réécrit depuis l'aperçu, par côté (<code>{"V": "…"}</code>).</td></tr>
+      <tr><td><code>audio</code>, <code>voice</code>, <code>foley</code></td><td>Trois couches de son (mode, fichier, volume, réglages) ; <code>generated</code> = versions.</td></tr>
+      <tr><td><code>extraSounds</code></td><td>Sons ajoutés par-dessus : <code>[{file, name, volume, loop}]</code>.</td></tr>
+      <tr><td><code>edit</code></td><td>Retouches du lecteur : <code>shake, grade, frame, range, xfade, ease, speed, bounce, start</code>.</td></tr>
+      <tr><td><code>review</code></td><td><span class="dot todo"></span><code>null</code> à voir · <span class="dot ok"></span><code>"ok"</code> validée · <span class="dot redo"></span><code>"redo"</code> à retoucher.</td></tr>
+      <tr><td><code>renders</code>, <code>chosen</code></td><td>Variantes rendues (graine, mouvement, machine, prompt…) ; fichier utilisé par côté (V, L, R).</td></tr>
+    </tbody>
+  </table></div>
+  <p>Au niveau de la planche : <code>name, page</code> (format, sens, taille, traits…), <code>layout</code> (arbre de découpes),
+    <code>geometry</code> (cases calculées), <code>style</code>, <code>pageSound</code>, <code>direction</code> (dernière consigne au
+    réalisateur), <code>published</code>, <code>rev</code>.</p>
+  <h3>Ce que reçoit le lecteur (<code>manga_data.js</code>, une entrée par case)</h3>
+  <pre><code>{ id, rect, poly, video, frames, center, loop, autoplay,
+  fx:    { shake, grade, frame, range, xfade, ease, speed, bounce, start },
+  depth: { img, map, preset, amount, focus, duration, trigger },       // case en relief (video = null)
+  audio, audioVol, voice: {src, vol, loop}, foley: {src, vol, sync}, more: [{src, vol, loop}] }
+page : { page: "page.jpg", frames: "frames.png", size: [W, H], fps: 24, sound: {src, vol}, panels: [...] }</code></pre>
+</section>
+
+<!-- ============================================================ PLANCHE -->
+<section id="planche">
+  <div class="sec-head"><p class="eyebrow">5 · Dans l'application</p><h2>Fabriquer une planche</h2></div>
+  <div class="grid2">
+    <div class="block">
+      <h3>Page et découpage</h3>
+      <ul>
+        <li>Formats : page BD, manga, 4:5, carré, écran ; vertical ou horizontal.</li>
+        <li>Découpages prêts ou au hasard ; glisser un trait déplace la frontière, glisser un bout l'incline (Maj : droit).</li>
+        <li>Couper, supprimer, pivoter ; fond, traits, gouttière, marge, ambiance commune ; Ctrl+Z / Ctrl+Y.</li>
+        <li>Images : glisser sur la case, molette pour zoomer, glisser pour recadrer.</li>
+      </ul>
+    </div>
+    <div class="block">
+      <h3>Chaque case</h3>
+      <ul>
+        <li><b>Traitement</b> : « Vidéo H3 » ou « Relief (instantané) ».</li>
+        <li><b>Caméra</b> (vidéo) : temps figé piloté au glisser (orbite 360°, arc, demi-arc, plongée ↕ contre-plongée,
+          travelling) ou scène animée (fixe, grue, avancée, épaule, texte libre).</li>
+        <li><b>Action</b> : figé, vie en boucle, nerveux, danse, marche, parole, éléments, texte libre ; « Animation en boucle » cochée par défaut.</li>
+        <li><b>Sons</b> : voix off (ton MP3), ambiance, bruitages ; « ✨ Écrire les textes avec l'IA ».</li>
+        <li><b>Rendus</b> : graine, variantes avec indice de mouvement, prompt envoyé à H3, prompt réécrit depuis l'aperçu.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ RELIEF -->
+<section id="relief">
+  <div class="sec-head"><p class="eyebrow">6 · Option relief</p><h2>Une photo en relief au lieu d'une vidéo</h2>
+    <p>Une case en relief n'a pas de vidéo : une carte de profondeur (blanc = proche) est calculée en ~0,7 s sur le processeur,
+      et le lecteur déplace chaque pixel selon sa profondeur. Instantané, gratuit, et les visages restent exactement ceux de la photo.
+      Détails et choix techniques : <code>docs/PARALLAXE-RELIEF.html</code>.</p></div>
+  <div class="grid2">
+    <div class="block">
+      <h3>La carte</h3>
+      <ul>
+        <li>Modèle : <b>Depth Anything V2 Small</b>, licence <b>Apache 2.0</b> (distribuable, usage commercial permis), ONNX
+          (<code>onnx-community/depth-anything-v2-small</code>), téléchargé une fois dans <code>data/models/</code>.</li>
+        <li>Entrée : l'image de départ de la case (<code>start/</code>), petit côté 518 px ; sortie normalisée (centiles 1–99),
+          dilatée autour des sujets proches puis lissée, contre les déchirures.</li>
+        <li>Recalculée seule si l'image change ; bouton « Recalculer » dans l'aperçu ; plan net automatique = médiane du centre.</li>
+      </ul>
+      <div class="warn">Depth Anything V2 Base / Large / Giant et Depth Anything 3 Large / Giant sont en CC-BY-NC : interdits.</div>
+    </div>
+    <div class="block">
+      <h3>Le mouvement</h3>
+      <ul>
+        <li><b>Respire</b> : petite avancée puis retour (portraits, couples, détails).</li>
+        <li><b>Glisse</b> : travelling latéral (groupes, paysages, tables).</li>
+        <li><b>Tourne</b> : petit cercle autour du sujet (sujet central bien détaché).</li>
+        <li><b>Vertigo</b> : le sujet garde sa taille, le fond s'éloigne (moments forts).</li>
+        <li>Au survol (boucle douce) ou au clic (un tour) ; la caméra suit aussi le glisser. Le <b>plan net</b> ne bouge pas :
+          le mettre sur les visages. Cheveux, voiles, vitres : rester sous 3 %.</li>
+      </ul>
+    </div>
+  </div>
+  <ul>
+    <li><b>Biscuits</b> : la formule conseillée met tout en relief et garde une vraie vidéo H3 par page (orbite 360 ou plan vivant en
+      boucle) dans la grande case qui le mérite. Le réalisateur IA sait la choisir.</li>
+    <li><b>Relief d'attente</b> : une case H3 dont le rendu n'est pas encore prêt s'affiche en relief.</li>
+    <li>Passer d'un traitement à l'autre (inspecteur, ou aperçu en mode édition) ne perd rien : les rendus H3 et les réglages du relief restent.</li>
+  </ul>
+</section>
+
+<!-- ============================================================ RENDUS -->
+<section id="rendus">
+  <div class="sec-head"><p class="eyebrow">7 · Calculer</p><h2>Les rendus H3 et la file</h2></div>
+  <div class="grid2">
+    <div class="block">
+      <h3>Où et comment</h3>
+      <ul>
+        <li>MiniMax H3 dans ComfyUI sur HITCHCOCK, CASSAVETES, FORD : nœud H3 Orbital pour le temps figé (orbite, chemins),
+          <code>MiniMaxH3ImageToVideo</code> pour les plans animés ; LoRA 360 Orbit via <code>LoraLoaderModelOnly</code> ;
+          la piste son native décodée (VAE audio H3) et gardée dans la vidéo.</li>
+        <li>fal : <code>minimax/h3/image-to-video[/lora]</code> (5–15 s, sans réécriture de prompt).</li>
+        <li>Boucle : la même image en première et dernière image (<code>last_is_first</code>).</li>
+        <li>Musiques : MiniMax Music 3 en local (passe après les vidéos de la machine).</li>
+      </ul>
+    </div>
+    <div class="block">
+      <h3>Une file robuste</h3>
+      <ul>
+        <li>Un fil par machine, des fils fal ; les vidéos d'abord, puis les sons.</li>
+        <li>Reprise après redémarrage : les rendus en cours se rebranchent sur ComfyUI.</li>
+        <li>Erreur de mémoire passagère : une relance, ailleurs si possible ; machine muette : nouveaux essais pendant 15 min.</li>
+        <li>Indice de mouvement après chaque rendu : &lt; 0,3 presque immobile ; 1,5 à 4,5 une case qui vit bien.</li>
+        <li>Une case en relief ne passe pas par la file : sa carte est calculée tout de suite.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ SONS -->
+<section id="sons">
+  <div class="sec-head"><p class="eyebrow">8 · Le son</p><h2>Les sons</h2></div>
+  <div class="tbl"><table>
+    <thead><tr><th>Couche</th><th>Source</th><th>Lecture</th><th>Niveau</th></tr></thead>
+    <tbody>
+      <tr><td>Voix off</td><td>MP3 de David (ou voix IA MiniMax Speech sur fal, ou 2e musique)</td><td>une fois à chaque survol, ou en boucle</td><td>−17 LUFS</td></tr>
+      <tr><td>Ambiance / musique</td><td>fichier ou MiniMax Music 3</td><td>en boucle au survol</td><td>−24 LUFS</td></tr>
+      <tr><td>Bruitages</td><td>piste son de la vidéo H3, ou Hunyuan / MMAudio sur fal</td><td>calés sur l'image affichée</td><td>−21 LUFS</td></tr>
+      <tr><td>Sons ajoutés</td><td>fichiers</td><td>en boucle ou une fois</td><td>−20 LUFS</td></tr>
+      <tr><td>Musique de la page</td><td>fichier ou MiniMax Music 3</td><td>en continu, baisse à 45 % quand une case parle</td><td>−23 LUFS</td></tr>
+    </tbody>
+  </table></div>
+  <p>Les sons sont égalisés à l'export (loudnorm) : les curseurs de volume restent comparables. Un son importé est reconnu à son
+    contenu : déjà utilisé dans une planche, une alerte donne la planche et la case (réponse 409, « Utiliser quand même ») ;
+    déjà importé sans servir, le fichier existant est repris, jamais copié deux fois.</p>
+</section>
+
+<!-- ============================================================ IA -->
+<section id="ia">
+  <div class="sec-head"><p class="eyebrow">9 · L'intelligence</p><h2>L'IA et le réalisateur</h2></div>
+  <ul>
+    <li><b>Fournisseurs</b> : Anthropic (défaut), OpenAI, Google, DeepSeek ; choix du modèle dans les réglages.</li>
+    <li><b>IA de case</b> : regarde l'image et remplit caméra, action, sons ; <b>réécriture de prompt</b> pour « Régénérer » ;
+      <b>traduction</b> des précisions.</li>
+    <li><b>Réalisateur IA</b> (fenêtre 🎬) : une consigne globale ; une seule demande avec toutes les cases en images (ordre de
+      lecture) ; il règle caméras, actions, textes, sons, voix, bruitages, musique de page, ambiance commune.</li>
+    <li><b>Traitement</b> : vidéo H3 partout, relief partout + N biscuits H3 par page (avec la raison de chaque biscuit), ou au choix de l'IA case par case.</li>
+    <li><b>Compétences</b> lues à chaque demande : <code>app/skills/boucles.md</code> (écrire des boucles parfaites : moteurs
+      flux / relève / cycle / rythme, idle vivant, phrase de boucle, mots interdits, orbite 360 dans la plus grande case).
+      On l'améliore en éditant le fichier, sans redémarrer.</li>
+    <li>Le réalisateur ne touche jamais aux <span class="dot ok"></span>cases vertes ni aux sons importés.</li>
+  </ul>
+</section>
+
+<!-- ============================================================ LECTEUR -->
+<section id="lecteur">
+  <div class="sec-head"><p class="eyebrow">10 · Ce que voit le lecteur</p><h2>Le lecteur</h2></div>
+  <div class="grid2">
+    <div class="block">
+      <h3>Cases vidéo</h3>
+      <ul>
+        <li>Vidéos tout-intra : le lecteur saute à l'image voulue (<code>currentTime</code>), au survol avec démarrage et arrêt doux,
+          au glisser avec inertie, double-clic pour agrandir.</li>
+        <li>Boucle : points début / fin, fondu au raccord, ralentis joués plus vite (<code>ease</code>), aller-retour, vitesse.</li>
+        <li>Tremblé : fonction de la position dans la boucle, nombre entier de cycles : identique au raccord.</li>
+        <li>Couleurs et cadrage en CSS sur la vidéo.</li>
+      </ul>
+    </div>
+    <div class="block">
+      <h3>Cases en relief</h3>
+      <ul>
+        <li>Un seul canevas WebGL par page (limite de contextes des navigateurs) ; chaque case dessinée dans son polygone.</li>
+        <li>Shader de point fixe (8 itérations) : <code>uv = écran − (profondeur − plan net) × décalage</code> ; sur-cadrage pendant le mouvement seulement.</li>
+        <li>Au repos, le dessin est identique à l'image de la page ; sans WebGL, l'image fixe.</li>
+        <li>Couleurs et cadrage dans le shader ; pas de tremblé.</li>
+      </ul>
+    </div>
+  </div>
+  <p>Partout : sons au survol en fondu, musique de page qui baisse, bouton « Activer le son » (règle des navigateurs), noir et
+    blanc, plein écran, livre (flèches, clavier, balayage, page suivante préchargée), tactile (la dernière case touchée joue).</p>
+</section>
+
+<!-- ============================================================ EDITION -->
+<section id="edition">
+  <div class="sec-head"><p class="eyebrow">11 · Retoucher sans recalculer</p><h2>Le mode édition</h2>
+    <p>Dans l'aperçu servi par l'application (jamais en ligne) : « ✏️ Éditer », puis un clic sur une case. Tout est en direct,
+      enregistré au fil de l'eau, sans ré-encodage. Ouvrir directement en édition : <code>?edit=1</code>.</p></div>
+  <div class="tbl"><table>
+    <thead><tr><th>Onglet</th><th>Case vidéo</th><th>Case en relief</th></tr></thead>
+    <tbody>
+      <tr><td>Boucle / Relief</td><td>timeline, courbe de mouvement (rouge = ralenti), « Lisser la boucle », début / fin, fondu, départ, sens, vitesse</td><td>mouvement, amplitude, plan net (clic dans l'image), durée, déclenchement ; voir / recalculer la carte</td></tr>
+      <tr><td>Tremblé</td><td>taille, fréquence, rotation, graine, « Adaptive loop », préréglages enregistrables, toute la page</td><td>—</td></tr>
+      <tr><td>Couleur, Cadrage</td><td colspan="2">saturation, luminosité, contraste, température, teinte ; zoom et position ; « Appliquer à toute la page »</td></tr>
+      <tr><td>Son</td><td colspan="2">voix off (charger un MP3, une fois par survol), sons ajoutés (« En faire la voix off »), régénérer, musique de page (volume, remplacer, générer, retirer)</td></tr>
+      <tr><td>Régénérer / Vidéo H3</td><td>consigne en français, même graine, versions ; « Passer en relief »</td><td>« Passer en vidéo H3 » (rendu lancé si aucun n'existe)</td></tr>
+    </tbody>
+  </table></div>
+  <p>Aussi : pastille de suivi sur chaque case (<span class="dot todo"></span>à voir, <span class="dot ok"></span>OK,
+    <span class="dot redo"></span>à retoucher) et compteur page / livre ; fenêtre agrandissable (⤢ ou le coin) ; barre espace =
+    lecture / pause ; « 🏠 Accueil » et « ✎ Planche » pour revenir à l'application.</p>
+</section>
+
+<!-- ============================================================ ACCUEIL -->
+<section id="accueil">
+  <div class="sec-head"><p class="eyebrow">12 · S'y retrouver</p><h2>L'accueil et les livres</h2></div>
+  <ul>
+    <li>Planches en vignettes (la feuille entière, à son format) ou en liste ; recherche ; tris : modification, création,
+      alphabétique naturel, mieux notées, à retoucher d'abord.</li>
+    <li>Étoiles d'après les pastilles : vert 1, orange 0,4, rouge 0, moyenne ramenée de 1 à 5 par demi-étoile (toutes vertes = 5,
+      jamais revue = 2,5).</li>
+    <li>Pastille de calcul : rouge qui clignote = rendu en cours, orange = en file (toutes les 4 s).</li>
+    <li>Livres repliables ; ◀ ▶ pour l'ordre des pages ; clic sur une page : l'ouvrir, la voir, l'éditer seule ou dans le livre ;
+      « Aperçu » et « Publier le livre ».</li>
+  </ul>
+</section>
+
+<!-- ============================================================ PUBLICATION -->
+<section id="publication">
+  <div class="sec-head"><p class="eyebrow">13 · En ligne</p><h2>La publication</h2></div>
+  <ul>
+    <li>Hébergement Hostinger : <code>alive-comics.placenta.tv</code> ; envoi incrémental par SSH (clé propre à chaque PC).</li>
+    <li>Page ou livre publiés sous <code>/&lt;nom&gt;/</code> ; registre <code>data/published.json</code> ; page d'accueil (étagère) régénérée.</li>
+    <li>Public pour qui a le lien, non indexé (<code>noindex</code>, robots.txt) ; html, js et css sans cache.</li>
+    <li>Une retouche faite dans l'aperçu n'est en ligne qu'après une nouvelle publication.</li>
+    <li>En ligne publiés : essais, test-appli, tristus, coulisse-book, et les livres « Les Fidèles », « Les Jours de fête »,
+      « Les Heures creuses », « Les Mannequins » (reportages 1987).</li>
+  </ul>
+</section>
+
+<!-- ============================================================ API -->
+<section id="api">
+  <div class="sec-head"><p class="eyebrow">14 · Référence</p><h2>L'API complète</h2>
+    <p class="muted">JSON, sauf les envois de fichiers (corps = octets bruts). Erreur : statut 4xx/5xx et <code>{"error": "…"}</code>.
+      Détails et exemples pour une autre instance : <code>docs/PILOTAGE-CLAUDE.html</code>.</p></div>
+  <div class="tbl"><table>
+    <thead><tr><th>Route</th><th>Rôle</th></tr></thead>
+    <tbody>
+      <tr><td><code>GET /api/info · presets · layouts · workers</code></td><td>Version, catalogues (caméras, actions, sons, voix, relief), découpages, machines.</td></tr>
+      <tr><td><code>GET|PUT /api/settings</code></td><td>Réglages (clés masquées en lecture).</td></tr>
+      <tr><td><code>POST /api/plan</code></td><td>Ce qu'une case calculerait (prompts complets).</td></tr>
+      <tr><td><code>GET /api/jobs[?project=&amp;active=1]</code>, <code>POST /api/jobs/&lt;id&gt;/cancel</code>, <code>/jobs/clear</code></td><td>File de rendus.</td></tr>
+      <tr><td><code>POST /api/llm/suggest · translate · test · voice</code>, <code>GET /api/llm/models</code></td><td>IA de case, traduction, test, texte de voix, modèles.</td></tr>
+      <tr><td><code>POST /api/fal/test</code>, <code>GET /api/publish/key</code>, <code>POST /api/publish/test</code></td><td>Clé fal ; clé SSH du poste ; test de publication.</td></tr>
+      <tr><td><code>GET|POST /api/userpresets</code></td><td>Préréglages de tremblé de David.</td></tr>
+      <tr><td><code>GET|PUT /api/books</code>, <code>POST /api/books/&lt;id&gt;/export|publish|reveal</code></td><td>Livres.</td></tr>
+      <tr><td><code>GET|POST /api/projects</code>, <code>GET|PUT|DELETE /api/projects/&lt;id&gt;</code></td><td>Planches (création avec format, sens, découpage ; corbeille).</td></tr>
+      <tr><td><code>…/&lt;id&gt;/rev · compose · update · upload</code></td><td>Version ; images de départ et page ; réglages de planche ; import (sons sans doublon, <code>&amp;force=1</code>).</td></tr>
+      <tr><td><code>…/&lt;id&gt;/panels/&lt;case&gt;</code>, <code>/image</code>, <code>/sound?layer=audio|voice|extra</code></td><td>Réglages d'une case (clés remplacées) ; image ; son.</td></tr>
+      <tr><td><code>…/&lt;id&gt;/estimate · render</code></td><td>Estimation ; rendus (relief : carte immédiate, réponse <code>relief</code>).</td></tr>
+      <tr><td><code>…/&lt;id&gt;/audio|voice|foley/&lt;case&gt;</code>, <code>/pagesound</code></td><td>Générer un son seul.</td></tr>
+      <tr><td><code>…/&lt;id&gt;/edit/&lt;case&gt;</code></td><td>Retouches : <code>edit, volumes, extra, pageVolume, review, relief, treatment</code> ; remonte l'export (case <code>_</code> = page).</td></tr>
+      <tr><td><code>…/&lt;id&gt;/depth/&lt;case&gt;</code></td><td>Carte de profondeur (<code>{"force": true}</code>).</td></tr>
+      <tr><td><code>…/&lt;id&gt;/regen/&lt;case&gt;</code>, <code>/regensound/&lt;case&gt;</code></td><td>Régénérer une vidéo (consigne, même graine) ou un son.</td></tr>
+      <tr><td><code>…/&lt;id&gt;/direct</code></td><td>Réalisateur IA (<code>instruction</code>, <code>options</code> dont <code>treatment</code> et <code>treats</code>).</td></tr>
+      <tr><td><code>…/&lt;id&gt;/choose · export · reveal · publish</code></td><td>Choisir une variante ; exporter ; ouvrir le dossier ; publier.</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<!-- ============================================================ PILOTAGE -->
+<section id="pilotage">
+  <div class="sec-head"><p class="eyebrow">15 · À plusieurs</p><h2>Travailler avec une autre instance de Claude</h2></div>
+  <ul>
+    <li>Une instance « Bande dessinée mode 10 pages » fabrique les livres par l'API à partir d'un thème : sept séries de dix
+      planches (Les Fidèles, Jours de fête, Heures creuses, Mannequins, Coulisses, Bureaux, Entretien).</li>
+    <li>Son guide : <code>docs/PILOTAGE-CLAUDE.html</code> (à régénérer avec <code>tools/make_pilot_doc.py</code> après chaque
+      changement de routes ou de clés) ; sa compétence : <code>.claude/skills/boucle-parfaite</code>.</li>
+    <li>Règles communes : ne jamais toucher aux cases vertes ; commencer par les rouges ; ne jamais remettre le tremblé dans la
+      vidéo ; publier seulement à la demande de David ; prévenir l'autre instance d'un redémarrage ou d'un changement d'API.</li>
+  </ul>
+</section>
+
+<!-- ============================================================ LECONS -->
+<section id="lecons">
+  <div class="sec-head"><p class="eyebrow">16 · Mémoire</p><h2>Leçons apprises</h2></div>
+  <div class="grid2">
+    <div class="block">
+      <h3>H3 et les boucles</h3>
+      <ul>
+        <li>« slow », « tiny », « stays in place » donnent des vidéos figées (indice 0,05 à 0,3) : écrire un mouvement continu et visible.</li>
+        <li>Un geste qui « va quelque part » produit un aller-retour : moteurs flux, relève, cycle, rythme + idle vivant.</li>
+        <li>H3 freine au début et à la fin de chaque boucle (10 à 20 images) : c'est le « fixe » qui casse la boucle ; « Lisser la boucle » le corrige.</li>
+        <li>Pas de négation, pas de « loop / seamless » seuls, pas d'arc de 90° en boucle (la caméra revient).</li>
+        <li>Le filtre de contenu de fal refuse certains textes (« pieds nus… ») : message traduit pour David.</li>
+      </ul>
+    </div>
+    <div class="block">
+      <h3>Le serveur et l'interface</h3>
+      <ul>
+        <li>Lire le corps de chaque requête dès l'arrivée (keep-alive) ; port exclusif sous Windows ; QuickEdit coupé.</li>
+        <li>Ouvrir l'onglet d'aperçu au clic (sinon bloqué), puis y charger la page.</li>
+        <li>Tremblé v1 trop fort (« faux 2D ») : v4 dans le lecteur, discret, raccord garanti.</li>
+        <li>Un raccourci « pastille seulement » a bloqué les remises à jour à corps vide : vérifier la présence de la clé.</li>
+        <li>Les identifiants de livres contiennent des tirets : les expressions régulières doivent les accepter.</li>
+        <li>Une interrogation ComfyUI sans réponse ne doit pas faire échouer un rendu (machine occupée).</li>
+        <li>Vérifier toute modification d'interface dans le navigateur ; scripts de correctifs en fichiers, pas en heredoc.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ SUITE -->
+<section id="suite">
+  <div class="sec-head"><p class="eyebrow">17 · Et maintenant</p><h2>Limites et pistes</h2></div>
+  <ul>
+    <li><b>Réseaux sociaux</b> : une planche ne joue pas dans le fil de X ou Instagram. À faire : un export vidéo de la page
+      (MP4 carré, 9:16, 16:9, toutes les cases animées, avec le son) et des aperçus de lien (balises Open Graph, robots des
+      réseaux autorisés tout en gardant Google dehors).</li>
+    <li><b>Relief niveau 2</b> : couches détourées et fond bouché (cheveux, voiles) ; double-clic agrandi pour les cases en relief ; aperçu de la carte dans le navigateur (transformers.js).</li>
+    <li><b>Biscuits automatiques</b> : bouton « Proposer les biscuits » sur la page, estimation de durée, biscuits en arrière-plan.</li>
+    <li>Musiques générées prioritaires quand une page attend seulement ses sons.</li>
+    <li>Republier d'un clic les livres en ligne après des retouches.</li>
+    <li>Mode automatique dans l'application (thème → livre), aujourd'hui assuré par l'instance de pilotage.</li>
+  </ul>
+</section>
+
+<footer>
+  <p>Dépôt <code>grosdada/Alive-Comics</code> · lancement <code>Lancer_Alive_Comics.bat</code> → <code>http://127.0.0.1:8790</code> ·
+    instance de test <code>python tools/dev_instance.py</code> → port 8791.</p>
+  <p>Voir aussi : <code>CLAUDE.md</code>, <code>README.md</code> (mode d'emploi), <code>docs/ALIVE-COMICS-TOPO.html</code>,
+    <code>docs/PILOTAGE-CLAUDE.html</code>, <code>docs/PARALLAXE-RELIEF.html</code>, <code>docs/BOUCLES-IA.html</code>.</p>
+</footer>
+</div>

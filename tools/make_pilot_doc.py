@@ -115,6 +115,7 @@ et des chemins de fichiers (images, sons).</p>
 <li><a href="#enchainer">Plusieurs pages à la suite</a></li>
 <li><a href="#verifier">Vérifier et corriger les rendus</a></li>
 <li><a href="#retouches">Retouches sans régénérer</a></li>
+<li><a href="#relief">Relief (photo en relief)</a></li>
 <li><a href="#publier">Exporter, publier, livres</a></li>
 <li><a href="#pieges">Pièges connus</a></li>
 <li><a href="#exemple">Script complet d'exemple</a></li>
@@ -322,6 +323,11 @@ POST /api/projects/&lt;id&gt;/regen/&lt;case&gt; {{"instruction": "en francais",
         "instruction" ; sinon "prompts" tel quel) -> {{"jobs", "prompts", "seed"}} ; le prompt est garde
         dans panel.prompt_override (il remplace celui des menus pour cette case)
 POST /api/projects/&lt;id&gt;/regensound/&lt;case&gt; {{"layer": "audio|voice|foley|page", "text": "…", "sameSeed": false}}</code></pre>
+<h3>Relief (voir 9 ter)</h3>
+<pre><code>POST /api/projects/&lt;id&gt;/edit/&lt;case&gt; {{"treatment": "relief"|"h3"}}      changer le traitement d'une case
+POST /api/projects/&lt;id&gt;/edit/&lt;case&gt; {{"relief": {{"preset", "amount", "focus", "duration", "trigger"}}}}
+POST /api/projects/&lt;id&gt;/depth/&lt;case&gt; {{"force": true}}   carte de profondeur (~1 s, sur ce PC) -> {{"file", "seconds"}}
+POST /api/projects/&lt;id&gt;/render  sur une case en relief : calcule la carte (reponse "relief": [cases]) et les sons, aucune video</code></pre>
 <h3>Exporter, publier</h3>
 <pre><code>POST /api/projects/&lt;id&gt;/export     -> {{"url": "/projects/&lt;id&gt;/export/index.html", "report": [...], "cached": bool}}
         page jouable dans projects/&lt;id&gt;/export/ (index.html, videos/, sons/) ; instantane si rien n'a change
@@ -430,6 +436,24 @@ reconnu par son contenu. S'il sert déjà dans une planche, la réponse est {cod
 ne force ({code("&force=1")}) que si la réutilisation est voulue (ex. même musique sur tout un livre). S'il a déjà été importé sans
 servir, le fichier existant est repris ({code('"reused": true')}).</li>
 </ul></section>
+
+<section id="relief"><h2><span class="n">9 ter</span>Relief : une photo en relief au lieu d'une vidéo</h2>
+<p>Chaque case a un <b>traitement</b> : {code('"treatment": "h3"')} (défaut, vidéo MiniMax H3, ~7 min de GPU) ou
+{code('"treatment": "relief"')} (photo en relief : une carte de profondeur calculée en ~1 s sur le processeur de ce PC par
+Depth Anything V2 Small, licence Apache 2.0 ; aucune vidéo). Le lecteur bouge la caméra de quelques pour cent au survol ou
+au clic, et suit le glisser. Une case H3 dont le rendu n'est pas encore là s'affiche en relief en attendant.</p>
+<ul>
+<li>Réglages : {code('panels[case].relief = {"preset": "respire|glisse|tourne|vertigo", "amount": 0.025, "focus": 0..1, "duration": 2, "trigger": "hover|click"}')}.
+<code>focus</code> = plan net (profondeur qui ne bouge pas : la mettre sur les visages) ; sans elle, médiane du centre de la case.</li>
+<li>Presets : respire (portraits, couples, détails), glisse (groupes, paysages), tourne (sujet central détaché), vertigo
+(moments forts). Cheveux, voiles, vitres : rester sous 3 % d'amplitude.</li>
+<li>Formule conseillée : relief partout, et un « biscuit » H3 (orbite 360 ou plan vivant en boucle) par page, dans la
+grande case qui le mérite. Le réalisateur IA sait le faire (option « Relief partout + biscuits H3 »).</li>
+<li>Couleurs ({code("edit.grade")}) et cadrage ({code("edit.frame")}) s'appliquent aussi au relief ; pas de tremblé.</li>
+</ul>
+<p>Le réalisateur IA lit à chaque demande la compétence <code>app/skills/boucles.md</code> (écrire des boucles parfaites,
+tirée de <code>docs/BOUCLES-IA.html</code>) et ne touche jamais aux cases vertes.</p>
+</section>
 
 <section id="publier"><h2><span class="n">10</span>Exporter, publier, livres</h2>
 <ul>

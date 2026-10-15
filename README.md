@@ -22,7 +22,11 @@ L'interface s'ouvre sur http://127.0.0.1:8790/. Il faut Python 3.10+ et ffmpeg d
    découpage » (les bandes deviennent des colonnes), couper ou supprimer la case sélectionnée. Colonne de droite (rien de sélectionné) : couleur du fond autour des cases, traits,
    gouttière, marge, ambiance commune. Ctrl+Z / Ctrl+Y.
 3. **Images** : glisse une image sur une case (ou clique dedans). Molette pour zoomer, glisser pour recadrer.
-4. **Dans chaque case**, quatre icônes :
+4. **Traitement de la case** (inspecteur) : « Vidéo H3 » (une boucle vidéo MiniMax H3, quelques minutes de calcul) ou
+   « Relief (instantané) » : une photo en relief, carte de profondeur calculée en ~1 s sur ce PC (Depth Anything V2 Small,
+   licence Apache 2.0) ; le lecteur bouge la caméra de quelques pour cent au survol, au clic ou au glisser (respire,
+   glisse, tourne, vertigo). Une case H3 dont le rendu n'est pas encore prêt s'affiche en relief en attendant.
+   **Dans chaque case**, quatre icônes :
    - **Image** : importer ou remplacer.
    - **Caméra** : orbite 360° en boucle, arc gauche ↔ droite, demi-arc, plongée ↕ contre-plongée,
      travelling avant ↔ arrière (la case se pilote au glisser, scène figée), ou caméra fixe, grue, lente avancée,
@@ -43,7 +47,9 @@ L'interface s'ouvre sur http://127.0.0.1:8790/. Il faut Python 3.10+ et ffmpeg d
    globale (ambiance, histoire, style de caméra, sons…), et l'IA regarde toute la page pour régler le reste de chaque
    case : caméra, action, textes, ambiance sonore, voix off qui raconte (option, fal), bruitages, son global et
    ambiance commune. Les images ne sont pas touchées ; tout reste modifiable ensuite. Option « Lancer les rendus
-   ensuite » pour enchaîner sur tes machines.
+   ensuite » pour enchaîner sur tes machines. Traitement : vidéo H3 partout, relief partout + N « biscuits » H3 par page,
+   ou au choix de l'IA. Il suit la compétence « boucles parfaites » (`app/skills/boucles.md`) et ne touche jamais aux
+   cases validées en vert.
 5. **Générer les cases** : choisir les cases, puis où calculer : tes machines ComfyUI, le cloud fal, ou mixte
    (fal prend ce que tes machines n'ont pas pris après 2 min). Les rendus se répartissent seuls ; une machine
    occupée garde la tâche dans sa file. Suivi dans « Rendus » en bas.
