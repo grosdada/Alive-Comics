@@ -1,0 +1,247 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Écrire des boucles parfaites</title>
+<style>
+  :root { --bg:#f7f5f0; --panel:#fff; --ink:#1d1b18; --muted:#6b655c; --line:#e2dccf; --accent:#b5561c; --code:#f0ece4; --bad:#a3331a; --good:#2f7a45; --note:#eef3f8; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg:#141312; --panel:#1c1b19; --ink:#ece8e1; --muted:#9a948a; --line:#34312c; --accent:#f2b45c; --code:#24221f; --bad:#f08a5d; --good:#6fcf8c; --note:#1b2430; } }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:16px/1.6 system-ui,"Segoe UI",Roboto,sans-serif; }
+  header { padding:26px 16px 16px; background:var(--panel); border-bottom:1px solid var(--line); }
+  header h1 { margin:0 0 6px; font-size:clamp(24px,4vw,34px); }
+  header p { margin:0; color:var(--muted); max-width:980px; }
+  .wrap { max-width:1100px; margin:0 auto; padding:20px 16px 80px; }
+  section { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:4px 22px 16px; margin:0 0 20px; }
+  h2 { font-size:22px; margin:18px 0 8px; } h2 .n { color:var(--accent); margin-right:8px; }
+  h3 { font-size:17px; margin:18px 0 6px; }
+  code { font:13.5px/1.5 ui-monospace,"Cascadia Code",Consolas,monospace; background:var(--code); padding:1px 5px; border-radius:4px; overflow-wrap:anywhere; }
+  pre { background:var(--code); border:1px solid var(--line); border-radius:8px; padding:12px 14px; overflow-x:auto; font:13px/1.5 ui-monospace,Consolas,monospace; white-space:pre-wrap; }
+  pre code { background:none; padding:0; }
+  .tbl { overflow-x:auto; margin:10px 0 14px; } table { border-collapse:collapse; width:100%; font-size:14px; }
+  th, td { border:1px solid var(--line); padding:6px 9px; text-align:left; vertical-align:top; } th { background:var(--code); }
+  .bad { border-left:4px solid var(--bad); background:var(--code); padding:8px 14px; border-radius:6px; margin:10px 0; }
+  .good { border-left:4px solid var(--good); background:var(--code); padding:8px 14px; border-radius:6px; margin:10px 0; }
+  .note { border-left:4px solid #7fa3c8; background:var(--note); padding:8px 14px; border-radius:6px; margin:10px 0; }
+  li { margin:3px 0; }
+  nav ol { columns:2; padding-left:20px; } nav a { color:var(--ink); text-decoration:none; } nav a:hover { color:var(--accent); }
+  @media (max-width:760px) { nav ol { columns:1; } section { padding:4px 14px 14px; } }
+</style>
+</head>
+<body>
+<header><div class="wrap" style="padding:0">
+<h1>Écrire des boucles parfaites (pour l'IA d'Alive-Comics)</h1>
+<p>Tout ce qui a été appris sur les boucles vidéo MiniMax H3 en image-to-video, en cinq livres de 60 cases (octobre 2026).
+Tu écris le texte d'action d'une case ; ce guide dit comment obtenir une case qui <b>boucle sans aller-retour, sans temps mort
+au raccord et sans rester figée</b>. La section 11 est le résumé à appliquer à chaque case.</p>
+</div></header>
+<div class="wrap">
+<nav><ol>
+<li><a href="#probleme">Pourquoi ça casse</a></li>
+<li><a href="#principe">Le principe : revenir sans retourner</a></li>
+<li><a href="#moteurs">Les quatre moteurs de boucle</a></li>
+<li><a href="#idle">L'idle vivant</a></li>
+<li><a href="#eviter">Ce qui fait un aller-retour</a></li>
+<li><a href="#ecrire">Écrire le prompt</a></li>
+<li><a href="#orbite">L'orbite 360°</a></li>
+<li><a href="#images">Choisir et lire l'image</a></li>
+<li><a href="#mesure">Mesurer une boucle</a></li>
+<li><a href="#reparer">Réparer sans re-rendre</a></li>
+<li><a href="#resume">Résumé pour chaque case</a></li>
+<li><a href="#exemples">Exemples réussis et ratés</a></li>
+</ol></nav>
+
+<section id="probleme"><h2><span class="n">1</span>Pourquoi ça casse</h2>
+<p>Dans une case « en boucle » (<code>action.loop = true</code>), l'application donne à H3 <b>la même image en première et en dernière
+image</b> (<code>last_frame = first_frame</code>). H3 doit donc finir exactement là où il a commencé. Deux défauts en découlent :</p>
+<ul>
+<li><b>L'aller-retour.</b> Si le texte décrit un geste qui « va quelque part » (lever le bras, marcher vers, se tourner, entrer),
+H3 le fait, puis le <b>défait</b> pour revenir à l'image de départ. La seconde moitié de la vidéo rejoue la première à l'envers :
+on dirait une vidéo passée à reculons. C'est le défaut que David veut éviter à tout prix.</li>
+<li><b>Le freinage au raccord.</b> Pour retomber pile sur l'image de départ, H3 ralentit sur les 10 à 20 premières et dernières
+images. La case « marque un temps » à chaque tour. (L'application sait compenser : section 10.)</li>
+<li><b>La case figée.</b> Si le texte ne donne que des mots mous (« slowly », « small », « stays in place »), H3 choisit la solution
+la plus sûre pour boucler : ne rien bouger. Indice de mouvement <code>motion</code> &lt; 0,3.</li>
+</ul>
+<div class="note">Écrire « loop », « seamless » ou « perfect loop » ne suffit pas : H3 n'en tient pas compte. Ce qui marche, c'est de ne décrire
+que des mouvements dont <b>l'état final est identique à l'état initial sans retour en arrière</b>.</div>
+</section>
+
+<section id="principe"><h2><span class="n">2</span>Le principe : revenir sans retourner</h2>
+<p>Un mouvement boucle bien quand, à la fin, il est <b>déjà reparti</b> : il n'a ni début ni fin. Trois façons d'y arriver, du plus sûr
+au moins sûr :</p>
+<ol>
+<li><b>Un flux continu</b> (fumée, pluie, eau, flamme, écran) : aucun état à « retrouver », il y en a toujours le même.</li>
+<li><b>Un geste cyclique</b> qui tourne toujours dans le même sens ou se répète vite, beaucoup de fois en 5 secondes : la phase au
+raccord n'est pas visible.</li>
+<li><b>Une relève</b> : ce qui sort du champ est remplacé par un identique qui entre ; on ne revient jamais en arrière.</li>
+</ol>
+<p>Et toujours un <b>idle vivant</b> sur chaque personnage. Le plan est ainsi vivant partout, et le moteur n'a qu'à boucler seul.</p>
+</section>
+
+<section id="moteurs"><h2><span class="n">3</span>Les quatre moteurs de boucle</h2>
+<p>Chaque case = un sujet en idle + <b>au moins un moteur</b>. On peut les combiner (« rythme + flux »).</p>
+<div class="tbl"><table>
+<tr><th>Moteur</th><th>Principe</th><th>Exemples qui marchent</th></tr>
+<tr><td><b>flux</b></td><td>un flot continu, sans début ni fin</td><td>fumée ou vapeur qui monte, pluie, eau du robinet, flamme, écran de télévision qui scintille, ampoules en chenillard, voilage qui ondule, poussière dans un rayon, confettis qui tombent, paysage qui défile derrière une vitre, nuages de gauche à droite, tambour de machine à laver</td></tr>
+<tr><td><b>relève</b></td><td>des gens traversent <b>dans un seul sens</b> ; chacun sort du champ (ou passe derrière un objet) et est remplacé par un identique</td><td>figurants qui traversent un couloir au fond, passants au feu rouge, voitures de gauche à droite, un technicien qui s'éloigne dans le noir pendant qu'un autre, même bleu de travail, entre par la gauche. <b>Modèle</b> : la scène des séchoirs (Heures creuses, page 9) : la coiffeuse passe derrière les clientes et revient par l'autre côté</td></tr>
+<tr><td><b>cycle</b></td><td>un geste qui <b>tourne</b> toujours dans le même sens</td><td>touiller un café, essuyer en petits cercles, polir une chaussure, serpillère en huit, câble qui passe d'une main à l'autre, poisson qui tourne dans son sac, horloge, valse en rond</td></tr>
+<tr><td><b>rythme</b></td><td>un geste <b>court</b>, répété vite et souvent (beaucoup de périodes en 5 s)</td><td>mâcher, tapoter, poudrer à petits coups, coudre, peigner d'avant en arrière, hocher la tête en cadence, tambouriner des doigts, feuilleter, respirer profondément en dormant</td></tr>
+</table></div>
+<div class="good"><b>Bon réflexe</b> : dire <i>où va le flux</i> (vers la droite, vers le haut, vers le fond) et dire que <i>chaque élément est remplacé par le suivant</i>
+(« one after another », « leaving on the right as the next arrives from the left »). Jamais « et revient ».</div>
+</section>
+
+<section id="idle"><h2><span class="n">4</span>L'idle vivant</h2>
+<p>David préfère des personnages en idle à des personnages qui font de grands gestes (ils produisent l'aller-retour). Un idle vivant se
+décrit en une phrase et s'ajoute à <b>chaque</b> personnage, même le plus discret :</p>
+<pre><code>keeps a living idle: breathing visibly, blinking, the eyes drifting, the fabric and the hair trembling,
+the weight shifting a touch from one foot to the other.</code></pre>
+<ul>
+<li>Respiration visible : le tissu gonflé (puffer, ballon, plastique) se soulève et retombe à chaque souffle.</li>
+<li>Regard qui dérive, clignements, bouche qui bouge si la personne parle.</li>
+<li>Pour les tissus brillants, nacrés, métalliques : la lumière qui « roule » sur les plis à chaque respiration.</li>
+<li>Pour les visages en gros plan : idle + un flux de lumière (flamme, écran) suffisent.</li>
+</ul>
+<div class="bad">Un personnage « immobile » (<i>stands still</i>, <i>stays in place</i>, <i>does not move</i>) donne une case figée. Dire plutôt <i>keeps a living idle</i>.</div>
+</section>
+
+<section id="eviter"><h2><span class="n">5</span>Ce qui fait un aller-retour</h2>
+<div class="tbl"><table>
+<tr><th>À éviter</th><th>Pourquoi</th><th>À écrire à la place</th></tr>
+<tr><td>un geste ample unique : lever puis baisser les bras, se lever puis se rasseoir</td><td>H3 doit revenir à la pose de départ : il défait le geste</td><td>un idle + un geste court répété ; ou un geste cyclique (« keeps turning… always the same way »)</td></tr>
+<tr><td>un déplacement qui reste dans le champ : marcher vers, s'approcher, traverser puis revenir</td><td>il faut revenir au point de départ</td><td>une relève : le perso sort du champ et un identique entre ; sinon, perso en idle et ce sont les autres qui passent</td></tr>
+<tr><td>« walk in place », marcher sur place</td><td>H3 fait avancer puis reculer le sujet</td><td>un idle ; l'arrière-plan défile en flux</td></tr>
+<tr><td>un changement d'état : remplir, vider, empiler, ouvrir une boîte, signer, poser un objet, s'habiller</td><td>l'état final diffère de l'état initial : retour forcé</td><td>un geste qui ne produit rien de définitif : tapoter, effleurer, feuilleter</td></tr>
+<tr><td>franchir une porte, entrer puis ressortir par le même côté</td><td>aller-retour par construction</td><td>entrer par un côté, sortir par l'autre, remplacé par un identique</td></tr>
+<tr><td>un <b>arc de caméra de 90°</b> en boucle</td><td>la caméra va, puis <b>revient</b></td><td>l'orbite 360° complète, ou une case pilotée au glisser (<code>arc</code> / <code>demi_arc</code> + <code>fige</code>, sans boucle)</td></tr>
+<tr><td>mots mous : <i>slowly, slow, tiny, small, calm, gently, stays in place</i></td><td>H3 choisit de ne rien bouger</td><td>« keeps … », « again and again », « at a steady beat », « clearly visible »</td></tr>
+<tr><td>négations : <i>never, not, without, no one, does not</i></td><td>H3 est distillé, sans prompt négatif : il ajoute ce qu'on nie</td><td>reformuler à l'affirmative</td></tr>
+</table></div>
+<p>Aussi à bannir (règles du projet) : <i>costume, dolly, zoom, cinematic, film grain, 35mm, operator, cameraman</i>. Ne jamais décrire qui filme.</p>
+</section>
+
+<section id="ecrire"><h2><span class="n">6</span>Écrire le prompt (anglais, sans négation)</h2>
+<p>Dans l'application, la case utilise en général la caméra <code>fixe</code> (le tremblé est ajouté par le lecteur : <b>ne l'écris pas</b>)
+et l'action <code>custom</code> avec <code>loop: true</code>. Le champ <code>text</code> de l'action est la phrase à écrire.</p>
+<h3>Gabarit d'un plan animé</h3>
+<pre><code>&lt;Lieu&gt;, &lt;sujet précis&gt; keeps &lt;geste de rythme ou de cycle&gt;, and keeps a living idle: breathing, blinking,
+the fabric trembling. &lt;Moteur de flux ou de relève avec une direction unique : "one after another",
+"always the same way", "leaving on the right as the next arrives from the left"&gt;.
+Everything is already in motion at the very first image and still in motion at the very last image. The shot is
+one seamless forward cycle: each motion keeps flowing in the same direction or repeats at a steady beat, and the
+last image is the first image again. The only sound is the natural sound of the place: &lt;sons&gt;.</code></pre>
+<h3>Règles de rédaction</h3>
+<ul>
+<li>Verbes de boucle : <b>keeps …</b>, <b>again and again</b>, <b>one after another</b>, <b>round and round in the same direction</b>, <b>at a steady beat</b>.</li>
+<li>Un à deux verbes forts par personnage ; tout ce qui n'est pas voulu en mouvement reçoit un idle.</li>
+<li>Décrire chaque personnage précisément (« the man in the pink quilted collar », pas « he »), sinon H3 mélange les sujets.</li>
+<li>Les bruitages décrits dans le texte sont ceux que H3 calcule avec la vidéo (<code>foley</code> moteur <code>h3</code>, gratuit) : « The only sound is the natural sound of the place: … ».</li>
+<li>Pas de dialogue entre guillemets (muet par défaut). Si une bouche parle, voir la section 11 (voix).</li>
+<li>Une case = 5 secondes : ne raconte pas une histoire, décris un état qui tourne.</li>
+</ul>
+</section>
+
+<section id="orbite"><h2><span class="n">7</span>L'orbite 360°</h2>
+<p>La caméra tourne toujours dans le même sens et revient naturellement au départ : c'est la boucle la plus pure. David en veut
+<b>au moins une par page</b>, dans la plus grande case, avec un idle très léger du sujet.</p>
+<ul>
+<li>Caméra <code>orbit360</code>, champ <code>subject</code> = le sujet précis (« the model in the long cream gown with the fan-shaped back »).</li>
+<li>Pour animer le sujet : action <code>custom</code>, <code>loop: true</code>, avec la phrase d'idle ci-dessous (l'application bascule le LoRA 360 à 0,6, marqué expérimental).</li>
+</ul>
+<pre><code>&lt;Sujet&gt; keeps a living idle at the centre of the orbit: breathing visibly, blinking, the fabric and the hair
+trembling. The orbit is already turning at the first image and still turning at the last image, at one even
+speed all the way round.</code></pre>
+<h3>Quelles images pour une orbite</h3>
+<ul>
+<li><b>Un seul sujet</b>, bien détaché du fond, en pied ou en buste, décor simple (podium, studio, salle vide, mur uni).</li>
+<li>À éviter : foules, sujet coupé au bord du cadre, décor très chargé (H3 l'invente en tournant), visage en très gros plan.</li>
+<li>Les fiches de personnage sur fond uni (1 sujet, pied entier) sont idéales.</li>
+<li>L'orbite freine fort aux bords (frein ≈ 0,02) : le réglage <code>ease</code> du mode édition le corrige (section 10).</li>
+</ul>
+<div class="bad">Pas d'« arc de 90° » en boucle : la caméra revient sur ses pas. Pour un arc, utiliser une case pilotée au glisser (sans boucle).</div>
+</section>
+
+<section id="images"><h2><span class="n">8</span>Choisir et lire l'image</h2>
+<p>Avant d'écrire, <b>repère dans l'image le moteur possible</b> : vapeur, écran, ampoules, fenêtre sous la pluie, couloir avec du passage
+au fond, mains occupées à un geste répétitif, objet qui tourne, flamme, eau.</p>
+<ul>
+<li>Bons sujets : personnages assis, appuyés, occupés, en attente. Mauvais : en plein élan, à mi-geste (H3 veut finir le geste).</li>
+<li>Foule sans moteur : le pire cas, la case reste figée. Ajoute un flux (lumières, écran, pluie) ou une relève au fond.</li>
+<li>Visages en gros plan : idle + un flux de lumière ; si la bouche parle, ajoute une voix (section 11).</li>
+<li>Lire l'image avant d'écrire : <i>qui</i> est où, ce qui peut sortir du champ à gauche ou à droite, ce qui est derrière un objet.</li>
+</ul>
+</section>
+
+<section id="mesure"><h2><span class="n">9</span>Mesurer une boucle</h2>
+<p>Après le rendu, chaque variante porte un indice <code>motion</code> (écart moyen entre images successives). Repères : &lt; 0,3 = presque immobile,
+1,5 à 4,5 = une case qui vit bien. Les mesures suivantes détectent les vrais défauts (outil <code>loopcheck.py</code>) :</p>
+<div class="tbl"><table>
+<tr><th>Mesure</th><th>Sens</th><th>Seuil</th></tr>
+<tr><td><b>miroir</b></td><td>ressemblance de la vidéo avec sa propre lecture à l'envers (image <i>t</i> comparée à l'image <i>N−1−t</i>, rapportée à l'écart normal)</td><td>&lt; 0,55 avec une seule excursion = <b>aller-retour</b> ; 0,55–0,7 = suspect ; ≈ 1 = le mouvement avance</td></tr>
+<tr><td><b>frein</b></td><td>vitesse des 12 premières et dernières images / vitesse du milieu</td><td>&lt; 0,5 = H3 freine au raccord (corrigeable)</td></tr>
+<tr><td><b>raccord</b></td><td>écart entre dernière et première image / écart moyen</td><td>&gt; 3 = saut visible</td></tr>
+<tr><td><b>bosses / plateau</b></td><td>forme de l'écart à la première image : une bosse = une excursion unique ; plusieurs = rythme ; plateau = flux stationnaire</td><td>une bosse + miroir bas = aller-retour ; plusieurs bosses = rythme, acceptable</td></tr>
+</table></div>
+<p>Résultats mesurés sur 60 cases : les orbites sont toutes « ok » (miroir ≈ 1) ; les aller-retour viennent de gestes amples, de personnages qui
+franchissent une porte ou « marchent sur place » ; les cases figées sont surtout des plans de foule ou de visages sans moteur.</p>
+</section>
+
+<section id="reparer"><h2><span class="n">10</span>Réparer sans re-rendre</h2>
+<p>Le mode édition de l'aperçu applique des réglages en direct, sans ré-encoder (<code>POST /api/projects/&lt;id&gt;/edit/&lt;case&gt;</code>, l'objet <code>edit</code> remplace l'ancien : relis-le et renvoie-le complété).</p>
+<div class="tbl"><table>
+<tr><th>Clé de <code>edit</code></th><th>Usage pour les boucles</th></tr>
+<tr><td><code>range [début, fin]</code></td><td>couper le <b>temps mort</b> au raccord : retirer les images du freinage tant que le saut reste plus petit qu'un demi-pas de mouvement normal (invisible)</td></tr>
+<tr><td><code>ease {head, tail, gain}</code></td><td>jouer plus vite les images de freinage restantes (gain 1,5 à 3), sans couper : la boucle reste parfaite</td></tr>
+<tr><td><code>xfade</code></td><td>fondu au point de boucle (ex. 6 images) quand une coupe laisse un raccord visible</td></tr>
+<tr><td><code>shake</code></td><td>tremblé caméra calculé sur la position dans la boucle : même valeur au début et à la fin (raccord garanti). <b>Ne jamais l'écrire dans le prompt</b></td></tr>
+<tr><td><code>bounce</code></td><td>aller-retour : à éviter, c'est l'effet qu'on cherche à fuir</td></tr>
+<tr><td><code>speed</code>, <code>frame</code>, <code>grade</code>, <code>start</code></td><td>vitesse, recadrage, couleurs, image de départ</td></tr>
+</table></div>
+<p>Un ralenti net en début et fin de boucle (« marque un temps ») se règle donc par <code>range</code> puis <code>ease</code>. Une case en aller-retour
+ou figée ne se répare pas : il faut re-rendre avec un autre texte (autre moteur) ou une autre graine ; si elle échoue deux fois, changer de moteur
+plutôt qu'insister (passer en flux, en relève, ou en orbite).</p>
+<div class="note">Les cases marquées <code>review = "ok"</code> (pastille verte) ont été validées par David : ne jamais les modifier ni les re-rendre.
+Les <code>"redo"</code> (rouges) se reprennent en premier. Ne jamais passer une case en <code>"ok"</code> toi-même.</div>
+</section>
+
+<section id="resume"><h2><span class="n">11</span>Résumé à appliquer à chaque case</h2>
+<ol>
+<li><b>Lire l'image</b> : repérer le moteur possible (flux, relève, cycle, rythme).</li>
+<li><b>Chaque personnage</b> reçoit un idle vivant ; au plus un ou deux verbes forts par personnage.</li>
+<li><b>Au moins un moteur</b> décrit avec une direction unique ou un battement régulier, jamais « et revient ».</li>
+<li><b>Aucun état qui change</b> (rien ne se remplit, ne se vide, ne s'achève).</li>
+<li><b>Phrase de boucle</b> à la fin : « Everything is already in motion at the very first image and still in motion at the very last image… ».</li>
+<li><b>Mots interdits</b> : slowly, slow, tiny, small, calm, gently, stays in place, never, not, without, no one + costume, dolly, zoom, cinematic, operator.</li>
+<li><b>Caméra</b> : <code>fixe</code> (le tremblé est dans le lecteur) ; pas d'arc de 90° en boucle ; l'orbite 360° pour la plus grande case de la page.</li>
+<li><b>Bruitages</b> : une phrase « The only sound is the natural sound of the place: … » (H3 les calcule, gratuit).</li>
+<li><b>Voix</b> : si une bouche bouge pour parler (lip-sync), la case doit avoir une voix, même si ça dit n'importe quoi. Les maximes enregistrées de David (<code>Voix off\maximes\maxime-NN.mp3</code>, importées en <code>voice</code> avec <code>mode: "file"</code>) marchent très bien : une courte phrase de mode, dite une fois par survol. Importer avec <code>&amp;force=1</code> si la maxime sert déjà ailleurs.</li>
+<li><b>Musique</b> : une musique par page (son global), choisie dans la bibliothèque <code>Music-score\bizarre</code> ; des bruitages et quelques phrases laconiques dans certaines cases.</li>
+<li><b>Contrôler</b> : motion, miroir, frein, raccord ; réparer par <code>range</code> et <code>ease</code> ; re-rendre les aller-retour et les figées avec un autre moteur.</li>
+</ol>
+</section>
+
+<section id="exemples"><h2><span class="n">12</span>Exemples réussis et ratés</h2>
+<h3>À écrire</h3>
+<div class="good"><b>Relève + rythme (séchoirs)</b> :<br>
+<code>At the hair salon the women under the silver dryer hoods keep turning pages of their magazines; the man in the pale puffer and the man in the cream feather outfit keep nodding their heads under the dryers; the hairdresser keeps walking along the line and checking the curlers.</code></div>
+<div class="good"><b>Cycle + flux</b> :<br>
+<code>At the sink the man in the gold quilted outfit keeps turning a cup under the running tap, always in the same direction, the water pouring in a continuous stream; the man in the plaid shirt beside him keeps a living idle, breathing, blinking.</code></div>
+<div class="good"><b>Rythme + flux (vapeur)</b> :<br>
+<code>In the canteen the man in the pale pink quilted collar keeps stirring his coffee, the spoon going round and round in the same direction; steam keeps rising from the cup; the television on the wall keeps flickering; he keeps a living idle, eyes lowered, breathing.</code></div>
+<div class="good"><b>Relève seule (couloir)</b> :<br>
+<code>In the green corridor two fidèles sit on the plastic chairs keeping a living idle; down the corridor a steady stream of crew members keeps coming toward us and passing out of the frame on the right while new ones keep appearing at the far end.</code></div>
+<h3>À ne pas écrire</h3>
+<div class="bad"><code>The man slowly raises his arm to greet her, then lowers it.</code> → aller-retour garanti (geste ample + « slowly »).</div>
+<div class="bad"><code>He walks in place down the corridor.</code> → H3 avance puis recule le sujet.</div>
+<div class="bad"><code>The woman stays in place and does not move.</code> → case figée (« stays in place », négation).</div>
+<div class="bad"><code>The camera arcs ninety degrees around the model.</code> (en boucle) → la caméra revient ; utiliser l'orbite 360°.</div>
+<div class="bad"><code>The cup fills with coffee.</code> → un état qui change ne reviendra pas à l'identique.</div>
+</section>
+
+<p style="color:var(--muted)">Voir aussi : <code>PILOTAGE-CLAUDE.html</code> (API, mode édition, pastilles de suivi), <code>ALIVE-COMICS-TOPO.html</code> (l'application), le skill
+<code>boucle-parfaite</code> et les outils <code>loopcheck.py</code> / <code>loopfix.py</code> (dans <code>Mode-Cringe-Telenovela\alive-comics-les-fideles</code>).</p>
+</div>
+</body>
+</html>
