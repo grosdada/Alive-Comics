@@ -82,24 +82,40 @@ class App {
     const bookList = h("div.books", books.length ? books.map(b => this.bookRow(b, books, projects, open.has(b.id)))
                                                  : h("p.muted", "Aucun livre pour l'instant."));
     const allBooks = (on) => { for (const b of books) this.bookOpen(b.id, on); this.home(); };
+    // sections repliables (flèche) : on atteint les livres sans faire défiler toutes les planches
+    const section = (key, title, countEl, tools, actions, body) => {
+      const chev = h("button.icon.sec-chev");
+      const sync = () => {
+        const open = pref("ac-sec-" + key, "1") === "1";
+        chev.textContent = open ? "▾" : "▸";
+        chev.title = open ? "Replier" : "Déplier";
+        body.hidden = !open;
+        for (const t of tools) t.hidden = !open;
+      };
+      const toggle = () => { setPref("ac-sec-" + key, pref("ac-sec-" + key, "1") === "1" ? "0" : "1"); sync(); };
+      chev.addEventListener("click", toggle);
+      const head = h("div.home-tools", chev, h("h2.sec-title", { on: { click: toggle } }, title), countEl, h("span.sp"), ...tools, ...actions);
+      sync();
+      return [head, body];
+    };
+    const newPlanche = h("button.primary", { on: { click: () => this.newProjectDialog() } }, "+ Nouvelle planche");
+    const newBook = h("button", { on: { click: async () => {
+      const id = Math.random().toString(36).slice(2, 8);
+      books.push({ id, title: "Nouveau livre", pages: [] });
+      this.bookOpen(id, true);
+      setPref("ac-sec-livres", "1");
+      await put("books", books); this.home();
+    } } }, "+ Nouveau livre");
+    const bookTools = [h("button.mini", { on: { click: () => allBooks(true) } }, "Tout déplier"),
+                       h("button.mini", { on: { click: () => allBooks(false) } }, "Tout replier")];
     this.root.append(h("main.home",
-      h("div.home-tools", h("h2", "Planches"), count, h("span.sp"), search, sortSel, seg), holder,
-      h("div.home-tools", h("h2", "Livres"), h("span.muted", String(books.length)), h("span.sp"),
-        h("button.mini", { on: { click: () => allBooks(true) } }, "Tout déplier"),
-        h("button.mini", { on: { click: () => allBooks(false) } }, "Tout replier"),
-        h("button", { on: { click: async () => {
-          const id = Math.random().toString(36).slice(2, 8);
-          books.push({ id, title: "Nouveau livre", pages: [] });
-          this.bookOpen(id, true);
-          await put("books", books); this.home();
-        } } }, "+ Nouveau livre")),
-      bookList));
+      ...section("planches", "Planches", count, [search, sortSel, seg], [newPlanche], holder),
+      ...section("livres", "Livres", h("span.muted", String(books.length)), bookTools, [newBook], bookList)));
     draw();
   }
 
   projectGrid(list) {
     return h("div.cards",
-      h("button.card.new", { on: { click: () => this.newProjectDialog() } }, h("span.plus", "+"), h("b", "Nouvelle planche")),
       list.map(p => h("a.card", { href: "#p=" + p.id, "data-pid": p.id },
         h("div.thumb", p.thumb ? h("img", { src: p.thumb + "?t=" + Math.round(p.updated), loading: "lazy" })
                                : h("div.noimg", { style: ratio(p) }), h("span.calc")),
@@ -118,7 +134,7 @@ class App {
         h("span.muted", p.created ? fmtDate(p.created) : "—"),
         h("span.muted", fmtDate(p.updated)),
         h("span.muted.lbooks", inBooks(p.id).join(", ") || "—"))),
-      h("button.prow.new", { on: { click: () => this.newProjectDialog() } }, "+ Nouvelle planche"));
+      list.length ? null : h("p.muted", "Aucune planche."));
   }
 
   // pastilles « en calcul » (clignote) / « en file » sur les planches et les livres de l'accueil

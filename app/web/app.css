@@ -240,3 +240,8 @@ audio { width: 100%; height: 34px; }
 .stars i.half { background: linear-gradient(90deg, var(--accent) 50%, #4a4a4a 50%); -webkit-background-clip: text; background-clip: text; color: transparent; }
 .card .stars { margin: 2px 0 1px; }
 .bpage .stars { font-size: 12px; }
+/* accueil : sections repliables */
+.home-tools .sec-chev { font-size: 16px; width: 30px; justify-content: center; padding: 2px 0; }
+.home-tools .sec-title { cursor: pointer; user-select: none; }
+.home-tools .sec-title:hover { color: var(--accent); }
+main.home > div[hidden], .home-tools [hidden] { display: none !important; }
