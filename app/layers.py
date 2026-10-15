@@ -4,23 +4,27 @@ Pourquoi : une seule image tordue par une seule carte de profondeur se replie au
 n'a rien a montrer derriere eux. Ici, chaque calque a sa propre profondeur, sans rupture, et c'est son alpha qui gere
 qui cache quoi. Le lecteur dessine les calques du fond vers l'avant (player/alive-player.js).
 
-Version 2 (detourage de precision) : une tache « couches » de la file, sur un PC ComfyUI qui a SAM 3.1, BiRefNet et
-Qwen-Image-Edit 2509 (voir docs/INSTALL-MODELES-RELIEF.md) :
-1. ComfyUI : SAM 3.1 (« person ») donne un masque exact par personne ; BiRefNet donne le bord doux (cheveux) et les
-   objets tenus (une valise accrochee a la main appartient a la personne).
+Une tache « couches » de la file, sur un PC ComfyUI qui a SAM 3.1, BiRefNet, Qwen-Image-Edit 2509 et LaMa (voir
+docs/INSTALL-MODELES-RELIEF.md) :
+1. ComfyUI : SAM 3.1 (« person ») donne un masque exact par personne ; BiRefNet voit les objets ; SAM 3.1 cherche aussi
+   telephones, ecrans et mains. Un objet suit une personne s'il touche une de ses mains (valise, livre, telephone) ou
+   s'il borde son contour (un bout de costume) ; les gens affiches sur un ecran ne sont pas des sujets.
 2. Ici : profondeur de la photo (Depth Pro d'Apple si present, sinon Depth Anything V2 Small). Sujets = les personnes
    assez grandes ; foule (sujets sur plus de 45 % de la case) : seulement le premier plan net (les plus proches, bien
    separes du reste en profondeur), le reste de la foule reste dans le decor ; aucun premier plan net : nappe simple.
-3. Une forme neutre (magenta) est peinte a la place des sujets : forme convexe (peinte en silhouette, Qwen redessinait
-   des jambes ou des gens) ; foule : silhouette elargie et arrondie, Qwen y prolonge les gens de derriere.
-4. ComfyUI : Qwen-Image-Edit remplit la forme avec le decor cache, et SAM 3.1 controle la plaque dans le meme graphe :
-   une personne inventee dans la forme (pas une personne de la photo prolongee) -> autre graine, puis LaMa (flou mais
-   sans invention).
-5. Ici : groupes devant / derriere par ecart de profondeur, plaque recalee, lumiere prolongee sous les sujets, couleurs
-   des sujets sans lisere, sujets en cartes a peine bombees, profondeur du fond calculee sur la plaque.
+3. Decor cache (voir PLATE) : LaMa sur la place des sujets (prolonge les couleurs, n'invente rien), et Qwen-Image-Edit
+   sur une forme neutre (magenta) peinte a leur place : forme convexe (peinte en silhouette, Qwen redessinait des
+   jambes) ; foule : silhouette elargie, Qwen y prolonge les gens de derriere. SAM 3.1 controle la plaque Qwen (personne
+   inventee, photo recomposee, magenta restant -> autre graine, puis LaMa).
+4. Ici, theatre de papier (version 3, demande de David le 16/10) : chaque groupe (devant / derriere par ecart de
+   profondeur) est une CARTE PLATE au contour net (masque SAM, trous bouches, 1 pixel en dedans, adouci d'un pixel,
+   couleurs de la photo) ; le fond est un PLAN (ajuste sur la profondeur de la photo hors des sujets) ; le decor
+   reconstruit ne remplace la photo que sous les sujets et sur 3-4 pixels autour. Rien ne s'etire, ni dans un
+   personnage ni autour de lui, et aucun contour ne bouge.
 Au repos, l'image est celle de la photo : l'IA ne sert que DANS la place des sujets.
 
-Fichiers : projects/<id>/layers/<case>/ : raw/ (sam_XX.png, birefnet.png, depth.npy, painted.png, plate.png), bg.jpg (fond sans
+Fichiers : projects/<id>/layers/<case>/ : raw/ (sam_XX.png, prop_*.png, hand_*.png, birefnet.png, depth.npy,
+painted.png, plate.png = Qwen, lama.png = LaMa), bg.jpg (fond sans
 les sujets), l1.webp et l2.webp (sujets RGBA, du plus loin au plus proche), ld.png (profondeurs : R = fond, G = l1,
 B = l2, demi-resolution), meta.json (n calques, profondeurs, plan net conseille, controles).
 """
@@ -30,10 +34,23 @@ import time
 
 from . import depth, store
 
-VERSION = 2
+VERSION = 3                    # 3 : cartes plates a contour net, fond en plan (16/10/2026)
 SIDE = "C"                     # tache « couches » dans la file de rendus
 SAM_PROMPT = "person:20"       # SAM 3.1 : jusqu'a 20 personnes, un masque chacune
+# objets tenus que BiRefNet rate (un telephone devant un sujet plus saillant ; le gros telephone d'un invite au premier
+# plan sort en « screen », pas en « phone »). Objet absent : SAM rend souvent un faux objet (« giraffe » -> un doigt,
+# « screen » -> 98 % de la case), d'ou les garde-fous de _subjects ; parfois rien du tout (ComfyUI en erreur, voir
+# comfy.no_detection : on passe a l'objet suivant). Un ecran porte aussi les gens qu'il affiche (pas des sujets).
+PROPS = (("phone", "phone:10"), ("screen", "screen:5"))
+HANDS = "hand:20"              # un objet de SAM ne suit une personne que s'il touche une de ses mains (le panneau d'une
+                               # cuisiniere juste derriere un homme sortait en « screen » a sa profondeur)
+PROP_MAX = 0.05                # un objet tenu couvre 5 % de la case au plus (le gros telephone de la planche 15 : 3 % ;
+                               # faux « ecran » rendu par SAM sur une case sans ecran : 98 %)
 MIN_AREA = 0.004               # un sujet couvre au moins 0,4 % de la case (les silhouettes lointaines restent au decor)
+# decor cache derriere les sujets : "qwen" (Qwen-Image-Edit invente un decor plausible, parfois faux : un trou noir),
+# "lama" (LaMa prolonge les couleurs autour, n'invente rien ; on n'en voit qu'une bande etroite au bord du sujet),
+# "hybride" (LaMa pres du contour, la ou la parallaxe le montre, Qwen plus loin). Les deux plaques sont toujours calculees.
+PLATE = "qwen"
 CROWD = 0.45                   # mesure : bonnes cases 14-37 % de sujets, foules 54-67 %
 FRONT_MAX = 0.35               # foule : premier plan detache sur 35 % de la case au plus...
 FRONT_GAP = 0.08               # ... et seulement s'il est net (ecart de profondeur avec la personne suivante)
@@ -182,13 +199,6 @@ def _fill_plate(im, P, hole):
     return im * (1 - hole[..., None]) + Pc * hole[..., None]
 
 
-def _decontam(img, a, bg):
-    """Couleur du sujet sans le fond melange dans ses bords : I = aF + (1 - a)B, avec B connu."""
-    import numpy as np
-    aa = np.clip(a, 0.05, 1)[..., None]
-    return np.clip((img - (1 - aa) * bg) / aa, 0, 1)
-
-
 def _extend(F, a):
     """Couleurs prolongees sous l'alpha nul (le filtrage du lecteur ne ramene pas de noir au bord du sujet)."""
     import numpy as np
@@ -207,49 +217,17 @@ def _extend(F, a):
     return out * (1 - k) + F * k
 
 
-def _subject_depth(d, a_core, a_full=None):
-    """Profondeur d'un sujet : sa carte lissee dans la silhouette, prolongee tout autour (bord stable au rendu)."""
-    import cv2
-    import numpy as np
-    inside = (a_core > 0.5).astype(np.float32)
-    if inside.sum() < 10:
-        return np.zeros_like(d)
-    ds = cv2.GaussianBlur(d * inside, (0, 0), 6)
-    w = cv2.GaussianBlur(inside, (0, 0), 6)
-    ds = np.where(w > 1e-3, ds / np.maximum(w, 1e-3), 0).astype(np.float32)
-    med = float(np.median(ds[inside > 0]))
-    # un sujet bouge d'un bloc, comme une carte de pop-up a peine bombee : la profondeur estimee a l'interieur d'une
-    # personne est peu fiable (un pli de cape « plus loin » que le corps dechirerait le calque)
-    ds = med + 0.25 * (cv2.GaussianBlur(ds, (0, 0), 10) - med)
-    # prolongement (hors du sujet et sous sa partie cachee) : valeur du pixel du sujet le plus proche
-    have = inside > 0
-    _, near = cv2.distanceTransformWithLabels((~have).astype(np.uint8), cv2.DIST_L2, 5, labelType=cv2.DIST_LABEL_PIXEL)
-    filled = ds[have][np.clip(near - 1, 0, have.sum() - 1)]
-    filled[have] = ds[have]
-    del a_full
-    return depth.bound_slope(cv2.GaussianBlur(filled.astype(np.float32), (0, 0), 3))
-
-
-def _fit_depth(d_plate, d_ref, keep):
-    """Profondeur d'une plaque ramenee a l'echelle de la photo (echelle + decalage, sur les pixels inchanges)."""
-    import numpy as np
-    x, y = d_plate[keep].ravel(), d_ref[keep].ravel()
-    if x.size < 500:
-        return depth.normalize(d_plate)
-    A = np.stack([x, np.ones_like(x)], 1)
-    (s, t), *_ = np.linalg.lstsq(A, y, rcond=None)
-    return np.clip(d_plate * s + t, 0, 1).astype(np.float32)
-
-
 # ------------------------------------------------------------------ sujets (SAM 3.1 + BiRefNet)
-def _sam_masks(rd, W, H):
-    """Masques SAM 3.1 ranges dans rd (un par personne, petites comprises), doublons fusionnes."""
+def _sam_masks(rd, W, H, pattern="sam_*.png", max_area=1.0):
+    """Masques SAM 3.1 ranges dans rd (un par personne, petites comprises ; ou un par objet), doublons fusionnes. Plus
+    grands que max_area (part de la case) : ignores avant la fusion (un faux « ecran » de toute la case avalerait sinon
+    les vrais telephones)."""
     import numpy as np
     from PIL import Image
     masks = []
-    for f in sorted(rd.glob("sam_*.png")):
+    for f in sorted(rd.glob(pattern)):
         m = np.asarray(Image.open(f).convert("L").resize((W, H), Image.NEAREST)) > 127
-        if m.sum() < 50:
+        if m.sum() < 50 or m.mean() > max_area:
             continue
         for j, o in enumerate(masks):                     # SAM rend parfois deux fois la meme personne : on fusionne
             inter = int((m & o).sum())
@@ -261,29 +239,40 @@ def _sam_masks(rd, W, H):
     return masks
 
 
-def _subjects(im, d):
-    """Sujets de la case a partir des sorties ComfyUI rangees dans raw/ -> ([{mask, soft, region, area}], tous les
-    masques de personnes). mask = masque exact de SAM 3.1 ; region = la personne + ce qu'elle tient (objets vus par
-    BiRefNet qui ne touchent qu'elle) ; soft = alpha doux (BiRefNet) limite a la region, sans les autres personnes, coeur de la
-    personne toujours opaque. Sujet = personne sur MIN_AREA de la case au moins."""
+def _subjects(im, d, d_im):
+    """Sujets de la case a partir des sorties ComfyUI rangees dans raw/ -> ([{mask, soft, region, area, held}],
+    personnes de la photo, personnes affichees sur un ecran). mask = masque exact de SAM 3.1 ; region = la personne +
+    ce qu'elle tient ; soft = alpha net de la region (sans les autres personnes), voir _sharp.
+    Sujet = personne sur MIN_AREA de la case au moins. d_im : profondeur 0-1 de la photo (garde-fou des objets)."""
     import cv2
     import numpy as np
     from PIL import Image
     H, W = im.shape[:2]
     rd = d / "raw"
-    people = _sam_masks(rd, W, H)
+    props = _sam_masks(rd, W, H, "prop_*.png", PROP_MAX)
+    k = lambda r: cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (r, r))  # noqa: E731
+    # une « personne » presque toute dans un ecran est une image affichee (les maries filmes, sur l'ecran du telephone
+    # d'un invite) : elle suit l'objet, ce n'est pas un sujet
+    grown = [cv2.dilate(q.astype(np.uint8), k(5)) > 0 for q in props]
+    people, shown = [], []
+    for m in _sam_masks(rd, W, H):
+        flat = any((m & g).sum() >= 0.7 * m.sum() and m.sum() < 0.6 * q.sum() for q, g in zip(props, grown))
+        (shown if flat else people).append(m)
     masks = [m for m in people if m.mean() >= MIN_AREA]
     bn = rd / "birefnet.png"
     alpha = np.asarray(Image.open(bn).convert("L").resize((W, H), Image.BILINEAR), np.float32) / 255 if bn.exists() \
         else np.zeros((H, W), np.float32)
-    k = lambda r: cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (r, r))  # noqa: E731
-    # objets tenus : ce que BiRefNet voit en plus des personnes (valise, verre, telephone), objet par objet. Un objet va a
-    # la personne qu'il touche s'il ne touche qu'elle et reste petit devant elle (mesure : valise 16 % de la taille de
-    # l'homme, telephones 1-3 %) ; un gateau touche par quatre invites ou un banc (92 %) restent au decor.
+    near = [cv2.dilate(o.astype(np.uint8), k(15)) > 0 for o in people]
+    hands = np.any(_sam_masks(rd, W, H, "hand_*.png", PROP_MAX) or [np.zeros((H, W), bool)], axis=0)
+    in_hand = lambda x, j: (cv2.dilate(x.astype(np.uint8), k(11)) > 0)[hands & near[j]].sum() >= 20  # noqa: E731
+    # objets vus par BiRefNet en plus des personnes, objet par objet. Un objet va a la personne qu'il touche s'il ne
+    # touche qu'elle, reste petit devant elle (valise 16 % de la taille de l'homme, telephones 1-3 % ; un banc 92 % reste
+    # au decor) ET touche une de ses mains (valise, bouteille, epluchures) ; ou si c'est un liseré colle a son contour
+    # (un bout de costume oublie par SAM). Un bout de saladier qui touche le bras d'une femme reste au decor (sinon il
+    # se dechire en bougeant avec elle).
     anyone = cv2.dilate(np.any(people or [np.zeros((H, W), bool)], axis=0).astype(np.uint8), k(5)) > 0
     n, lab, stats, _ = cv2.connectedComponentsWithStats(((alpha > 0.5) & ~anyone).astype(np.uint8))
-    near = [cv2.dilate(o.astype(np.uint8), k(15)) > 0 for o in people]
-    owner = {}
+    owner, held = {}, {}
     for c in range(1, n):
         if stats[c, 4] < 30:
             continue
@@ -293,18 +282,100 @@ def _subjects(im, d):
             continue
         j = int(np.argmax(touch))
         alone = sum(touch) - touch[j] < 0.2 * touch[j]
-        if alone and stats[c, 4] <= 0.35 * people[j].sum():
+        rim = (comp & (cv2.dilate(people[j].astype(np.uint8), k(13)) > 0)).sum() >= 0.8 * stats[c, 4]
+        if alone and stats[c, 4] <= 0.35 * people[j].sum() and (rim or in_hand(comp, j)):
             owner.setdefault(j, []).append(comp)
+    # objets de SAM (telephones, ecrans) : a la personne qu'ils touchent le plus, s'ils touchent une de ses mains, sont
+    # au moins aussi proches qu'elle (une fenetre derriere quelqu'un est plus loin) et pas trop grands (4 fois la partie
+    # visible d'une personne coupee par le bord, comme une main qui tient un telephone ; sinon sa taille)
+    zof = lambda x: float(np.median(d_im[x])) if x.any() else 0.0  # noqa: E731
+    z_people = [zof(cv2.erode(o.astype(np.uint8), k(7)) > 0) or zof(o) for o in people]
+    cut = [bool(o[0].any() or o[-1].any() or o[:, 0].any() or o[:, -1].any()) for o in people]
+    for q in props:
+        touch = [int((q & z).sum()) for z in near]
+        if not touch or max(touch) == 0:
+            continue
+        inside = [int((q & o).sum()) for o in people]
+        j = max(range(len(people)), key=lambda i: (inside[i], touch[i]))   # recouvrement reel d'abord (egalites)
+        if inside[j] > 0.5 * q.sum():
+            continue                                      # deja dans le masque de quelqu'un : rien a ajouter
+        if not in_hand(q, j):
+            continue                                      # ne touche aucune de ses mains : pas tenu
+        if zof(q) >= z_people[j] - 0.08 and q.sum() <= (4.0 if cut[j] else 1.0) * people[j].sum():
+            held.setdefault(j, []).append(q)
     out = []
-    for i, m in enumerate(masks):
-        region = m.copy()
-        for comp in owner.get(next(j for j, o in enumerate(people) if o is m), []):
+    grow_prop = k(2 * max(4, round(0.011 * W)) + 1)       # SAM « screen » ne prend que l'ecran : cadre et coque du
+    #                                                        telephone (sinon ils restent au fond, un contour qui bouge)
+    for m in masks:
+        j = next(i for i, o in enumerate(people) if o is m)
+        others = np.any([o for o in people if o is not m] or [np.zeros_like(m)], axis=0)
+        core = m.copy()
+        for q in held.get(j, []):
+            core |= (cv2.dilate(q.astype(np.uint8), grow_prop) > 0) & ~others
+        region = core.copy()
+        for comp in owner.get(j, []):
             region |= comp
-        others = np.any([o for o in people if o is not m] or [np.zeros_like(m)], axis=0) & ~region
-        zone = (cv2.dilate(region.astype(np.uint8), k(9)) > 0) & ~others      # jamais un bout du voisin
-        soft = np.maximum(alpha * zone, (cv2.erode(m.astype(np.uint8), k(5)) > 0).astype(np.float32))
-        out.append({"mask": m, "region": region, "soft": soft.astype(np.float32), "area": float(m.mean())})
-    return out, people
+        objs = region & ~m
+        if objs.any():                                    # pas de jour entre la main et ce qu'elle tient (le fond s'y
+            near_objs = cv2.dilate(objs.astype(np.uint8), k(15)) > 0      # voyait bouger comme un contour)
+            closed = cv2.morphologyEx(region.astype(np.uint8), cv2.MORPH_CLOSE, k(9)) > 0
+            region |= closed & near_objs & ~others
+        region = _fill_holes(region, alpha) & ~others
+        others &= ~region
+        out.append({"mask": m, "region": region, "soft": _sharp(region & ~others), "area": float(m.mean()),
+                    "held": len(held.get(j, []))})
+    return out, people, shown
+
+
+def _fill_holes(region, alpha):
+    """Trous du masque bouches (SAM laisse des trous dans un costume blanc ; le contour flou d'avant les cachait, le
+    contour net les montre en taches sombres qui bougent) : un trou ferme est bouche si BiRefNet y voit le sujet
+    (alpha moyen > 0,5) ou s'il est minuscule ; le fond vu entre un bras et le corps reste un trou."""
+    import cv2
+    import numpy as np
+    H, W = region.shape
+    n, lab, st, _ = cv2.connectedComponentsWithStats((~region).astype(np.uint8), connectivity=4)
+    if n <= 2:
+        return region
+    mean_a = np.bincount(lab.ravel(), weights=alpha.ravel(), minlength=n) / np.maximum(st[:, 4], 1)
+    edge = (st[:, 0] == 0) | (st[:, 1] == 0) | (st[:, 0] + st[:, 2] >= W) | (st[:, 1] + st[:, 3] >= H)
+    fill = ~edge & ((mean_a > 0.5) | (st[:, 4] < 30))
+    fill[0] = False
+    return region | fill[lab]
+
+
+def _sharp(region):
+    """Alpha net d'une region : 1 pixel en dedans (jamais de liseré du fond qui partirait avec le sujet), bord adouci
+    d'un pixel (pas d'escalier). Le pixel retire au bord est dans le trou de la plaque : remplace par le decor."""
+    import cv2
+    import numpy as np
+    m = cv2.erode(region.astype(np.uint8), np.ones((3, 3), np.uint8)).astype(np.float32)
+    return np.clip(cv2.GaussianBlur(m, (0, 0), 0.7), 0, 1).astype(np.float32)
+
+
+def _plane(d, keep):
+    """Plan (sol ou mur) ajuste sur la profondeur d aux pixels keep, sans tenir compte des ecarts (3 passes, residus
+    au-dela de 2,5 ecarts robustes ecartes) -> carte H x W. Un plan n'a aucun pli ni bosse : le fond ne s'etire pas
+    localement, il garde seulement la perspective d'ensemble."""
+    import numpy as np
+    H, W = d.shape
+    ys, xs = np.nonzero(keep)
+    if xs.size < 500:
+        return np.full((H, W), float(np.median(d)), np.float32)
+    step = max(1, xs.size // 40000)
+    xs, ys = xs[::step], ys[::step]
+    z = d[ys, xs].astype(np.float64)
+    A = np.stack([np.ones_like(z), xs / W, ys / H], 1)
+    w = np.ones_like(z)
+    coef = np.array([np.median(z), 0.0, 0.0])
+    for _ in range(3):
+        if w.sum() < 100:
+            break
+        coef, *_ = np.linalg.lstsq(A * w[:, None], z * w, rcond=None)
+        r = np.abs(A @ coef - z)
+        w = (r < 2.5 * (1.4826 * np.median(r) + 1e-4)).astype(np.float64)
+    yy, xx = np.mgrid[0:H, 0:W].astype(np.float32)
+    return np.clip(coef[0] + coef[1] * (xx + 0.5) / W + coef[2] * (yy + 0.5) / H, 0, 1).astype(np.float32)
 
 
 def _depth(im, d):
@@ -435,16 +506,35 @@ def compute(server, pid, panel_id, spec, progress=print, cancelled=lambda: False
         comfy.download(server, it, rd / f"sam_{i:02d}.png")
     for it in _images(e, "10"):
         comfy.download(server, it, rd / "birefnet.png")
-
-    timing["segment"] = round(time.time() - t0, 1)
     im = np.asarray(Image.open(src).convert("RGB"), np.float32) / 255
     H, W = im.shape[:2]
-    subs, people = _subjects(im, d)
+    if not any(m.mean() >= MIN_AREA for m in _sam_masks(rd, W, H)):   # ni objets ni profondeur : rien a detacher
+        return build(pid, panel_id, dict(spec, skip="aucune personne assez grande dans la case"))
+    for key, prompt in PROPS:                             # objets tenus que BiRefNet ne voit pas
+        try:
+            e = _run(server, comfy.sam_graph(name, f"{prefix}_{key}", prompt), cancelled)
+        except comfy.ComfyError as exc:
+            if not comfy.no_detection(exc):
+                raise
+            continue
+        for i, it in enumerate(_images(e, "6")):
+            comfy.download(server, it, rd / f"prop_{key}_{i:02d}.png")
+    try:
+        e = _run(server, comfy.sam_graph(name, f"{prefix}_hand", HANDS), cancelled)
+        for i, it in enumerate(_images(e, "6")):
+            comfy.download(server, it, rd / f"hand_{i:02d}.png")
+    except comfy.ComfyError as exc:                       # aucune main vue : aucun objet de SAM ne sera rattache
+        if not comfy.no_detection(exc):
+            raise
+
+    timing["segment"] = round(time.time() - t0, 1)
+    progress("profondeur")
+    d_im = _depth(im, d)
+    timing["depth"] = round(time.time() - t0 - timing["segment"], 1)
+    subs, people, shown = _subjects(im, d, d_im)
     if not subs:
         return build(pid, panel_id, dict(spec, skip="aucune personne assez grande dans la case"))
-    progress("profondeur")
-    subs, crowd, _ = _plan(subs, _depth(im, d))
-    timing["depth"] = round(time.time() - t0 - timing["segment"], 1)
+    subs, crowd, _ = _plan(subs, d_im)
     if not subs:
         return build(pid, panel_id, spec)                 # verdict « foule » ecrit par build
     painted, blob = _painted(im, subs, crowd)
@@ -456,6 +546,9 @@ def compute(server, pid, panel_id, spec, progress=print, cancelled=lambda: False
     for m in people:
         if not any(m is s["mask"] for s in subs):
             known |= m.astype(np.uint8)
+    for m in shown:                                       # affiches sur un ecran reste au decor (pas un telephone emporte)
+        if not any((m & s["region"]).sum() > 0.5 * m.sum() for s in subs):
+            known |= m.astype(np.uint8)
     known = cv2.dilate(known, np.ones((9, 9), np.uint8)) > 0
 
     # controle de la plaque. Case normale : une personne dans la forme qui n'est pas une personne de la photo est
@@ -463,7 +556,20 @@ def compute(server, pid, panel_id, spec, progress=print, cancelled=lambda: False
     # le sujet redessine a sa place est une faute (score = recouvrement avec son masque).
     limit = 0.6 if crowd else 0.3
     tries = []
-    for attempt in range(3):                              # plaque : Qwen ; une personne inventee -> autre graine
+    mode = spec.get("plate") or PLATE
+    if lama:                                              # LaMa sur la place des sujets (~1 s) : plaque « lama »
+        progress("décor caché (LaMa)")
+        region = np.any([s["region"] for s in subs], axis=0).astype(np.uint8)
+        r = max(5, round(0.012 * W))
+        hole = cv2.dilate(region, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * r + 1, 2 * r + 1)))
+        Image.fromarray(hole * 255).save(rd / "hole.png")
+        try:
+            g = comfy.lama_graph(name, comfy.upload(server, rd / "hole.png", sub), prefix + "_lama")
+            e = _run(server, g, cancelled)
+            comfy.download(server, _images(e, "5")[0], rd / "lama.png")
+        except comfy.ComfyError as exc:
+            tries.append({"lama": False, "error": str(exc)[:200]})
+    for attempt in range(0 if mode == "lama" and (rd / "lama.png").exists() else 3):   # Qwen ; inventee -> autre graine
         progress("décor caché (Qwen-Image-Edit)" + (f", essai {attempt + 1}" if attempt else ""))
         g, node = comfy.fill_graph(pname, FILL_PROMPT_CROWD if crowd else FILL_PROMPT, seed + 101 * attempt,
                                    prefix + "_fill", fast)
@@ -491,22 +597,17 @@ def compute(server, pid, panel_id, spec, progress=print, cancelled=lambda: False
         drift, magenta = _plate_faults(im, rd / f"plate_{attempt}.png", blob)
         if drift > 0.06 or magenta > 0.05:                # photo recomposee ou forme mal remplie : essai rate
             bad = 1.0
-        tries.append({"seed": seed + 101 * attempt, "invented": round(bad, 2), "drift": round(drift, 3),
+        tries.append({"attempt": attempt, "seed": seed + 101 * attempt, "invented": round(bad, 2), "drift": round(drift, 3),
                       "magenta": round(magenta, 3)})
         if bad < limit:
             break
-    best = min(range(len(tries)), key=lambda i: tries[i]["invented"])
-    (rd / f"plate_{best}.png").replace(rd / "plate.png")
-    if tries[best]["invented"] >= limit and lama:         # toujours quelqu'un d'invente : LaMa (flou, sans invention)
-        progress("décor caché (LaMa)")
-        try:
-            Image.fromarray((blob * 255).astype(np.uint8)).save(rd / "hole.png")
-            g = comfy.lama_graph(name, comfy.upload(server, rd / "hole.png", sub), prefix + "_lama")
-            e = _run(server, g, cancelled)
-            comfy.download(server, _images(e, "5")[0], rd / "plate.png")
-            tries.append({"lama": True})
-        except comfy.ComfyError as exc:                   # LaMa absent ou en erreur : le moins mauvais essai Qwen
-            tries.append({"lama": False, "error": str(exc)[:200]})
+    qwen = [i for i, t in enumerate(tries) if "invented" in t]
+    best = min(qwen, key=lambda i: tries[i]["invented"]) if qwen else None
+    if best is not None:
+        (rd / f"plate_{tries[best]['attempt']}.png").replace(rd / "plate.png")
+    if (best is None or tries[best]["invented"] >= limit) and (rd / "lama.png").exists():
+        (rd / "plate.png").write_bytes((rd / "lama.png").read_bytes())   # Qwen invente toujours : LaMa (sans invention)
+        tries.append({"lama": True})
     for old in rd.glob("plate_*.png"):
         old.unlink()
     spec["fill"] = tries
@@ -545,11 +646,11 @@ def build(pid, panel_id, spec=None):
         return give_up(spec["skip"], True)
 
     # 1) sujets : masques exacts (SAM 3.1), bords doux (BiRefNet)
-    subs, _ = _subjects(im, d)
+    d_im = _depth(im, d)
+    subs, _, _ = _subjects(im, d, d_im)
     if not subs:
         return give_up("aucune personne assez grande dans la case", True)
     n_all = len(subs)
-    d_im = _depth(im, d)
     subs, crowd, cover = _plan(subs, d_im)                # du plus proche au plus loin
     if not subs:
         return give_up("foule sans premier plan net : les personnes couvrent la moitié de la case ou plus, à des "
@@ -575,31 +676,44 @@ def build(pid, panel_id, spec=None):
 
     # 3) plaque : recalee hors de la forme peinte, lumiere de la photo prolongee sous les sujets
     margin = max(6, round(0.012 * W))
-    edge = max(4, round(0.008 * W))
+    # la plaque ne remplace la photo que dans une bande fine autour du contour net (3-4 px) : une bande large se voyait
+    # comme un halo, un « contour mouvant » qui suit le personnage (la plaque n'est jamais identique a la photo)
+    edge = max(3, round(0.003 * W))
     _, blob = _painted(im, subs, crowd)
     P = _load(plate, (W, H))
     keep = ~(cv2.dilate(blob.astype(np.uint8), np.ones((15, 15), np.uint8)) > 0)
     P, mP = _align(im, P, keep.astype(np.float32))
     P = _color_match(im, P, keep)
     hole = _grow(a_all, edge)
+    mode, lama = spec.get("plate") or PLATE, d / "raw" / "lama.png"
+    if mode in ("lama", "hybride") and lama.exists():     # LaMa : meme cadrage que la photo, rien a recaler
+        PL = _load(lama, (W, H))
+        if mode == "lama":
+            P = PL
+        else:                                             # LaMa sur 1,5 % de largeur au bord, Qwen au-dela de 3 %
+            inner = cv2.distanceTransform((hole > 0.5).astype(np.uint8), cv2.DIST_L2, 5)
+            wq = np.clip((inner - 0.015 * W) / (0.015 * W), 0, 1)[..., None]
+            P = PL * (1 - wq) + P * wq
+    else:
+        mode = "qwen"
     bg = _fill_plate(im, P, hole)
     M = _grow(a_all, margin)
 
-    # 4) calques : couleurs sans lisere, profondeur de chaque sujet (carte a peine bombee)
+    # 4) calques : les couleurs de la photo (contour net : pas de « decontamination », qui calculee sur une plaque tres
+    # differente, noire derriere un telephone, eclaircissait le dernier pixel du bord) ; chaque groupe est une carte
+    # plate, a la profondeur de ses sujets
+    def card(group):
+        w = np.array([s["area"] for s in group])
+        return np.full((H, W), float(np.sum(w * np.array([s["z"] for s in group])) / max(1e-9, w.sum())), np.float32)
+
     layers = []                                           # (couleur, alpha, profondeur), du plus loin au plus proche
     if a_back is not None:
-        layers.append((_extend(_decontam(im, a_back, bg), a_back), a_back, _subject_depth(d_im, a_back)))
-        behind = bg * (1 - a_back[..., None]) + im * a_back[..., None]
-    else:
-        behind = bg
-    layers.append((_extend(_decontam(im, a_front, behind), a_front), a_front, _subject_depth(d_im, a_front)))
+        layers.append((_extend(im, a_back), a_back, card(back)))
+    layers.append((_extend(im, a_front), a_front, card(front)))
 
-    # 5) profondeur du fond : calculee sur la plaque, a l'echelle de la photo, jamais devant les sujets
-    d_bg = _fit_depth(depth.raw_best(bg), d_im, M < 0.01)
-    for _, a, dz in layers:
-        inside = _grow(a, margin) > 0.5
-        d_bg[inside] = np.minimum(d_bg[inside], dz[inside] - 0.03)
-    d_bg = depth.bound_slope(depth.smooth_edges(np.clip(d_bg, 0, 1), bg))
+    # 5) fond : un plan ajuste sur la profondeur de la photo hors des sujets detaches (la foule restee au decor compte),
+    # pente bornee (le lecteur ne peut alors jamais replier l'image)
+    d_bg = depth.bound_slope(_plane(d_im, M < 0.01))
 
     # 6) fichiers
     d.mkdir(parents=True, exist_ok=True)
@@ -616,8 +730,8 @@ def build(pid, panel_id, spec=None):
         .save(d / "ld.png", optimize=True)
     zs = [round(float(np.median(d_bg[M > 0.5])) if (M > 0.5).any() else float(np.median(d_bg)), 3)]
     zs += [round(float(np.median(x[2][x[1] > 0.5])), 3) for x in layers]
-    m = dict(base, n=len(layers), z=zs, focus=zs[-1], groups=how, crowd=crowd, depth_model=depth.best_name(),
-             qc={"subjects": [{"z": round(s["z"], 3), "area": round(s["area"], 4)} for s in subs],
+    m = dict(base, n=len(layers), z=zs, focus=zs[-1], groups=how, crowd=crowd, plate=mode, depth_model=depth.best_name(),
+             qc={"subjects": [{"z": round(s["z"], 3), "area": round(s["area"], 4), "held": s["held"]} for s in subs],
                  "people": n_all, "cover": round(cover, 3), "fill": round(fill, 3), "aligned": mP is not None},
              seconds=round(time.time() - t0, 1))
     (d / "meta.json").write_text(json.dumps(m, ensure_ascii=False, indent=1), encoding="utf-8")
