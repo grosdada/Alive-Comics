@@ -35,10 +35,13 @@
  *       setLayerVolume, setGlobalVolume, seekTo, setPinned, setPanelSound.
  * Les videos doivent etre « tout-intra » (ffmpeg -g 1) pour un saut instantane.
  *
- * Cases en relief (depth: {img, map, preset, amount, focus, duration, trigger}) : pas de video, une photo et sa carte
- * de profondeur (blanc = proche). Un seul canevas WebGL par page (les navigateurs limitent le nombre de contextes) :
+ * Cases en relief (depth: {img, map, preset, amount, focus, duration, trigger, layers?}) : pas de video, une photo et sa
+ * carte de profondeur (blanc = proche). Un seul canevas WebGL par page (les navigateurs limitent le nombre de contextes) :
  * chaque case y est dessinee dans son polygone ; la camera bouge de quelques pour cent au survol (ou au clic) et suit
  * le glisser. Au repos, le dessin est identique a l'image de la page. Sans WebGL : l'image fixe, sans erreur.
+ * Relief en couches (depth.layers: {bg, fg: [1 ou 2 RGBA, du plus loin au plus proche], ld}) : le fond sans les sujets
+ * puis chaque sujet, chacun avec sa propre profondeur (ld : R = fond, G = fg[0], B = fg[1]) : aucun pli, donc aucun
+ * bord dedouble ; ce qui etait cache derriere les sujets apparait quand la camera bouge.
  */
 (function () {
   "use strict";
@@ -607,19 +610,55 @@
   const renderers = new Set();          // canevas WebGL actifs (un par page, plus les vues de l'editeur)
   const RELIEF_VS = "attribute vec2 p; attribute vec2 t; varying vec2 v; void main(){ v = t; gl_Position = vec4(p, 0.0, 1.0); }";
   const RELIEF_FS = `precision highp float;
-    varying vec2 v; uniform sampler2D uImg, uDep;
-    uniform vec2 uOff; uniform float uDolly, uZoom, uFocus, uOver, uShow, uHue;
+    varying vec2 v; uniform sampler2D uImg, uDep, uBg, uL1, uL2, uLD;
+    uniform vec2 uOff; uniform float uDolly, uZoom, uFocus, uOver, uShow, uHue, uN, uMix;
     uniform vec3 uFrame; uniform vec4 uGrade;
+    // pixel source d'un point de profondeur z (camera : decalage uOff, avancee uDolly linearisee)
+    vec2 src(vec2 s, float z){ float zr = z - uFocus; return (s - 0.5) * (1.0 - uDolly * zr) + 0.5 - zr * uOff; }
+    // recherche du premier point de la surface touche, du plus proche (z = 1) au plus loin (z = 0), puis affinage :
+    // une seule solution, jamais de bord dedouble ; une pente trop forte s'etire au lieu de se replier
+    vec2 inv(sampler2D t, vec3 m, vec2 s){
+      float a = 1.0, b = 0.0;                                                     // a : devant la surface, b : touche
+      for (int i = 0; i <= 20; i++) {
+        float z = 1.0 - float(i) / 20.0;
+        if (dot(texture2D(t, clamp(src(s, z), 0.0, 1.0)).rgb, m) >= z) { b = z; break; }
+        a = z;
+      }
+      for (int j = 0; j < 5; j++) {
+        float mid = 0.5 * (a + b);
+        if (dot(texture2D(t, clamp(src(s, mid), 0.0, 1.0)).rgb, m) >= mid) b = mid; else a = mid;
+      }
+      return src(s, b);
+    }
+    // sujet detoure : profondeur lisse et prolongee hors de sa silhouette, le point fixe converge (une recherche « premier
+    // point touche » y verrait des surfaces fantomes devant le sujet)
+    vec2 fp(vec2 s, vec3 m){
+      vec2 uv = s;
+      for (int i = 0; i < 10; i++) uv = src(s, dot(texture2D(uLD, clamp(uv, 0.0, 1.0)).rgb, m));
+      return uv;
+    }
+    float inside(vec2 uv){ return step(0.0, uv.x) * step(0.0, uv.y) * step(uv.x, 1.0) * step(uv.y, 1.0); }
     void main(){
       vec2 s = (v - 0.5 + uFrame.yz * (uFrame.x - 1.0) * 0.5) / uFrame.x + 0.5;   // cadrage (fx.frame)
       s = (s - 0.5) / (uOver * uZoom) + 0.5;                                      // sur-cadrage pendant le mouvement
-      vec2 uv = s;
-      for (int i = 0; i < 8; i++) {                                               // point fixe : pixel source
-        float z = texture2D(uDep, clamp(uv, 0.0, 1.0)).r - uFocus;
-        uv = (s - 0.5) / (1.0 + uDolly * z) + 0.5 - z * uOff;
+      vec3 c; float dz, k1 = 0.0, k2 = 0.0;
+      if (uN > 0.5) {                                                             // couches : fond puis sujets
+        vec2 u0 = clamp(inv(uLD, vec3(1.0, 0.0, 0.0), s), 0.0, 1.0);
+        c = texture2D(uBg, u0).rgb; dz = texture2D(uLD, u0).r;
+        vec2 u1 = fp(s, vec3(0.0, 1.0, 0.0)), q1 = clamp(u1, 0.0, 1.0);
+        vec4 a = texture2D(uL1, q1); k1 = a.a * inside(u1);                       // hors de l'image : transparent
+        c = mix(c, a.rgb, k1); dz = mix(dz, texture2D(uLD, q1).g, k1);
+        if (uN > 1.5) {
+          vec2 u2 = fp(s, vec3(0.0, 0.0, 1.0)), q2 = clamp(u2, 0.0, 1.0);
+          vec4 b = texture2D(uL2, q2); k2 = b.a * inside(u2);
+          c = mix(c, b.rgb, k2); dz = mix(dz, texture2D(uLD, q2).b, k2);
+        }
+        vec2 r = clamp(s, 0.0, 1.0);
+        c = mix(texture2D(uImg, r).rgb, c, uMix);                                 // au repos : la photo exacte
+      } else {
+        vec2 uv = clamp(inv(uDep, vec3(1.0, 0.0, 0.0), s), 0.0, 1.0);             // nappe seule
+        c = texture2D(uImg, uv).rgb; dz = texture2D(uDep, uv).r;
       }
-      uv = clamp(uv, 0.0, 1.0);
-      vec3 c = texture2D(uImg, uv).rgb;
       c *= uGrade.y;                                                              // luminosite
       c = (c - 0.5) * uGrade.z + 0.5;                                             // contraste
       float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
@@ -630,13 +669,20 @@
         vec3 k = vec3(0.57735);
         c = c * co + cross(k, c) * si + k * dot(k, c) * (1.0 - co);
       }
-      gl_FragColor = vec4(mix(clamp(c, 0.0, 1.0), vec3(texture2D(uDep, uv).r), uShow), 1.0);
+      c = clamp(c, 0.0, 1.0);
+      if (uShow > 1.5) {                                                          // vue des calques (editeur)
+        float lum = dot(c, vec3(0.2126, 0.7152, 0.0722));
+        c = vec3(0.25 + 0.5 * lum);
+        c = mix(c, vec3(0.25, 0.55, 1.0) * (0.45 + 0.6 * lum), 0.8 * k1);
+        c = mix(c, vec3(1.0, 0.55, 0.15) * (0.45 + 0.6 * lum), 0.8 * k2);
+      } else if (uShow > 0.5) c = vec3(dz);                                       // vue de la profondeur
+      gl_FragColor = vec4(c, 1.0);
     }`;
   const RELIEF_MOVES = {
-    respire: (ph, a, e) => ({ ox: 0, oy: 0, dolly: 0.6 * e, zoom: 1 + 1.6 * a * e }),
+    respire: (ph, a, e) => ({ ox: 0, oy: 0, dolly: 0.3 * e, zoom: 1 + 1.6 * a * e }),
     glisse: (ph, a, e) => ({ ox: a * Math.sin(2 * Math.PI * ph) * e, oy: 0, dolly: 0, zoom: 1 }),
     tourne: (ph, a, e) => ({ ox: a * Math.sin(2 * Math.PI * ph) * e, oy: 0.6 * a * (1 - Math.cos(2 * Math.PI * ph)) * e * 0.5, dolly: 0, zoom: 1 }),
-    vertigo: (ph, a, e) => ({ ox: 0, oy: 0, dolly: -12 * a * e, zoom: 1 }),
+    vertigo: (ph, a, e) => ({ ox: 0, oy: 0, dolly: -Math.min(0.35, 12 * a) * e, zoom: 1 }),
   };
   const CYCLIC = { respire: true, vertigo: true };     // enveloppe qui revient a zero a chaque tour
 
@@ -651,20 +697,27 @@
     if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) return null;
     gl.useProgram(prog);
     const U = {};
-    for (const n of ["uImg", "uDep", "uOff", "uDolly", "uZoom", "uFocus", "uOver", "uShow", "uHue", "uFrame", "uGrade"]) U[n] = gl.getUniformLocation(prog, n);
-    gl.uniform1i(U.uImg, 0); gl.uniform1i(U.uDep, 1);
+    for (const n of ["uImg", "uDep", "uBg", "uL1", "uL2", "uLD", "uOff", "uDolly", "uZoom", "uFocus", "uOver", "uShow", "uHue",
+                     "uN", "uMix", "uFrame", "uGrade"]) U[n] = gl.getUniformLocation(prog, n);
+    gl.uniform1i(U.uImg, 0); gl.uniform1i(U.uDep, 1); gl.uniform1i(U.uBg, 2); gl.uniform1i(U.uL1, 3); gl.uniform1i(U.uL2, 4);
+    gl.uniform1i(U.uLD, 5);
     const R = { gl, canvas, prog, U, items: [], dirty: true, aP: gl.getAttribLocation(prog, "p"), aT: gl.getAttribLocation(prog, "t") };
-    R.texture = (source) => {
-      const t = gl.createTexture();
+    R.texture = (source, rgba) => {
+      const t = gl.createTexture(), f = rgba ? gl.RGBA : gl.RGB;
       gl.bindTexture(gl.TEXTURE_2D, t);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, source);
+      gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+      gl.texImage2D(gl.TEXTURE_2D, 0, f, f, gl.UNSIGNED_BYTE, source);
       return t;
+    };
+    R.free = (it) => {
+      for (const t of [it.tImg, it.tDep, ...(it.tL ? [it.tL.bg, it.tL.ld, ...it.tL.fg] : [])]) if (t) gl.deleteTexture(t);
+      it.tImg = it.tDep = it.tL = null;
     };
     // verts : [x, y (espace de decoupe), u, v] en triangles
     R.add = (st, verts) => {
-      const it = { st, n: verts.length / 4, buf: gl.createBuffer(), tImg: null, tDep: null };
+      const it = { st, n: verts.length / 4, buf: gl.createBuffer(), tImg: null, tDep: null, tL: null };
       gl.bindBuffer(gl.ARRAY_BUFFER, it.buf);
       gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(verts), gl.STATIC_DRAW);
       R.items.push(it);
@@ -674,14 +727,16 @@
     R.upload = (it) => {
       const st = it.st;
       if (!st.imgOk || !st.depOk) return;
-      if (it.tImg) { gl.deleteTexture(it.tImg); gl.deleteTexture(it.tDep); }
+      R.free(it);
       it.tImg = R.texture(st.imgEl); it.tDep = R.texture(st.depEl);
+      const L = st.layEls;
+      it.tL = L ? { bg: R.texture(L.bg), ld: R.texture(L.ld), fg: L.fg.map(e => R.texture(e, true)) } : null;
       R.dirty = true;
     };
     R.remove = (st) => {
       R.items = R.items.filter(it => {
         if (it.st !== st) return true;
-        gl.deleteBuffer(it.buf); if (it.tImg) { gl.deleteTexture(it.tImg); gl.deleteTexture(it.tDep); }
+        gl.deleteBuffer(it.buf); R.free(it);
         return false;
       });
       R.dirty = true;
@@ -704,9 +759,15 @@
         gl.enableVertexAttribArray(R.aT); gl.vertexAttribPointer(R.aT, 2, gl.FLOAT, false, 16, 8);
         gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, it.tImg);
         gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, it.tDep);
+        const L = it.tL;
+        gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D, L ? L.bg : null);
+        gl.activeTexture(gl.TEXTURE3); gl.bindTexture(gl.TEXTURE_2D, L ? L.fg[0] : null);
+        gl.activeTexture(gl.TEXTURE4); gl.bindTexture(gl.TEXTURE_2D, L && L.fg[1] ? L.fg[1] : null);
+        gl.activeTexture(gl.TEXTURE5); gl.bindTexture(gl.TEXTURE_2D, L ? L.ld : null);
+        gl.uniform1f(R.U.uN, L ? L.fg.length : 0); gl.uniform1f(R.U.uMix, m.mix || 0);
         gl.uniform2f(R.U.uOff, m.ox, m.oy);
         gl.uniform1f(R.U.uDolly, m.dolly); gl.uniform1f(R.U.uZoom, m.zoom); gl.uniform1f(R.U.uOver, m.over);
-        gl.uniform1f(R.U.uFocus, c.focus ?? 0.7); gl.uniform1f(R.U.uShow, st.showMap ? 1 : 0);
+        gl.uniform1f(R.U.uFocus, c.focus ?? 0.7); gl.uniform1f(R.U.uShow, st.showMap === "layers" ? 2 : st.showMap ? 1 : 0);
         gl.uniform3f(R.U.uFrame, fr.zoom > 1 ? fr.zoom : 1, fr.zoom > 1 ? (fr.x || 0) : 0, fr.zoom > 1 ? (fr.y || 0) : 0);
         gl.uniform4f(R.U.uGrade, g.sat ?? 1, g.bright ?? 1, g.contrast ?? 1, g.temp || 0);
         gl.uniform1f(R.U.uHue, g.hue || 0);
@@ -748,19 +809,30 @@
     return out;
   }
 
+  // images d'une case en relief : photo + nappe, et ses couches s'il y en a (une couche absente : la nappe seule)
   function loadRelief(st, stamp) {
-    const c = st.p.depth;
-    st.imgOk = st.depOk = false;
-    st.imgEl = new Image(); st.depEl = new Image();
-    const done = () => {
-      if (!st.imgOk || !st.depOk) return;
+    const c = st.p.depth, lay = c.layers, gen = (st.loadGen = (st.loadGen || 0) + 1);
+    const want = { img: c.img, dep: c.map };
+    const fg = lay && lay.bg && lay.ld && (lay.fg || []).length ? lay.fg.slice(0, 2) : [];
+    if (fg.length) { want.bg = lay.bg; want.ld = lay.ld; fg.forEach((f, i) => { want["f" + i] = f; }); }
+    const els = {}, state = {};
+    const settle = () => {
+      if (gen !== st.loadGen || Object.keys(want).some(k => !state[k])) return;       // pas tout arrive, ou remplace
+      st.imgEl = els.img; st.depEl = els.dep;
+      st.imgOk = state.img === "ok"; st.depOk = state.dep === "ok";
+      const keys = fg.map((_, i) => "f" + i);
+      st.layEls = fg.length && ["bg", "ld", ...keys].every(k => state[k] === "ok")
+        ? { bg: els.bg, ld: els.ld, fg: keys.map(k => els[k]) } : null;
       for (const R of renderers) for (const it of R.items) if (it.st === st) R.upload(it);
-      st.depthData = null;
+      st.depthData = st.layData = null;
     };
-    st.imgEl.onload = () => { st.imgOk = true; done(); };
-    st.depEl.onload = () => { st.depOk = true; done(); };
-    st.imgEl.src = withStamp(st.base + c.img, stamp);
-    st.depEl.src = withStamp(st.base + c.map, stamp);
+    for (const [k, src] of Object.entries(want)) {
+      const im = new Image();
+      els[k] = im;
+      im.onload = () => { state[k] = "ok"; settle(); };
+      im.onerror = () => { state[k] = "err"; settle(); };
+      im.src = withStamp(st.base + src, stamp);
+    }
   }
 
   function makeRelief(inst, p, el, base) {
@@ -829,8 +901,11 @@
     m.ox -= rv.dx * a * 1.6; m.oy -= rv.dy * a * 1.0;
     const k = Math.max(m.k, Math.min(1, Math.hypot(rv.dx, rv.dy)));
     m.over = 1 + k * (2.4 * a + 0.02) + 0.35 * Math.abs(m.dolly);   // au repos : 1 = identique a l'image de la page
+    const x = Math.min(1, k / 0.25);
+    m.mix = x * x * (3 - 2 * x);                        // couches : fondu depuis la photo exacte des que ca bouge
     const old = st.motion;
-    if (!old || old.ox !== m.ox || old.oy !== m.oy || old.dolly !== m.dolly || old.zoom !== m.zoom || old.over !== m.over) {
+    if (!old || old.ox !== m.ox || old.oy !== m.oy || old.dolly !== m.dolly || old.zoom !== m.zoom || old.over !== m.over
+        || old.mix !== m.mix) {
       st.motion = m;
       for (const R of renderers) if (R.items.some(it => it.st === st)) R.dirty = true;
     }
@@ -855,11 +930,32 @@
     st.p.depth = Object.assign({}, st.p.depth, cfg);
     for (const R of renderers) if (R.items.some(it => it.st === st)) R.dirty = true;
   }
-  function reliefShowMap(st, on) { st.showMap = !!on; for (const R of renderers) R.dirty = true; }
+  // vue de controle (editeur) : true = profondeur, "layers" = calques en couleur, false = image
+  function reliefShowMap(st, on) { st.showMap = on === "layers" ? "layers" : !!on; for (const R of renderers) R.dirty = true; }
+  function reliefLayers(st) { return st.layEls ? st.layEls.fg.length : 0; }
   function reliefPlay(st) { st.rv.once = performance.now(); }
   // profondeur (0..1) sous un point de la case : pour choisir le plan net d'un clic
   function reliefDepthAt(st, u, v) {
     if (!st.depOk) return null;
+    if (st.layEls) {                        // couches : la profondeur que le lecteur compose au repos (fond, puis sujets)
+      if (!st.layData) {
+        const read = (img) => {
+          const c = document.createElement("canvas");
+          c.width = img.naturalWidth; c.height = img.naturalHeight;
+          const g = c.getContext("2d", { willReadFrequently: true });
+          g.drawImage(img, 0, 0);
+          return { w: c.width, h: c.height, d: g.getImageData(0, 0, c.width, c.height).data };
+        };
+        st.layData = { ld: read(st.layEls.ld), fg: st.layEls.fg.map(read) };
+      }
+      const px = (D, k) => {
+        const x = Math.max(0, Math.min(D.w - 1, Math.round(u * (D.w - 1)))), y = Math.max(0, Math.min(D.h - 1, Math.round(v * (D.h - 1))));
+        return D.d[(y * D.w + x) * 4 + k] / 255;
+      };
+      let z = px(st.layData.ld, 0);
+      st.layData.fg.forEach((F, i) => { const a = px(F, 3); z = z * (1 - a) + px(st.layData.ld, i + 1) * a; });
+      return z;
+    }
     if (!st.depthData) {
       const c = document.createElement("canvas");
       c.width = st.depEl.naturalWidth; c.height = st.depEl.naturalHeight;
@@ -871,7 +967,8 @@
     return D.d[(y * D.w + x) * 4] / 255;
   }
   function updateRelief(st, entry, stamp) {
-    const reload = !st.p.depth || entry.depth.img !== st.p.depth.img || entry.depth.map !== st.p.depth.map || stamp;
+    const reload = !st.p.depth || entry.depth.img !== st.p.depth.img || entry.depth.map !== st.p.depth.map || stamp
+      || JSON.stringify(entry.depth.layers || null) !== JSON.stringify(st.p.depth.layers || null);
     st.p = entry;
     if (reload) loadRelief(st, stamp);
     const was = st.hover;
@@ -970,7 +1067,7 @@
   window.AlivePlayer = { isUnlocked: () => unlocked, mount, setBW, setSound, resetAll, hasAudio, isLightboxOpen: () => !!lb.st,
                          setEditHook, addView, removeView, setFx, updatePanel, setLayerVolume, setGlobalVolume, seekTo,
                          setPinned, setPanelSound, setPageSound, frameOf: idxOf, _pages: pages,
-                         addReliefView, setRelief, reliefShowMap, reliefPlay, reliefDepthAt, updateRelief,
+                         addReliefView, setRelief, reliefShowMap, reliefLayers, reliefPlay, reliefDepthAt, updateRelief,
                          // tremble d'une case : cycles par boucle et frequence reellement jouee
                          shakeInfo(st) {
                            const sh = (st.p.fx || {}).shake;

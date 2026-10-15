@@ -22,7 +22,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
-from . import assemble, compose, depth, director, edit, falapi, geometry, jobs, llm, presets, publish, settings, sounds, store
+from . import assemble, compose, depth, director, edit, falapi, geometry, jobs, layers, llm, presets, publish, settings, sounds, store
 
 ROOT = Path(__file__).resolve().parent.parent
 WEB = ROOT / "app" / "web"
@@ -62,7 +62,9 @@ def merge_project(server_p, ui_p):
         panel = dict(panel)
         panel["renders"] = old.get("renders", [])
         panel["chosen"] = old.get("chosen", {})
-        for k in ("edit", "extraSounds", "prompt_override", "review"):      # ecrits par le mode edition de l'apercu
+        if old.get("layers"):                       # relief en couches : ecrit par la file de rendus
+            panel["layers"] = old["layers"]
+        for k in ("edit", "extraSounds", "prompt_override", "review", "relief", "treatment", "couches"):   # mode edition
             if k not in panel and k in old:
                 panel[k] = old[k]
         for layer in ("audio", "voice", "foley"):
@@ -461,9 +463,15 @@ class Handler(BaseHTTPRequestHandler):
             relief = []
             for panel in b.get("panels", []):
                 try:
-                    if presets.treatment(store.get(pid)["panels"].get(panel)) == "relief":
-                        if depth.ensure(pid, panel):           # relief : la carte en ~1 s, pas de video
+                    pan = store.get(pid)["panels"].get(panel) or {}
+                    if presets.treatment(pan) == "relief":
+                        if depth.ensure(pid, panel, upgrade=pan.get("review") != "ok"):   # relief : la carte en ~1 s
                             relief.append(panel)
+                        # puis les couches (sans dedoublement) sur une machine : jamais sur une case validee en vert,
+                        # jamais si elles existent deja (meme ratees : le bouton de l'editeur relance)
+                        if (pan.get("couches", True) is not False and pan.get("review") != "ok"
+                                and not layers.meta(pid, panel) and S.can_layers()):
+                            created += S.enqueue_layers(pid, panel, b.get("machines"))
                     created += S.enqueue_panel(pid, panel, b.get("target", "local"), b.get("machines"),
                                                b.get("seeds", {}).get(panel))
                 except (FileNotFoundError, KeyError, ValueError) as e:
@@ -497,6 +505,18 @@ class Handler(BaseHTTPRequestHandler):
                 raise ApiError("pas d'image de départ pour cette case : poser une image d'abord")
             return self.send_json({"file": rel, "url": f"/projects/{pid}/{rel}?t={int(time.time())}",
                                    "seconds": round(time.time() - t0, 2), "model": depth.MODEL_ID})
+        if sub == "layers" and len(parts) == 4:                  # relief en couches d'une case
+            panel = (store.get(pid)["panels"].get(parts[3]) or {})
+            if m == "POST":
+                b = self.jbody()
+                prev = (panel.get("layers") or {}).get("seed")
+                seed = b.get("seed") if b.get("seed") is not None else (int(prev) + 7 if prev is not None else None)
+                if not S.can_layers():
+                    raise ApiError("aucune machine n'a Qwen-Image-Edit (2509 fp8) : couches impossibles pour l'instant")
+                return self.send_json({"jobs": S.enqueue_layers(pid, parts[3], b.get("machines"), seed)})
+            job = next((j for j in sorted(S.list(pid), key=lambda j: -j["created"])
+                        if j["panel"] == parts[3] and j["kind"] == "layers"), None)
+            return self.send_json({"meta": layers.meta(pid, parts[3]), "job": job, "possible": S.can_layers()})
         if sub == "regen" and len(parts) == 4 and m == "POST":    # regenerer la video d'une case (consigne, graine)
             return self.send_json(edit.regen(pid, parts[3], self.jbody()))
         if sub == "regensound" and len(parts) == 4 and m == "POST":

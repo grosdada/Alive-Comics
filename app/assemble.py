@@ -21,6 +21,7 @@ from collections import defaultdict
 from pathlib import Path
 
 from . import depth, presets, store
+from . import layers as relief_layers   # « layers » designe aussi les couches de son ici
 
 ROOT = Path(__file__).resolve().parent.parent
 PLAYER = ROOT / "player"
@@ -154,7 +155,8 @@ def page_key(p, d):
                  for x in panel.get("extraSounds") or []]
         relief = None
         if plan["player"] == "depth" or not chosen:      # relief, ou relief d'attente (rendu pas encore la)
-            relief = [presets.relief_cfg(panel), _mtime(d / f"start/{pid_}.png"), _mtime(d / f"depth/{pid_}.png")]
+            relief = [presets.relief_cfg(panel), _mtime(d / f"start/{pid_}.png"), _mtime(d / f"depth/{pid_}.png"),
+                      relief_layers.used(panel), _mtime(d / f"layers/{pid_}/meta.json")]
         panels[pid_] = {"player": plan["player"], "autoplay": plan["autoplay"], "loop": plan["loop"],
                         "fx": player_fx(panel, pid_, plan), "extra": extra, "relief": relief,
                         "sides": [j["side"] for j in plan["jobs"]],
@@ -313,7 +315,7 @@ def _build(pid, log=print, force=False):
             | {(e.get("voice") or {}).get("src") for e in data["panels"]}
             | {(e.get("foley") or {}).get("src") for e in data["panels"]}
             | {x["src"] for e in data["panels"] for x in e.get("more") or []}
-            | {(e.get("depth") or {}).get(k) for e in data["panels"] for k in ("img", "map")}
+            | {f for e in data["panels"] for f in relief_files(e)}
             | {(data.get("sound") or {}).get("src")})
     for sub in ("videos", "sons", "images", "depth"):
         for f in (out / sub).iterdir():
@@ -329,7 +331,7 @@ def _build(pid, log=print, force=False):
 def relief_entry(d, out, panel_id, panel, entry):
     """Case en relief : image de la case + carte de profondeur dans l'export, reglages dans entry["depth"]."""
     pid = d.name
-    rel = depth.ensure(pid, panel_id)
+    rel = depth.ensure(pid, panel_id, upgrade=panel.get("review") != "ok")
     if not rel:
         return False
     from PIL import Image
@@ -339,10 +341,28 @@ def relief_entry(d, out, panel_id, panel, entry):
         Image.open(src).convert("RGB").save(img, "JPEG", quality=90)
     shutil.copy2(d / rel, mp)
     cfg = presets.relief_cfg(panel)
+    lf = relief_layers.files(pid, panel_id) if relief_layers.used(panel) else None
     if "focus" not in cfg:
-        cfg["focus"] = depth.auto_focus(mp)
+        cfg["focus"] = lf["meta"]["focus"] if lf else depth.auto_focus(mp)
     entry["depth"] = dict(cfg, img=f"images/{panel_id}.jpg", map=f"depth/{panel_id}.png")
+    if lf:                                          # relief en couches : fond sans les sujets, sujets RGBA, profondeurs
+        def put(src, rel):
+            dst = out / rel
+            if not dst.exists() or dst.stat().st_mtime < src.stat().st_mtime or dst.stat().st_size != src.stat().st_size:
+                shutil.copy2(src, dst)
+            return rel
+        entry["depth"]["layers"] = {
+            "bg": put(lf["bg"], f"images/{panel_id}_bg.jpg"),
+            "fg": [put(p, f"images/{panel_id}_l{i}.webp") for i, p in enumerate(lf["fg"], 1)],
+            "ld": put(lf["ld"], f"depth/{panel_id}_ld.png"), "z": lf["meta"].get("z")}
     return True
+
+
+def relief_files(e):
+    """Fichiers d'une case en relief : image, nappe, et ses couches s'il y en a."""
+    dp = e.get("depth") or {}
+    lay = dp.get("layers") or {}
+    return [f for f in [dp.get("img"), dp.get("map"), lay.get("bg"), lay.get("ld"), *(lay.get("fg") or [])] if f]
 
 
 def read_data(folder):
@@ -356,7 +376,7 @@ def data_files(data):
     files = [data["page"], data["frames"]] + [e[k] for e in data["panels"] for k in ("video", "audio") if e.get(k)]
     files += [e[k]["src"] for e in data["panels"] for k in ("voice", "foley") if e.get(k)]
     files += [x["src"] for e in data["panels"] for x in e.get("more") or []]
-    files += [e["depth"][k] for e in data["panels"] if e.get("depth") for k in ("img", "map")]
+    files += [f for e in data["panels"] for f in relief_files(e)]
     if data.get("sound"):
         files.append(data["sound"]["src"])
     return files

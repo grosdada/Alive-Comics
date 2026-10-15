@@ -89,8 +89,10 @@ Sound design:
 Answer with JSON only."""
 
 RELIEF_RULES = """TREATMENT OF EACH PANEL ("treatment" field):
-- "relief" = DEPTH RELIEF: no video at all, a depth-map parallax of the photo (instant, free, faces stay exactly the
-  author's). The reader hovers or clicks and the camera moves a few percent. Pick a relief preset matched to the
+- "relief" = DEPTH RELIEF: no video at all, a layered parallax of the photo (faces stay exactly the author's): the
+  app cuts the panel into a rebuilt background plus the cut-out people (pop-up book), each with its own depth. The reader
+  hovers or clicks and the camera moves a few percent. Works best with 1 to 3 clearly separated subjects; crowds,
+  foliage and tangled planes cut badly (prefer a gentle "respire" there). Pick a relief preset matched to the
   composition: "respire" (small push toward the subject: portraits, couples, details), "glisse" (lateral travelling:
   groups, landscapes, tables), "tourne" (small circle around a central subject well detached from the background),
   "vertigo" (subject keeps its size while the background recedes: strong moments).

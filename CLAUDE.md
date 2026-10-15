@@ -24,10 +24,14 @@ Pilotage par API (une autre instance de Claude fabrique les livres) : `docs/PILO
   Pas d'aller-retour, pas de mots mous (slowly, small…), pas de négation, un idle vivant sur chaque personnage.
 - Cartes de profondeur : uniquement des modèles à licence distribuable (Depth Anything V2 **Small**, Apache 2.0).
   Les tailles Base / Large / Giant sont CC-BY-NC : interdites.
+- Relief en couches (`app/layers.py`) : plaques et masques par **Qwen-Image-Edit 2509** (Apache 2.0) seulement. Jamais
+  FLUX dev, RMBG, ObjectClear, MatAnyone, MiniMax-Remover (non commerciaux), ni Lyra-2 / SHARP (recherche) dans l'app.
+- Licence MiniMax H3 : elle exclut l'UE, le Royaume-Uni, les USA et la Corée, y compris l'affichage des vidéos produites
+  (§ V.4). David publie depuis la France : ne pas présenter H3 comme « sans risque » ; c'est à lui de trancher.
 - Sons importés : jamais deux fois le même fichier (app/sounds.py) ; un son déjà utilisé déclenche une alerte.
 
 ## Repères techniques
-- Serveur Python, bibliothèque standard + `requirements.txt` (pillow, numpy, onnxruntime) ; ffmpeg dans le PATH.
+- Serveur Python, bibliothèque standard + `requirements.txt` (pillow, numpy, onnxruntime, opencv-contrib) ; ffmpeg dans le PATH.
 - Interface sans compilation : `app/web` (application), `player/` (lecteur, livre, mode édition `alive-edit.js`).
 - Rendus : ComfyUI sur HITCHCOCK, CASSAVETES, FORD (réglages dans `local_settings.json`) + fal.
 - Écrire les gros correctifs dans un script Python (fichier) plutôt qu'en heredoc bash : les `\n` y sont mangés.

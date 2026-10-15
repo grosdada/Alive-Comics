@@ -11,6 +11,8 @@
  * Case en relief (carte de profondeur, sans video) : un popup dedie (mouvement, amplitude, plan net choisi d'un
  * clic dans l'apercu, duree, declenchement, voir / recalculer la carte), couleurs, cadrage, sons, et le passage
  * relief <-> video H3 dans les deux sens.
+ * Relief en couches : l'onglet Relief montre l'etat des couches (fond sans les sujets + sujets detoures, calcules par
+ * Qwen-Image-Edit sur une machine), les lance ou les relance, et la vue « Calques » les montre en couleur.
  * Tout est enregistre au fil de l'eau dans le projet (panel.edit...) et l'export est remis a jour (rapide).
  */
 (function () {
@@ -325,6 +327,8 @@
     c.st.freeze = false; c.st.freeShake = false;
     if (c.view) P.removeView(c.st, c.view);
     if (c.rview) c.rview.remove();
+    clearTimeout(c.layTimer);
+    if (c.st.relief) P.reliefShowMap(c.st, false);
     c.st.el.classList.remove("ac-sel");
     cancelAnimationFrame(c.raf);
     if (pop) pop.remove();
@@ -363,7 +367,10 @@
     if (c.pending.volumes) body.volumes = c.pending.volumes;
     if (c.pending.extra) body.extra = c.pending.extra;
     if (c.pending.pageVolume != null) body.pageVolume = c.pending.pageVolume;
-    if (c.pending.relief) body.relief = c.relief;
+    if (c.pending.relief) {                 // seulement les reglages choisis (deja enregistres ou touches ici)
+      const keep = new Set([...Object.keys(c.relief0Saved || {}), ...(c.reliefTouched || [])]);
+      body.relief = Object.fromEntries(Object.entries(c.relief).filter(([k, v]) => keep.has(k) && v != null));
+    }
     const sounds = c.pending.extra ? c.id : null;      // son ajoute retire : reconstruire les couches
     c.pending = {};
     status("enregistrement…");
@@ -458,8 +465,15 @@
                    h("button.ae-btn.ae-main", { on: { click: close } }, "Fermer"));
     let extraRow = null;
     if (st.relief) {
-      const mapBtn = h("button.ae-btn", { title: "Voir la carte de profondeur (blanc = proche)" }, "👁 Voir la carte");
-      mapBtn.onclick = () => { cur.showMap = !cur.showMap; P.reliefShowMap(st, cur.showMap); mapBtn.classList.toggle("ae-main", cur.showMap); };
+      const mapBtn = h("button.ae-btn", { title: "Voir la profondeur (blanc = proche)" }, "👁 Profondeur");
+      const layBtn = h("button.ae-btn", { title: "Voir les calques : bleu = sujet du fond, orange = sujet de devant" }, "🧩 Calques");
+      const view = (v) => {
+        cur.showMap = cur.showMap === v ? false : v;
+        P.reliefShowMap(st, cur.showMap);
+        mapBtn.classList.toggle("ae-main", cur.showMap === true); layBtn.classList.toggle("ae-main", cur.showMap === "layers");
+      };
+      mapBtn.onclick = () => view(true);
+      layBtn.onclick = () => view("layers");
       const redo = h("button.ae-btn", { title: "Recalculer la carte de profondeur (Depth Anything V2 Small, ~1 s)" }, "↻ Recalculer la carte");
       redo.onclick = async () => {
         const c = cur;
@@ -471,7 +485,7 @@
         } catch (e) { status("⚠ " + e.message, true); }
         redo.disabled = false;
       };
-      extraRow = h("div.ae-row", mapBtn, redo, h("span.ae-note", "Clic dans l'image : plan net."));
+      extraRow = h("div.ae-row", mapBtn, layBtn, redo, h("span.ae-note", "Clic dans l'image : plan net."));
     }
     pop = h("div.ae-pop", head,
             h("div.ae-body", h("div.ae-stagebox", stage), h("div.ae-row", playBtn, info), extraRow, canvas, tabs, tabBody), foot);
@@ -1251,6 +1265,7 @@
                         ["tourne", "Tourne", "petit cercle de caméra autour du sujet"],
                         ["vertigo", "Vertigo", "le sujet garde sa taille, le fond s'éloigne"]];
   function changeRelief(k, v) {
+    (cur.reliefTouched = cur.reliefTouched || new Set()).add(k);
     cur.relief[k] = v;
     P.setRelief(cur.st, { [k]: v });
     queue({ relief: true });
@@ -1271,6 +1286,103 @@
     box.append(h("label.ae-sl", h("span.ae-lab", "Déclenchement"), trig, h("span.ae-val")));
     box.append(h("p.ae-note", "Le plan net ne bouge pas : le premier plan et le fond partent en sens contraires. Le mettre sur les visages " +
                  "évite toute déformation. Cheveux, voiles, vitres : rester sous 3 % d'amplitude. Glisser dans la case la fait aussi bouger."));
+    const lay = h("div.ae-lay");
+    box.append(lay);
+    paintLayers(cur, lay);
+  }
+
+  // relief en couches : etat, calcul / relance, utilisation. Le suivi de la tache vit avec le popup (pas avec l'onglet) :
+  // quand elle finit, la case se met a jour meme si un autre onglet est ouvert ; une requete ratee est reessayee.
+  const layersUsed = (pn) => pn.couches === true || (pn.couches !== false && pn.review !== "ok");   // comme app/layers.py
+  function syncReliefFocus(c) {             // plan net automatique (non choisi) : celui des couches, pour le curseur
+    if ((c.reliefTouched && c.reliefTouched.has("focus")) || "focus" in (c.relief0Saved || {})) return;
+    const z = (c.st.p.depth || {}).focus;
+    if (z == null || z === c.relief.focus) return;
+    c.relief.focus = c.relief0.focus = z;
+    if (lastTab === "relief" && cur === c) renderTab();
+  }
+  async function refreshLayers(c) {
+    flush();                                // retouches en attente d'abord (sinon l'apercu les perdrait)
+    await saveEdit(c.i, c.id, {}, { relief: c.id });
+    syncReliefFocus(c);
+  }
+  async function paintLayers(c, el, quiet) {
+    clearTimeout(c.layTimer);
+    if (cur !== c) return;
+    let r;
+    try { r = await api(`/api/projects/${c.pid}/layers/${c.id}`); }
+    catch (e) {
+      if (cur !== c) return;
+      if (el.isConnected) {
+        const note = el.querySelector(".ae-note");
+        if (note) note.textContent = "⚠ " + e.message + (c.layJob ? " (nouvel essai dans 5 s)" : "");
+        else el.textContent = "⚠ " + e.message;
+      }
+      if (c.layJob) c.layTimer = setTimeout(() => paintLayers(c, el, true), 5000);
+      return;
+    }
+    if (cur !== c) return;
+    const job = r.job && ["queued", "running"].includes(r.job.status) ? r.job : null, m = r.meta;
+    const finished = !job && c.layJob && r.job && r.job.id === c.layJob;
+    const on = layersUsed(c.panel || {}), shown = !!((c.st.p.depth || {}).layers);     // dans l'export de la page
+    if (el.isConnected) {
+      let line;
+      if (job) line = job.status === "queued" ? "⏳ En file d'attente (une machine libre avec Qwen-Image-Edit)…"
+                                              : `⚙ Calcul sur ${job.worker} : ${job.progress || "en cours"}…`;
+      else if (m && m.n > 0) line = `✓ ${m.n} sujet${m.n > 1 ? "s" : ""} détouré${m.n > 1 ? "s" : ""} + le fond reconstruit` +
+                                    (m.n > 1 ? (m.groups === "profondeur" ? " (devant / derrière selon la profondeur)"
+                                                                          : " (devant / derrière vus par l'IA)") : "")
+                                    + (on ? "" : (c.panel || {}).review === "ok" && (c.panel || {}).couches == null
+                                         ? " · case validée : cocher pour les utiliser" : " · non utilisées (nappe simple)")
+                                    + (m.last_try ? ` · dernier essai raté (${m.last_try.reason}), couches précédentes gardées` : "");
+      else if (m) line = "✗ Pas de couches : " + (m.reason || "découpe impossible") + ". La case garde la nappe simple.";
+      else line = r.possible ? "Pas encore calculées : la case utilise la nappe simple (elle peut onduler au bord des sujets)."
+                             : "Aucune machine n'a Qwen-Image-Edit 2509 : la case garde la nappe simple.";
+      const go = h("button.ae-btn" + (m ? "" : ".ae-main"), { disabled: !!job || !r.possible,
+        title: "Qwen-Image-Edit enlève les sujets, les détoure sur fond vert, puis l'app découpe les calques (~1 min)" },
+        m ? "↻ Recalculer (autre essai)" : "🧩 Calculer les couches");
+      go.onclick = async () => {
+        go.disabled = true;
+        try {
+          const res = await api(`/api/projects/${c.pid}/layers/${c.id}`, {});
+          c.layJob = ((res.jobs || [])[0] || {}).id || c.layJob;
+          toast("Couches en calcul sur tes machines (environ 1 min).");
+        } catch (e) { toast("⚠ " + e.message); }
+        paintLayers(c, el, true);
+      };
+      const use = h("input", { type: "checkbox", checked: on });
+      use.onchange = async () => {
+        use.disabled = true;
+        try {
+          flush();
+          await saveEdit(c.i, c.id, { couches: use.checked }, { relief: c.id });
+          syncReliefFocus(c);
+          status(use.checked ? "✓ couches utilisées" : "✓ nappe simple");
+        } catch (e) { status("⚠ " + e.message, true); }
+        paintLayers(c, el, true);
+      };
+      el.textContent = "";
+      el.append(h("b", "Relief en couches (sans dédoublement)"), h("p.ae-note", line),
+                h("div.ae-row", go, m && m.n > 0 ? h("label.ae-check", use, " Utiliser les couches") : null));
+    }
+    if (job) {
+      c.layJob = job.id;
+      c.layTimer = setTimeout(() => paintLayers(c, el, true), 3000);
+      return;
+    }
+    if (finished) {                         // la tache vient de finir : la case se met a jour (une seule fois)
+      c.layJob = null;
+      if (r.job.status === "done" && m && m.n > 0 && on) {
+        status("couches prêtes : mise à jour de la case…");
+        try { await refreshLayers(c); if (cur === c) status("✓ couches en place"); }
+        catch (e) { if (cur === c) status("⚠ " + e.message, true); }
+        if (cur === c && el.isConnected) paintLayers(c, el, true);
+      } else if (r.job.status === "error") status("⚠ couches : " + (r.job.error || "erreur"), true);
+      return;
+    }
+    if (!quiet && m && m.n > 0 && on && !shown) {      // couches pretes mais pas encore dans l'export de la page
+      try { await refreshLayers(c); } catch (_) { /* rien : l'apercu suivant les montrera */ }
+    }
   }
   function tabTreat(box) {
     const c = cur, n = ((c.panel || {}).renders || []).length;

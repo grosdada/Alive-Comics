@@ -25,7 +25,9 @@ L'interface s'ouvre sur http://127.0.0.1:8790/. Il faut Python 3.10+ et ffmpeg d
 4. **Traitement de la case** (inspecteur) : « Vidéo H3 » (une boucle vidéo MiniMax H3, quelques minutes de calcul) ou
    « Relief (instantané) » : une photo en relief, carte de profondeur calculée en ~1 s sur ce PC (Depth Anything V2 Small,
    licence Apache 2.0) ; le lecteur bouge la caméra de quelques pour cent au survol, au clic ou au glisser (respire,
-   glisse, tourne, vertigo). Une case H3 dont le rendu n'est pas encore prêt s'affiche en relief en attendant.
+   glisse, tourne, vertigo). Puis « Calculer » découpe la case en couches (fond reconstruit + personnages détourés, par
+   Qwen-Image-Edit sur tes machines, ~45 s) : plus de bords dédoublés. Une case H3 dont le rendu n'est pas encore prêt
+   s'affiche en relief en attendant.
    **Dans chaque case**, quatre icônes :
    - **Image** : importer ou remplacer.
    - **Caméra** : orbite 360° en boucle, arc gauche ↔ droite, demi-arc, plongée ↕ contre-plongée,

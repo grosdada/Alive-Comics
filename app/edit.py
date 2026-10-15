@@ -128,6 +128,8 @@ def apply(pid, panel_id, b):
                 panel["relief"] = clean_relief(b["relief"])
             if b.get("treatment") in ("relief", "h3"):
                 panel["treatment"] = b["treatment"]
+            if b.get("couches") in (True, False):     # relief : utiliser les couches calculees (defaut) ou la nappe seule
+                panel["couches"] = b["couches"]
             if "review" in b:                        # suivi : a voir (defaut) / ok / a retoucher
                 panel["review"] = b["review"] if b["review"] in ("ok", "redo") else None
             for layer, v in (b.get("volumes") or {}).items():
@@ -141,7 +143,7 @@ def apply(pid, panel_id, b):
         if b.get("pageVolume") is not None and p.get("pageSound"):
             p["pageSound"]["volume"] = round(_num(b["pageVolume"], 0, 1, 0.7), 3)
             p["pageSound"]["rev"] = time.time()
-    if any(k in b for k in ("edit", "volumes", "extra", "pageVolume", "review", "relief", "treatment")):
+    if any(k in b for k in ("edit", "volumes", "extra", "pageVolume", "review", "relief", "treatment", "couches")):
         store.mutate(pid, upd)
 
 

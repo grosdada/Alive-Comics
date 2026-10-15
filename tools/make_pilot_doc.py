@@ -327,7 +327,11 @@ POST /api/projects/&lt;id&gt;/regensound/&lt;case&gt; {{"layer": "audio|voice|fo
 <pre><code>POST /api/projects/&lt;id&gt;/edit/&lt;case&gt; {{"treatment": "relief"|"h3"}}      changer le traitement d'une case
 POST /api/projects/&lt;id&gt;/edit/&lt;case&gt; {{"relief": {{"preset", "amount", "focus", "duration", "trigger"}}}}
 POST /api/projects/&lt;id&gt;/depth/&lt;case&gt; {{"force": true}}   carte de profondeur (~1 s, sur ce PC) -> {{"file", "seconds"}}
-POST /api/projects/&lt;id&gt;/render  sur une case en relief : calcule la carte (reponse "relief": [cases]) et les sons, aucune video</code></pre>
+POST /api/projects/&lt;id&gt;/render  sur une case en relief : calcule la carte (reponse "relief": [cases]) et les sons, aucune video ;
+        met aussi en file ses COUCHES (sauf case verte, couches deja calculees, ou aucune machine avec Qwen-Image-Edit)
+GET  /api/projects/&lt;id&gt;/layers/&lt;case&gt;          etat des couches -> {{"meta": {{"n", "z", "focus", "reason"…}}, "job", "possible"}}
+POST /api/projects/&lt;id&gt;/layers/&lt;case&gt; {{}}       (re)calculer les couches (autre graine a chaque relance), ~45 s a chaud
+POST /api/projects/&lt;id&gt;/edit/&lt;case&gt; {{"couches": false}}   garder la nappe simple (true : utiliser les couches)</code></pre>
 <h3>Exporter, publier</h3>
 <pre><code>POST /api/projects/&lt;id&gt;/export     -> {{"url": "/projects/&lt;id&gt;/export/index.html", "report": [...], "cached": bool}}
         page jouable dans projects/&lt;id&gt;/export/ (index.html, videos/, sons/) ; instantane si rien n'a change
@@ -442,6 +446,12 @@ servir, le fichier existant est repris ({code('"reused": true')}).</li>
 {code('"treatment": "relief"')} (photo en relief : une carte de profondeur calculée en ~1 s sur le processeur de ce PC par
 Depth Anything V2 Small, licence Apache 2.0 ; aucune vidéo). Le lecteur bouge la caméra de quelques pour cent au survol ou
 au clic, et suit le glisser. Une case H3 dont le rendu n'est pas encore là s'affiche en relief en attendant.</p>
+<p><b>Relief en couches</b> (sans bords dédoublés) : « Calculer » découpe chaque case en relief en un fond reconstruit
+(sans les personnages) et 1 ou 2 calques de personnages détourés, chacun avec sa profondeur, comme un livre pop-up.
+Qwen-Image-Edit 2509 (Apache 2.0) sur une machine, ~45 s par case à chaud ; tâche « Couches relief » dans la file.
+{code("meta.n")} = nombre de calques ; {code("n = 0")} avec {code("reason")} : la case ne se découpe pas (paysage, foule…),
+elle garde la nappe simple. Marche le mieux avec 1 à 3 sujets bien séparés. À contrôler dans l'aperçu (mode édition,
+onglet Relief, vue « Calques »).</p>
 <ul>
 <li>Réglages : {code('panels[case].relief = {"preset": "respire|glisse|tourne|vertigo", "amount": 0.025, "focus": 0..1, "duration": 2, "trigger": "hover|click"}')}.
 <code>focus</code> = plan net (profondeur qui ne bouge pas : la mettre sur les visages) ; sans elle, médiane du centre de la case.</li>

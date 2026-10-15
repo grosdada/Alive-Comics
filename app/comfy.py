@@ -2,6 +2,7 @@
 
 Rien a installer cote client (bibliotheque standard). Cote worker : ComfyUI >= 0.33, le noeud
 comfyui-h3-orbital (H3OrbitalConditioning), le LoRA 360 Orbit et, pour le son, MiniMax Music 3.
+Relief en couches : Qwen-Image-Edit 2509 fp8 (Apache-2.0) et, pour aller 3 fois plus vite, sa LoRA Lightning 8 pas.
 """
 
 import json
@@ -22,6 +23,10 @@ H3_AUDIO_VAE = "minimax_h3_audio_vae_fp32.safetensors"   # piste son native (bru
 M3_DIT = "minimax_music3_dit_fp16.safetensors"
 M3_TE = "minimax_music3_text_encoder_pruned_int8_convrot.safetensors"
 M3_VAE = "minimax_music3_dav.safetensors"
+QWEN_UNET = "qwen_image_edit_2509_fp8_e4m3fn.safetensors"            # Apache-2.0
+QWEN_LORA = "Qwen-Image-Edit-2509-Lightning-8steps-V1.0-bf16.safetensors"   # Apache-2.0 (lightx2v)
+QWEN_CLIP = "qwen_2.5_vl_7b_fp8_scaled.safetensors"
+QWEN_VAE = "qwen_image_vae.safetensors"
 
 
 class ComfyError(RuntimeError):
@@ -136,6 +141,44 @@ def music_graph(caption, lyrics, seed, seconds, prefix):
     }
 
 
+def qwen_edit_graph(image_name, passes, seed, prefix, fast=True, megapixels=1.0):
+    """Plusieurs editions Qwen-Image-Edit dans un seul graphe (modeles charges une fois).
+    passes : [(cle, prompt, source)] ; source = None (l'image envoyee) ou la cle d'une passe precedente (epluchage :
+    on retire un sujet de l'image deja privee du precedent). Renvoie (graphe, {cle: id du noeud SaveImage})."""
+    g = {
+        "1": {"class_type": "UNETLoader", "inputs": {"unet_name": QWEN_UNET, "weight_dtype": "default"}},
+        "3": {"class_type": "CLIPLoader", "inputs": {"clip_name": QWEN_CLIP, "type": "qwen_image", "device": "default"}},
+        "4": {"class_type": "VAELoader", "inputs": {"vae_name": QWEN_VAE}},
+        "5": {"class_type": "LoadImage", "inputs": {"image": image_name}},
+        "6": {"class_type": "ImageScaleToTotalPixels", "inputs": {"image": ["5", 0], "upscale_method": "lanczos",
+                                                                  "megapixels": float(megapixels), "resolution_steps": 16}},
+    }
+    model = ["1", 0]
+    if fast:
+        g["2"] = {"class_type": "LoraLoaderModelOnly", "inputs": {"model": model, "lora_name": QWEN_LORA, "strength_model": 1.0}}
+        model = ["2", 0]
+    g["9"] = {"class_type": "ModelSamplingAuraFlow", "inputs": {"model": model, "shift": 3.0}}
+    outs, decoded = {}, {None: ["6", 0]}
+    for i, p in enumerate(passes):
+        key, prompt = p[0], p[1]
+        img = decoded.get(p[2] if len(p) > 2 else None, ["6", 0])
+        b = 100 + 10 * i
+        g[str(b)] = {"class_type": "TextEncodeQwenImageEditPlus", "inputs": {"clip": ["3", 0], "prompt": prompt,
+                                                                            "vae": ["4", 0], "image1": img}}
+        g[str(b + 4)] = {"class_type": "TextEncodeQwenImageEditPlus", "inputs": {"clip": ["3", 0], "prompt": "",
+                                                                                "vae": ["4", 0], "image1": img}}
+        g[str(b + 5)] = {"class_type": "VAEEncode", "inputs": {"pixels": img, "vae": ["4", 0]}}
+        g[str(b + 1)] = {"class_type": "KSampler", "inputs": {
+            "model": ["9", 0], "seed": int(seed) + i, "steps": 8 if fast else 24, "cfg": 1.0 if fast else 2.5,
+            "sampler_name": "euler", "scheduler": "simple", "positive": [str(b), 0], "negative": [str(b + 4), 0],
+            "latent_image": [str(b + 5), 0], "denoise": 1.0}}
+        g[str(b + 2)] = {"class_type": "VAEDecode", "inputs": {"samples": [str(b + 1), 0], "vae": ["4", 0]}}
+        g[str(b + 3)] = {"class_type": "SaveImage", "inputs": {"images": [str(b + 2), 0], "filename_prefix": f"{prefix}_{key}"}}
+        decoded[key] = [str(b + 2), 0]
+        outs[key] = str(b + 3)
+    return g, outs
+
+
 # ------------------------------------------------------------------ execution
 def submit(server, graph):
     try:
@@ -195,7 +238,7 @@ def cancel(server, prompt_id):
 def preflight(server):
     """{online, version, video: bool, music: bool, missing: [...], load} pour l'interface et le planificateur."""
     out = {"online": False, "version": "", "video": False, "music": False, "h3audio": False, "missing": [], "load": 0,
-           "gpu": ""}
+           "gpu": "", "qwen": False, "qwen_fast": False}
     try:
         stats = http_json(server.rstrip("/") + "/system_stats", timeout=6)
     except (OSError, ValueError) as exc:
@@ -234,6 +277,11 @@ def preflight(server):
               if not has(node, f, fn)]
     out["music"] = not miss_m and not out["missing"]
     out["h3audio"] = has("VAELoader", "vae_name", H3_AUDIO_VAE)
+    # relief en couches (Qwen-Image-Edit) : facultatif, ne compte pas dans « manque »
+    out["qwen"] = not out["missing"] and all(has(*c) for c in [
+        ("TextEncodeQwenImageEditPlus",), ("UNETLoader", "unet_name", QWEN_UNET), ("CLIPLoader", "clip_name", QWEN_CLIP),
+        ("VAELoader", "vae_name", QWEN_VAE)])
+    out["qwen_fast"] = out["qwen"] and has("LoraLoaderModelOnly", "lora_name", QWEN_LORA)
     out["missing"] += miss_v + miss_m
     try:
         out["load"] = queue_load(server)

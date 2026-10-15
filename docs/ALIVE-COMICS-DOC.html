@@ -236,7 +236,8 @@ copy "\\PC-SOURCE\E$\Codex projects\Alive-Comics\local_settings.json" .</code></
               assets/            images et sons importés
               start/&lt;case&gt;.png   image de départ envoyée à H3 (et base du relief)
               renders/&lt;case&gt;/    toutes les variantes rendues
-              depth/&lt;case&gt;.png   carte de profondeur (relief)
+              depth/&lt;case&gt;.png   nappe de profondeur (relief, apercu immediat et repli)
+              layers/&lt;case&gt;/      relief en couches : raw/ (sorties Qwen), bg.jpg, l1.webp, l2.webp, ld.png, meta.json
               page/              page.jpg, frames.png (traits), thumb.jpg
               export/            la page jouable : index.html, book.js, manga_data.js, videos/, sons/, images/, depth/</code></pre>
 </section>
@@ -250,6 +251,8 @@ copy "\\PC-SOURCE\E$\Codex projects\Alive-Comics\local_settings.json" .</code></
       <tr><td><code>image</code>, <code>view</code></td><td>Image importée ; recadrage <code>{zoom, ox, oy}</code>.</td></tr>
       <tr><td><code>treatment</code></td><td><code>"h3"</code> (défaut) ou <code>"relief"</code>.</td></tr>
       <tr><td><code>relief</code></td><td><code>{preset: respire|glisse|tourne|vertigo, amount, focus, duration, trigger: hover|click}</code>.</td></tr>
+      <tr><td><code>layers</code>, <code>couches</code></td><td>Relief en couches : <code>layers</code> écrit par la file (<code>{rev, n, reason, job, seed, worker, seconds}</code>) ;
+        <code>couches: false</code> = garder la nappe simple.</td></tr>
       <tr><td><code>camera</code>, <code>action</code></td><td><code>{id, fields, amplitude, rigid, extra}</code> ; action <code>{id, fields, loop, extra}</code> (<code>custom</code> : <code>fields.text</code>).</td></tr>
       <tr><td><code>seed</code>, <code>prompt_override</code></td><td>Graine ; prompt réécrit depuis l'aperçu, par côté (<code>{"V": "…"}</code>).</td></tr>
       <tr><td><code>audio</code>, <code>voice</code>, <code>foley</code></td><td>Trois couches de son (mode, fichier, volume, réglages) ; <code>generated</code> = versions.</td></tr>
@@ -265,7 +268,8 @@ copy "\\PC-SOURCE\E$\Codex projects\Alive-Comics\local_settings.json" .</code></
   <h3>Ce que reçoit le lecteur (<code>manga_data.js</code>, une entrée par case)</h3>
   <pre><code>{ id, rect, poly, video, frames, center, loop, autoplay,
   fx:    { shake, grade, frame, range, xfade, ease, speed, bounce, start },
-  depth: { img, map, preset, amount, focus, duration, trigger },       // case en relief (video = null)
+  depth: { img, map, preset, amount, focus, duration, trigger,        // case en relief (video = null)
+           layers: { bg, fg: [plus loin, plus proche], ld, z } },     // relief en couches, s'il est calcule
   audio, audioVol, voice: {src, vol, loop}, foley: {src, vol, sync}, more: [{src, vol, loop}] }
 page : { page: "page.jpg", frames: "frames.png", size: [W, H], fps: 24, sound: {src, vol}, panels: [...] }</code></pre>
 </section>
@@ -300,9 +304,31 @@ page : { page: "page.jpg", frames: "frames.png", size: [W, H], fps: 24, sound: {
 <!-- ============================================================ RELIEF -->
 <section id="relief">
   <div class="sec-head"><p class="eyebrow">6 · Option relief</p><h2>Une photo en relief au lieu d'une vidéo</h2>
-    <p>Une case en relief n'a pas de vidéo : une carte de profondeur (blanc = proche) est calculée en ~0,7 s sur le processeur,
-      et le lecteur déplace chaque pixel selon sa profondeur. Instantané, gratuit, et les visages restent exactement ceux de la photo.
-      Détails et choix techniques : <code>docs/PARALLAXE-RELIEF.html</code>.</p></div>
+    <p>Une case en relief n'a pas de vidéo. Version 2 : un <b>diorama en couches</b>, comme un livre pop-up : le fond sans
+      les personnages (reconstruit par l'IA), puis chaque personnage détouré, chacun avec sa propre profondeur. Plus de bords
+      dédoublés, et ce qui était caché derrière les sujets apparaît quand la caméra bouge. Au repos, la case est exactement la
+      photo. En attendant les couches (ou si la case ne se découpe pas), une <b>nappe</b> de profondeur sans pli sert de relief.
+      Détails : <code>docs/PARALLAXE-RELIEF.html</code>, <code>app/layers.py</code>.</p></div>
+  <div class="block">
+    <h3>Les couches (tâche « Couches relief » de la file, ~45 s à chaud, ~5 min si le modèle est froid)</h3>
+    <ol>
+      <li>L'IA de l'app décrit les sujets de la case (personnes, animaux, véhicules ; devant ou derrière). Sans clé d'IA :
+        prompts génériques. Si l'IA ne voit aucun sujet détaché, rien n'est calculé.</li>
+      <li><b>Qwen-Image-Edit 2509</b> (fp8, licence Apache 2.0, + LoRA Lightning 8 pas), en un graphe sur une machine :
+        « fond vert » (tout sauf les sujets en vert pur : les masques), puis épluchage : « avant » (sans les sujets de devant)
+        et « plaque » (sans les autres, à partir de l'image précédente).</li>
+      <li>Sur ce PC (~6 s) : recalage des images générées sur la photo (ECC), masques doux, contrôle (un sujet que l'IA n'a pas
+        retiré reste dans le fond), couleurs des sujets sans liseré, ombre portée prolongée sous le sujet, profondeur de chaque
+        calque (Depth Anything V2 Small) à l'échelle de la photo, pente bornée.</li>
+      <li>Export : <code>images/&lt;case&gt;_bg.jpg</code>, <code>_l1.webp</code>, <code>_l2.webp</code> (RGBA),
+        <code>depth/&lt;case&gt;_ld.png</code> (R = fond, G = l1, B = l2), environ 0,25 Mo par case.</li>
+    </ol>
+    <p>Lancement : « Calculer » (cases en relief, sauf les vertes et celles déjà calculées) ou, dans l'aperçu en mode édition,
+      onglet Relief : « Calculer les couches » / « Recalculer (autre essai) », « Utiliser les couches », vue « 🧩 Calques »
+      (bleu = sujet du fond, orange = sujet de devant).</p>
+    <div class="warn">Licences : Qwen-Image-Edit (Apache 2.0) uniquement pour les plaques. Jamais FLUX.1/FLUX.2 dev, RMBG,
+      ObjectClear, MatAnyone, MiniMax-Remover (non commerciaux), ni Lyra-2 ou SHARP (recherche).</div>
+  </div>
   <div class="grid2">
     <div class="block">
       <h3>La carte</h3>
@@ -310,7 +336,8 @@ page : { page: "page.jpg", frames: "frames.png", size: [W, H], fps: 24, sound: {
         <li>Modèle : <b>Depth Anything V2 Small</b>, licence <b>Apache 2.0</b> (distribuable, usage commercial permis), ONNX
           (<code>onnx-community/depth-anything-v2-small</code>), téléchargé une fois dans <code>data/models/</code>.</li>
         <li>Entrée : l'image de départ de la case (<code>start/</code>), petit côté 518 px ; sortie normalisée (centiles 1–99),
-          dilatée autour des sujets proches puis lissée, contre les déchirures.</li>
+          lissée en suivant les bords (Fast Global Smoother d'OpenCV), puis pente bornée : la nappe ne peut plus se replier,
+          donc plus de dédoublement (elle ondule un peu autour des sujets ; les couches règlent ça).</li>
         <li>Recalculée seule si l'image change ; bouton « Recalculer » dans l'aperçu ; plan net automatique = médiane du centre.</li>
       </ul>
       <div class="warn">Depth Anything V2 Base / Large / Giant et Depth Anything 3 Large / Giant sont en CC-BY-NC : interdits.</div>
@@ -323,7 +350,10 @@ page : { page: "page.jpg", frames: "frames.png", size: [W, H], fps: 24, sound: {
         <li><b>Tourne</b> : petit cercle autour du sujet (sujet central bien détaché).</li>
         <li><b>Vertigo</b> : le sujet garde sa taille, le fond s'éloigne (moments forts).</li>
         <li>Au survol (boucle douce) ou au clic (un tour) ; la caméra suit aussi le glisser. Le <b>plan net</b> ne bouge pas :
-          le mettre sur les visages. Cheveux, voiles, vitres : rester sous 3 %.</li>
+          le mettre sur les visages (avec les couches, il est réglé d'office sur le sujet de devant). Cheveux, voiles, vitres : rester sous 3 %.</li>
+        <li>Lecteur : le fond et la nappe sont rendus par une recherche « premier point touché » (jamais de bord dédoublé, une
+          pente trop forte s'étire) ; chaque sujet bouge d'un bloc, comme une carte de pop-up à peine bombée. L'avancée de
+          caméra est bornée (Respire 0,3 ; Vertigo 0,35 au plus) : au-delà, l'image se déforme.</li>
       </ul>
     </div>
   </div>
@@ -357,7 +387,7 @@ page : { page: "page.jpg", frames: "frames.png", size: [W, H], fps: 24, sound: {
         <li>Reprise après redémarrage : les rendus en cours se rebranchent sur ComfyUI.</li>
         <li>Erreur de mémoire passagère : une relance, ailleurs si possible ; machine muette : nouveaux essais pendant 15 min.</li>
         <li>Indice de mouvement après chaque rendu : &lt; 0,3 presque immobile ; 1,5 à 4,5 une case qui vit bien.</li>
-        <li>Une case en relief ne passe pas par la file : sa carte est calculée tout de suite.</li>
+        <li>Une case en relief : sa nappe est calculée tout de suite, ses couches passent par la file (Qwen-Image-Edit).</li>
       </ul>
     </div>
   </div>
@@ -434,7 +464,7 @@ page : { page: "page.jpg", frames: "frames.png", size: [W, H], fps: 24, sound: {
   <div class="tbl"><table>
     <thead><tr><th>Onglet</th><th>Case vidéo</th><th>Case en relief</th></tr></thead>
     <tbody>
-      <tr><td>Boucle / Relief</td><td>timeline, courbe de mouvement (rouge = ralenti), « Lisser la boucle », début / fin, fondu, départ, sens, vitesse</td><td>mouvement, amplitude, plan net (clic dans l'image), durée, déclenchement ; voir / recalculer la carte</td></tr>
+      <tr><td>Boucle / Relief</td><td>timeline, courbe de mouvement (rouge = ralenti), « Lisser la boucle », début / fin, fondu, départ, sens, vitesse</td><td>mouvement, amplitude, plan net (clic dans l'image), durée, déclenchement ; couches (calculer, relancer, utiliser) ; voir la profondeur, les calques ; recalculer la nappe</td></tr>
       <tr><td>Tremblé</td><td>taille, fréquence, rotation, graine, « Adaptive loop », préréglages enregistrables, toute la page</td><td>—</td></tr>
       <tr><td>Couleur, Cadrage</td><td colspan="2">saturation, luminosité, contraste, température, teinte ; zoom et position ; « Appliquer à toute la page »</td></tr>
       <tr><td>Son</td><td colspan="2">voix off (charger un MP3, une fois par survol), sons ajoutés (« En faire la voix off »), régénérer, musique de page (volume, remplacer, générer, retirer)</td></tr>
@@ -497,7 +527,8 @@ page : { page: "page.jpg", frames: "frames.png", size: [W, H], fps: 24, sound: {
       <tr><td><code>…/&lt;id&gt;/panels/&lt;case&gt;</code>, <code>/image</code>, <code>/sound?layer=audio|voice|extra</code></td><td>Réglages d'une case (clés remplacées) ; image ; son.</td></tr>
       <tr><td><code>…/&lt;id&gt;/estimate · render</code></td><td>Estimation ; rendus (relief : carte immédiate, réponse <code>relief</code>).</td></tr>
       <tr><td><code>…/&lt;id&gt;/audio|voice|foley/&lt;case&gt;</code>, <code>/pagesound</code></td><td>Générer un son seul.</td></tr>
-      <tr><td><code>…/&lt;id&gt;/edit/&lt;case&gt;</code></td><td>Retouches : <code>edit, volumes, extra, pageVolume, review, relief, treatment</code> ; remonte l'export (case <code>_</code> = page).</td></tr>
+      <tr><td><code>…/&lt;id&gt;/edit/&lt;case&gt;</code></td><td>Retouches : <code>edit, volumes, extra, pageVolume, review, relief, treatment, couches</code> ; remonte l'export (case <code>_</code> = page).</td></tr>
+      <tr><td><code>…/&lt;id&gt;/layers/&lt;case&gt;</code></td><td>GET : état des couches (<code>meta, job, possible</code>) ; POST <code>{seed?, machines?}</code> : les (re)calculer.</td></tr>
       <tr><td><code>…/&lt;id&gt;/depth/&lt;case&gt;</code></td><td>Carte de profondeur (<code>{"force": true}</code>).</td></tr>
       <tr><td><code>…/&lt;id&gt;/regen/&lt;case&gt;</code>, <code>/regensound/&lt;case&gt;</code></td><td>Régénérer une vidéo (consigne, même graine) ou un son.</td></tr>
       <tr><td><code>…/&lt;id&gt;/direct</code></td><td>Réalisateur IA (<code>instruction</code>, <code>options</code> dont <code>treatment</code> et <code>treats</code>).</td></tr>
@@ -555,7 +586,7 @@ page : { page: "page.jpg", frames: "frames.png", size: [W, H], fps: 24, sound: {
     <li><b>Réseaux sociaux</b> : une planche ne joue pas dans le fil de X ou Instagram. À faire : un export vidéo de la page
       (MP4 carré, 9:16, 16:9, toutes les cases animées, avec le son) et des aperçus de lien (balises Open Graph, robots des
       réseaux autorisés tout en gardant Google dehors).</li>
-    <li><b>Relief niveau 2</b> : couches détourées et fond bouché (cheveux, voiles) ; double-clic agrandi pour les cases en relief ; aperçu de la carte dans le navigateur (transformers.js).</li>
+    <li><b>Relief niveau 3</b> : un calque par objet proche (banc, table) ; maillages en couches avec vraie caméra perspective (vertigo plus fort) ; détourage BiRefNet (MIT) quand l'image « fond vert » rate ; double-clic agrandi pour les cases en relief.</li>
     <li><b>Biscuits automatiques</b> : bouton « Proposer les biscuits » sur la page, estimation de durée, biscuits en arrière-plan.</li>
     <li>Musiques générées prioritaires quand une page attend seulement ses sons.</li>
     <li>Republier d'un clic les livres en ligne après des retouches.</li>

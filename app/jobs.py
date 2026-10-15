@@ -1,4 +1,4 @@
-"""File de rendus : repartit les videos et les sons sur les ComfyUI du reseau et/ou sur fal.
+"""File de rendus : repartit les videos, les sons et les couches de relief sur les ComfyUI du reseau et/ou sur fal.
 
 - Un fil par worker ComfyUI : il prend la prochaine tache compatible quand il est libre. Si sa file
   ComfyUI est deja occupee par d'autres (Q-Builder…) et qu'un autre worker est libre, il laisse passer ;
@@ -18,7 +18,7 @@ import time
 import traceback
 from pathlib import Path
 
-from . import comfy, falapi, presets, settings, store
+from . import comfy, falapi, layers, presets, settings, store
 
 ROOT = Path(__file__).resolve().parent.parent
 DATA = ROOT / "data"
@@ -26,6 +26,7 @@ JOBS_FILE = Path(os.environ.get("ALIVE_JOBS_FILE") or DATA / "jobs.json")   # in
 AUTO_FAL_AFTER = 120          # s d'attente avant qu'une tache « auto » parte sur fal
 POLL_COMFY = 4
 POLL_FAL = 5
+CAPS = {"video": "video", "audio": "music", "layers": "qwen"}   # tache -> capacite du worker (preflight)
 
 
 def png_size(path):
@@ -262,6 +263,30 @@ class Scheduler:
             self.jobs[job["id"]]["after"] = list(after or [])
         return [job]
 
+    def enqueue_layers(self, project_id, panel_id, machines=None, seed=None):
+        """Relief en couches d'une case (Qwen-Image-Edit sur un PC, puis decoupe ici). Pas de doublon en file."""
+        start = store.path(project_id, f"start/{panel_id}.png")
+        if not start.exists():
+            raise FileNotFoundError("image de depart manquante pour " + panel_id)
+        w, h = png_size(start)
+        spec = {"side": layers.SIDE, "start": f"start/{panel_id}.png", "width": w, "height": h,
+                "seed": int(seed if seed is not None else 20261015)}
+        with self.lock:                                 # verification et ajout d'un seul tenant : jamais deux en meme temps
+            for j in self.jobs.values():
+                if (j["project"], j["panel"], j["kind"]) == (project_id, panel_id, "layers") and j["status"] in ("queued", "running"):
+                    return [dict(j)]
+            return [self._add(project_id, panel_id, layers.SIDE, "layers", "local", self.qwen_machines(machines), spec)]
+
+    def qwen_machines(self, machines):
+        """Parmi les machines choisies, celles qui ont Qwen-Image-Edit ; aucune : toutes celles qui l'ont (None)."""
+        with self.lock:
+            ok = [m for m in machines or [] if (self.workers.get(m) or {}).get("pf", {}).get("qwen")]
+        return ok or None
+
+    def can_layers(self):
+        with self.lock:
+            return any(w["enabled"] and (w["pf"] or {}).get("qwen") for w in self.workers.values())
+
     def _add(self, project_id, panel_id, side, kind, target, machines, spec):
         job = {"id": secrets.token_hex(5), "project": project_id, "panel": panel_id, "side": side, "kind": kind,
                "target": target if kind in ("video", "voice", "foley") else "local", "machines": machines or None, "status": "queued",
@@ -315,20 +340,19 @@ class Scheduler:
                            and (o["pf"] or {}).get("online") and (o["pf"] or {}).get("load", 0) == 0]
             cands = []
             for j in self.jobs.values():
-                if j["status"] != "queued" or j["target"] not in ("local", "auto") or j["kind"] not in ("video", "audio"):
+                if j["status"] != "queued" or j["target"] not in ("local", "auto") or j["kind"] not in CAPS:
                     continue
+                cap = CAPS[j["kind"]]
                 if j["machines"] and w["name"] not in j["machines"]:
                     continue
                 if w["name"] in (j.get("avoid") or []) and any(          # relance : une autre machine si possible
-                        o is not w and o["enabled"] and (o["pf"] or {}).get("video") and o["name"] not in j["avoid"]
+                        o is not w and o["enabled"] and (o["pf"] or {}).get(cap) and o["name"] not in j["avoid"]
                         for o in self.workers.values()):
                     continue
-                if (j["kind"] == "video" and not pf.get("video")) or (j["kind"] == "audio" and not pf.get("music")):
+                if not pf.get(cap):
                     continue
                 if pf.get("load", 0) > 0 and any(
-                        (not j["machines"] or o["name"] in j["machines"])
-                        and (o["pf"].get("video") if j["kind"] == "video" else o["pf"].get("music"))
-                        for o in others_free):
+                        (not j["machines"] or o["name"] in j["machines"]) and o["pf"].get(cap) for o in others_free):
                     continue          # un autre worker est libre : lui laisser
                 cands.append(j)
             if not cands:
@@ -419,7 +443,7 @@ class Scheduler:
         """Erreur passagere de la machine (memoire video…) : une relance, de preference ailleurs ; sinon erreur."""
         try:
             msg = str(exc)
-            if job["kind"] in ("video", "audio") and job.get("worker") not in (None, "fal")                     and int(job.get("attempts") or 0) < 1 and any(t.lower() in msg.lower() for t in self.TRANSIENT):
+            if job["kind"] in CAPS and job.get("worker") not in (None, "fal")                     and int(job.get("attempts") or 0) < 1 and any(t.lower() in msg.lower() for t in self.TRANSIENT):
                 self._set(job, status="queued", attempts=int(job.get("attempts") or 0) + 1, handle=None,
                           avoid=(job.get("avoid") or []) + [job["worker"]], worker=None, started=None,
                           progress="relance (erreur passagère : " + msg[:80] + ")")
@@ -440,6 +464,17 @@ class Scheduler:
             steps = settings.load()["render"].get("steps", 28)
             spec["h3audio"] = bool((w["pf"] or {}).get("h3audio"))
             graph = comfy.h3_graph(spec, names, prefix, steps, audio=spec["h3audio"])
+        elif job["kind"] == "layers":
+            self._set(job, progress="l'IA regarde la case")
+            passes, info = layers.passes(store.path(pid, spec["start"]), spec.get("info"))
+            spec.update(info=info, passes=passes, worker=w["name"])
+            if not passes:                              # l'IA ne voit aucun sujet : pas de calcul sur la machine
+                m = layers.build(pid, job["panel"], dict(spec, skip=True))
+                return self._finish_layers(job, m)
+            spec["src_mtime"] = store.path(pid, spec["start"]).stat().st_mtime   # image changee d'ici la fin : refus
+            name = comfy.upload(w["url"], store.path(pid, spec["start"]), sub)
+            graph, spec["outs"] = comfy.qwen_edit_graph(name, passes, spec["seed"], prefix,
+                                                        fast=bool((w["pf"] or {}).get("qwen_fast")))
         else:
             graph = comfy.music_graph(spec["caption"], spec["lyrics"], spec["seed"], spec["seconds"], prefix)
         prompt_id = comfy.submit(w["url"], graph)
@@ -470,6 +505,15 @@ class Scheduler:
                 break
             self._set(job, progress="calcul %d s" % (time.time() - t0)) if int(time.time() - t0) % 20 < POLL_COMFY else None
             time.sleep(POLL_COMFY)
+        if job["kind"] == "layers":                     # plusieurs images : une par passe Qwen
+            for old in layers.raw_path(job["project"], job["panel"], "x").parent.glob("*.png"):
+                old.unlink()                            # jamais de sortie d'un calcul precedent
+            for key, nid in (job["spec"].get("outs") or {}).items():
+                imgs = ((entry.get("outputs") or {}).get(nid) or {}).get("images") or []
+                if imgs:
+                    comfy.download(h["server"], imgs[0], layers.raw_path(job["project"], job["panel"], key))
+            self._set(job, progress="découpe des calques")
+            return self._finish_layers(job, layers.build(job["project"], job["panel"], job["spec"]))
         exts = (".mp4", ".webm", ".mov") if job["kind"] == "video" else (".mp3", ".flac", ".wav", ".ogg")
         items = list(comfy.outputs(entry, exts))
         if not items:
@@ -545,6 +589,20 @@ class Scheduler:
                     w["job"] = None
 
     # ------------------------------------------------------------ resultat
+    def _finish_layers(self, job, m):
+        secs = round(time.time() - (job["started"] or time.time()), 1)
+
+        lt = m.get("last_try") or {}
+        failed = lt.get("reason") if lt.get("created", 0) >= (job["started"] or 0) else None   # essai rate, anciennes gardees
+
+        def record(p):
+            panel = p["panels"].setdefault(job["panel"], {})
+            panel["layers"] = {"rev": time.time(), "n": m.get("n", 0), "reason": failed or m.get("reason"), "job": job["id"],
+                               "seed": job["spec"].get("seed"), "worker": job.get("worker"), "seconds": secs}
+        store.mutate(job["project"], record)
+        note = ("essai raté (" + failed + "), couches précédentes gardées") if failed else             ("" if m.get("n") else "pas de calques : " + (m.get("reason") or ""))
+        self._set(job, status="done", output=f"layers/{job['panel']}/meta.json", finished=time.time(), progress=note)
+
     def _dest(self, job, ext):
         spec = job["spec"]
         name = f"{job['side']}_s{spec['seed']}_{job['id']}{ext}"

@@ -356,7 +356,7 @@ export function renderSection(app, pid) {
   return box;
 }
 
-export function sideName(s) { return { L: "Côté gauche", R: "Côté droit", V: "Vidéo", A: "Son 1", B: "Son 2", F: "Bruitages", P: "Son global" }[s] || s; }
+export function sideName(s) { return { L: "Côté gauche", R: "Côté droit", V: "Vidéo", A: "Son 1", B: "Son 2", F: "Bruitages", P: "Son global", C: "Couches relief" }[s] || s; }
 
 export function statusText(j) {
   if (j.status === "queued") return j.after?.length ? "attend la vidéo" : "en attente";
