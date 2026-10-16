@@ -335,7 +335,12 @@ page : { page: "page.jpg", frames: "frames.png", size: [W, H], fps: 24, sound: {
         plausible dans une forme magenta ; contrôles SAM, photo recomposée, magenta restant ; 3 graines). Le réglage
         <code>PLATE</code> de <code>app/layers.py</code> choisit : <code>qwen</code>, <code>lama</code> ou
         <code>hybride</code> (LaMa près du contour, là où la parallaxe le montre, Qwen plus loin). Le décor reconstruit ne
-        remplace la photo que sous les personnages, sur 3-4 px autour et sur leur bord doux.</li>
+        remplace la photo que sous les personnages, sur ~7 px autour et sur leur bord doux ; la carte est rentrée de 2 px
+        (à 1 px, un liseré clair du fond partait avec elle).</li>
+      <li><b>Lecteur</b> : au repos, la photo exacte. Dès que la caméra bouge, le fond montre le décor reconstruit là où la
+        carte s'écarte du fond de <b>2 pixels ou plus</b> (écart <b>local</b> : le fond est un plan incliné). Avant le 16/10 au
+        matin, un fondu jusqu'à 6 px d'écart moyen laissait voir, en transparence, le personnage lui-même décalé (« double
+        nez », lunettes dédoublées) et ne finissait jamais sur les cases où les cartes bougent peu.</li>
       <li>Export : <code>images/&lt;case&gt;_bg.jpg</code>, <code>_l1.webp</code>, <code>_l2.webp</code> (RGBA),
         <code>depth/&lt;case&gt;_ld.png</code> (R = plan du fond, G et B = profondeur constante de chaque carte).</li>
     </ol>
