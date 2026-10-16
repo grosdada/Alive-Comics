@@ -18,3 +18,13 @@ Format d'une entrée :
 ```
 
 ---
+
+## 2026-10-16 — arcs verticaux (haut / bas) sur deux images du jeu de test
+- Images : `1_mannequins-7-les-tetes-suite_p2` et `5_coulisses-9-la-pluie_p4`
+- Ce qu'il faut : deux demi-arcs **verticaux** H3 « temps figé » (caméra qui monte, caméra qui descend, partant de
+  l'image), puis la pile construite par `tools/lytro_build.py` (caméra « vertical », donc `axis: "y"`) et
+  `tools/lytro_redepth.py` (Depth Pro). À ranger dans `<dossier>/pile-y/` (et `rendus/arc_haut.mp4`, `arc_bas.mp4`).
+- Réglages : les mêmes que les arcs horizontaux du jeu de test (amplitude « lytro », 73 images, 41 vues, 1024 px).
+- Pourquoi : tester l'axe y du lecteur `lytro-viewer/` (étape 1) sur de vraies vues ; aujourd'hui il n'est testé que
+  sur une scène synthétique (`tools/lytro_synth.py`). Pas bloquant : le lecteur avance sans.
+- Statut : demandé
