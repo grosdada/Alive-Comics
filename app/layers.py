@@ -393,6 +393,20 @@ def _fill_holes(region, alpha):
     return region | fill[lab]
 
 
+def _fill_small(region, max_px):
+    """Trous fermes de la region (ne touchant pas le bord du cadre) de moins de max_px pixels : bouches."""
+    import cv2
+    import numpy as np
+    H, W = region.shape
+    n, lab, st, _ = cv2.connectedComponentsWithStats((~region).astype(np.uint8), connectivity=4)
+    if n <= 2:
+        return region
+    edge = (st[:, 0] == 0) | (st[:, 1] == 0) | (st[:, 0] + st[:, 2] >= W) | (st[:, 1] + st[:, 3] >= H)
+    fill = ~edge & (st[:, 4] < max_px)
+    fill[0] = False
+    return region | fill[lab]
+
+
 def _sharp(region):
     """Alpha net d'une region : 2 pixels en dedans (revue : a 1 pixel, un liseré clair du fond partait avec la carte sur
     les fonds lumineux), bord adouci d'un pixel (pas d'escalier). Les pixels retires au bord sont dans le trou de la
@@ -775,6 +789,12 @@ def build(pid, panel_id, spec=None):
         R_back |= gaps & ~(near_f & ~near_b)              # sinon la carte de derriere (elle est dessous)
     else:
         R_front |= gaps
+    # petits trous fermes (paillettes, reflets, bijoux : SAM y laisse quelques pixels) bouches avant de rentrer le bord :
+    # rentre de 2 px, chaque trou devenait une pastille ou l'on voyait le decor reconstruit (revue 4)
+    tiny = max(40, round(4e-4 * W * H))
+    R_front = _fill_small(R_front, tiny)
+    if back:
+        R_back = _fill_small(R_back, tiny) & ~R_front
     a_front = _sharp(R_front)
     a_back = _sharp(R_back) * (1 - a_front) if back else None   # un pixel ne sert qu'a un calque : celui de devant
     a_all = np.maximum(a_front, a_back) if back else a_front
