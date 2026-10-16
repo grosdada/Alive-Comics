@@ -611,7 +611,7 @@
   const RELIEF_VS = "attribute vec2 p; attribute vec2 t; varying vec2 v; void main(){ v = t; gl_Position = vec4(p, 0.0, 1.0); }";
   const RELIEF_FS = `precision highp float;
     varying vec2 v; uniform sampler2D uImg, uDep, uBg, uL1, uL2, uLD;
-    uniform vec2 uOff; uniform float uDolly, uZoom, uFocus, uOver, uShow, uHue, uN, uMix;
+    uniform vec2 uOff; uniform float uDolly, uZoom, uFocus, uOver, uShow, uHue, uN, uMix, uRev;
     uniform vec3 uFrame; uniform vec4 uGrade;
     // pixel source d'un point de profondeur z (camera : decalage uOff, avancee uDolly linearisee)
     vec2 src(vec2 s, float z){ float zr = z - uFocus; return (s - 0.5) * (1.0 - uDolly * zr) + 0.5 - zr * uOff; }
@@ -644,7 +644,9 @@
       vec3 c; float dz, k1 = 0.0, k2 = 0.0;
       if (uN > 0.5) {                                                             // couches : fond puis sujets
         vec2 u0 = clamp(inv(uLD, vec3(1.0, 0.0, 0.0), s), 0.0, 1.0);
-        c = texture2D(uBg, u0).rgb; dz = texture2D(uLD, u0).r;
+        // fond : la photo tant que les cartes n'ont presque pas bouge, le decor reconstruit a mesure qu'elles s'ecartent
+        // (sinon la bande reconstruite autour des personnages apparaissait d'un coup : un contour qui bouge)
+        c = mix(texture2D(uImg, u0).rgb, texture2D(uBg, u0).rgb, uRev); dz = texture2D(uLD, u0).r;
         vec2 u1 = fp(s, vec3(0.0, 1.0, 0.0)), q1 = clamp(u1, 0.0, 1.0);
         vec4 a = texture2D(uL1, q1); k1 = a.a * inside(u1);                       // hors de l'image : transparent
         c = mix(c, a.rgb, k1); dz = mix(dz, texture2D(uLD, q1).g, k1);
@@ -698,7 +700,7 @@
     gl.useProgram(prog);
     const U = {};
     for (const n of ["uImg", "uDep", "uBg", "uL1", "uL2", "uLD", "uOff", "uDolly", "uZoom", "uFocus", "uOver", "uShow", "uHue",
-                     "uN", "uMix", "uFrame", "uGrade"]) U[n] = gl.getUniformLocation(prog, n);
+                     "uN", "uMix", "uRev", "uFrame", "uGrade"]) U[n] = gl.getUniformLocation(prog, n);
     gl.uniform1i(U.uImg, 0); gl.uniform1i(U.uDep, 1); gl.uniform1i(U.uBg, 2); gl.uniform1i(U.uL1, 3); gl.uniform1i(U.uL2, 4);
     gl.uniform1i(U.uLD, 5);
     const R = { gl, canvas, prog, U, items: [], dirty: true, aP: gl.getAttribLocation(prog, "p"), aT: gl.getAttribLocation(prog, "t") };
@@ -764,7 +766,7 @@
         gl.activeTexture(gl.TEXTURE3); gl.bindTexture(gl.TEXTURE_2D, L ? L.fg[0] : null);
         gl.activeTexture(gl.TEXTURE4); gl.bindTexture(gl.TEXTURE_2D, L && L.fg[1] ? L.fg[1] : null);
         gl.activeTexture(gl.TEXTURE5); gl.bindTexture(gl.TEXTURE_2D, L ? L.ld : null);
-        gl.uniform1f(R.U.uN, L ? L.fg.length : 0); gl.uniform1f(R.U.uMix, m.mix || 0);
+        gl.uniform1f(R.U.uN, L ? L.fg.length : 0); gl.uniform1f(R.U.uMix, m.mix || 0); gl.uniform1f(R.U.uRev, m.rev ?? 1);
         gl.uniform2f(R.U.uOff, m.ox, m.oy);
         gl.uniform1f(R.U.uDolly, m.dolly); gl.uniform1f(R.U.uZoom, m.zoom); gl.uniform1f(R.U.uOver, m.over);
         gl.uniform1f(R.U.uFocus, c.focus ?? 0.7); gl.uniform1f(R.U.uShow, st.showMap === "layers" ? 2 : st.showMap ? 1 : 0);
@@ -903,9 +905,14 @@
     m.over = 1 + k * (2.4 * a + 0.02) + 0.35 * Math.abs(m.dolly);   // au repos : 1 = identique a l'image de la page
     const x = Math.min(1, k / 0.25);
     m.mix = x * x * (3 - 2 * x);                        // couches : fondu depuis la photo exacte des que ca bouge
+    // decor reconstruit montre a mesure que les cartes s'ecartent du fond : 0 au repos, 1 des 6 pixels d'ecart (en pixels de
+    // l'image : ecart de profondeur cartes / fond x decalage de la camera)
+    const zz = (c.layers || {}).z, wImg = (st.layEls && st.layEls.bg && st.layEls.bg.naturalWidth) || 1200;
+    const span = zz && zz.length > 1 ? Math.max(...zz) - Math.min(...zz) : 1;
+    m.rev = Math.min(1, (Math.hypot(m.ox, m.oy) + 0.5 * Math.abs(m.dolly)) * span * wImg / 6);
     const old = st.motion;
     if (!old || old.ox !== m.ox || old.oy !== m.oy || old.dolly !== m.dolly || old.zoom !== m.zoom || old.over !== m.over
-        || old.mix !== m.mix) {
+        || old.mix !== m.mix || old.rev !== m.rev) {
       st.motion = m;
       for (const R of renderers) if (R.items.some(it => it.st === st)) R.dirty = true;
     }
