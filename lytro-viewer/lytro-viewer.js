@@ -418,7 +418,11 @@
       const todo = this.wanted().filter(k => !this.loaded.has(k) && !this.loading.has(k));
       this.ensureCapacity((this.used || 0) + this.loading.size + todo.length);
       this.updateBounds();
-      const run = async () => { while (todo.length) { await this.loadView(todo.shift()); } };
+      // une vue qui echoue ne bloque pas les autres, et l'erreur se voit (case + chiffres sous les reglages)
+      const run = async () => { while (todo.length) { const k = todo.shift();
+        try { await this.loadView(k); }
+        catch (e) { this.loading.delete(k); (this.errors = this.errors || []).push(`vue ${k} : ${e.message || e}`);
+          this.lab.textContent = this.src.label + " · erreur de chargement : " + (e.message || e); console.error(e); } } };
       await Promise.all([run(), run(), run(), run()]);
       this.updateBounds(); this.dirty = true;
       if (!this.calibrated) { this.calibrated = true; setTimeout(() => this.calibrate(), 30); }
@@ -799,16 +803,24 @@
 
   // gyroscope : inclinaison relative a la position au moment de l'activation, +-15 degres = tout l'arc
   let gyroBase = null;
+  // renvoie "" si tout va bien, sinon la raison (en clair)
+  let gyroSeen = 0;
   async function enableGyro(on) {
-    if (!on) { window.removeEventListener("deviceorientation", onOrient); gyroBase = null; viewers.forEach(v => { v.gyroN = null; }); return true; }
-    if (typeof DeviceOrientationEvent !== "undefined" && typeof DeviceOrientationEvent.requestPermission === "function") {
-      try { if (await DeviceOrientationEvent.requestPermission() !== "granted") return false; } catch (e) { return false; }
+    if (!on) { window.removeEventListener("deviceorientation", onOrient); gyroBase = null; viewers.forEach(v => { v.gyroN = null; }); return ""; }
+    if (!window.isSecureContext) return "les navigateurs ne donnent le gyroscope qu'aux pages en https:// (ou localhost) ; cette page est en " + location.protocol.replace(":", "");
+    if (typeof DeviceOrientationEvent === "undefined") return "ce navigateur n'a pas de gyroscope";
+    if (typeof DeviceOrientationEvent.requestPermission === "function") {
+      try { if (await DeviceOrientationEvent.requestPermission() !== "granted") return "autorisation refusée"; } catch (e) { return "autorisation impossible : " + e.message; }
     }
+    gyroSeen = 0;
     window.addEventListener("deviceorientation", onOrient);
-    return true;
+    await new Promise(r => setTimeout(r, 1500));
+    if (!gyroSeen) { window.removeEventListener("deviceorientation", onOrient); return "aucun signal du capteur en 1,5 s"; }
+    return "";
   }
   function onOrient(e) {
     if (e.gamma == null) return;
+    gyroSeen++;
     if (!gyroBase) gyroBase = [e.gamma, e.beta];
     const n = [Math.max(-1, Math.min(1, (e.gamma - gyroBase[0]) / 15)), Math.max(-1, Math.min(1, -(e.beta - gyroBase[1]) / 15))];
     viewers.forEach(v => { v.gyroN = n; });

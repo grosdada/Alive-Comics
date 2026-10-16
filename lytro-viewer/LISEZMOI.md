@@ -32,7 +32,7 @@ Réglages exposés : relief (% de la largeur), force du flou, bande nette, duré
 
 1. **Treillis de vues.** Axe x (une ligne), axe y (une colonne) ou grille 2D (`meta.grid`). Les vues en double
    (même `s`, images identiques : 1 à 21 par pile du jeu de test) sont écartées. Seules les vues utiles au relief
-   courant sont chargées, en gardant un écart d'au moins `minGap` px entre voisines (2,5 px ; 3 px sur téléphone),
+   courant sont chargées, en gardant un écart d'au moins `minGap` px entre voisines (2,5 px ; 4 px sur téléphone, où le relief par défaut est de 2 %),
    la photo d'abord puis du centre vers les bouts. La course de la souris s'arrête aux vues déjà chargées.
 2. **Synthèse de la vue demandée** (WebGL2 : `TEXTURE_2D_ARRAY` couleur RGBA8 + disparité R8 ; WebGL1 : une
    texture par vue). Fondu des 2 vues voisines (4 pour une grille, poids bilinéaires). Chaque vue est **recalée

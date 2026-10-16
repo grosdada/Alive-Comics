@@ -73,7 +73,8 @@
   const grid = document.getElementById("grid"), stats = document.getElementById("stats");
   const set = Object.assign({}, LV.defaults);
   const coarse = matchMedia("(pointer: coarse)").matches;
-  if (coarse) set.minGap = 3;                         // telephone : moins de vues en memoire
+  // telephone : moins de vues en memoire, et plus de relief (1 % d'une case large comme l'ecran = ~4 px, invisible)
+  if (coarse) { set.minGap = 4; set.relief = 2; }
   for (const k of Object.keys(set)) if (qs.has(k)) set[k] = qs.get(k) === "1" ? true : qs.get(k) === "0" ? false : parseFloat(qs.get(k));
   const opts = { forceWebGL1: qs.get("webgl1") === "1", preserve: qs.get("preserve") === "1", noHint: qs.get("hint") === "0",
                  onReady: () => showStats(), onLoaded: () => showStats(), onCalibrated: () => showStats() };
@@ -91,7 +92,7 @@
   for (const k of ["warp", "snap", "allSharp", "showDepth", "idle", "gyro"]) {
     const el = document.getElementById(k); el.checked = !!set[k];
     el.addEventListener("change", async () => {
-      if (k === "gyro") { const ok = await LV.enableGyro(el.checked); if (!ok) { el.checked = false; alert("Gyroscope refusé ou absent."); } }
+      if (k === "gyro") { const why = await LV.enableGyro(el.checked); if (why) { el.checked = false; alert("Gyroscope indisponible : " + why + "."); } }
       set[k] = el.checked; LV.viewers.forEach(v => { v.dirty = true; });
     });
   }
@@ -123,21 +124,36 @@
   document.getElementById("clear").onclick = () => { [...LV.viewers].forEach(v => LV.remove(v)); showStats(); };
 
   // chiffres : memoire GPU par case, vues chargees, recalage mesure, images par seconde
+  let lastExtra = "";
   function showStats(extra) {
+    if (extra !== undefined) lastExtra = extra;
+    extra = lastExtra;
     const vs = [...LV.viewers].filter(v => v.meta);
     if (!vs.length) { stats.textContent = extra || ""; return; }
     const g = vs[0];
-    const lines = [`${g.gl2 ? "WebGL2 (TEXTURE_2D_ARRAY)" : "WebGL1 (repli)"} · ${vs.length} case(s) · mémoire GPU totale ≈ ${(vs.reduce((a, v) => a + v.gpuBytes(), 0) / 1048576).toFixed(0)} Mo`];
+    const lines = [`${g.gl2 ? "WebGL2 (TEXTURE_2D_ARRAY)" : "WebGL1 (repli)"} · ${vs.length} case(s) · mémoire GPU totale ≈ ${(vs.reduce((a, v) => a + v.gpuBytes(), 0) / 1048576).toFixed(0)} Mo` +
+                   ` · page ${window.isSecureContext ? "sécurisée" : "non sécurisée (pas de gyroscope)"} · densité ×${(window.devicePixelRatio || 1).toFixed(2)}${coarse ? " · tactile" : ""}`];
     for (const v of vs) {
       const L = v.L, tot = L.cols * L.rows;
       if (!v.loaded.size && !v.loading?.size && v.cap === 0) { lines.push(`${v.src.label} : hors écran, mémoire libérée`); continue; }
       lines.push(`${v.src.label} : ${v.loaded.size}/${tot} vues${L.dups ? ` (+${L.dups} doublons écartés)` : ""} · ${v.tw}×${v.th} · ` +
                  `${(v.gpuBytes() / 1048576).toFixed(1)} Mo GPU · recalage k=${v.K[0].toFixed(2)} c=${v.K[1].toFixed(2)}` +
                  (L.rows > 1 ? ` / y k=${v.K[2].toFixed(2)} c=${v.K[3].toFixed(2)}` : "") + (v.calibMs != null ? ` (${v.calibMs} ms)` : ""));
+      // course possible et position actuelle, en px de la pile et en px a l'ecran (ce que l'oeil voit bouger)
+      if (v.useI && v.cw) {
+        const css = v.el.getBoundingClientRect().width / v.meta.w, c0 = L.sx[L.cc], r0 = L.sy[L.cr];
+        const a = L.sx[v.useI[0]] - c0, b = L.sx[v.useI[v.useI.length - 1]] - c0;
+        const ay = L.sy[v.useJ[0]] - r0, by = L.sy[v.useJ[v.useJ.length - 1]] - r0;
+        lines.push(`    course ${a.toFixed(1)} … +${b.toFixed(1)} px` + (L.rows > 1 ? `, y ${ay.toFixed(1)} … +${by.toFixed(1)} px` : "") +
+                   ` (≈ ${(Math.max(-a, b) * css).toFixed(1)} px à l'écran) · position ${(v.px - c0).toFixed(1)} px` + (L.rows > 1 ? ` / ${(v.py - r0).toFixed(1)}` : "") +
+                   (v.errors?.length ? ` · ERREURS : ${v.errors.join(" ; ")}` : ""));
+      }
     }
     if (extra) lines.push(extra);
     stats.textContent = lines.join("\n");
   }
+
+  setInterval(() => showStats(), 1000);                  // chiffres vivants (position, erreurs)
 
   // mesure : toutes les cases oscillent, mise au point active, 6 s ; images par seconde (navigateur) et temps GPU
   document.getElementById("bench").onclick = async () => {
