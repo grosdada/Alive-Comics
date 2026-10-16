@@ -99,6 +99,9 @@ avec les pages, le lecteur des planches (`player/alive-player.js`) reprend le le
 
 ## 5. Règles de travail
 
+- **Besoin d'un rendu ou de nouvelles données ?** Écris ta demande dans `lytro-testdata/DEMANDES.md` (format dans
+  le fichier), pousse, et préviens David. La session locale fait les rendus et répond dans le même fichier.
+
 - Écris en français dans les docs et l'interface ; code et commentaires dans le style du dépôt (français, sans accents
   dans le code Python).
 - Ne versionne jamais `local_settings.json`, `projects/`, `data/` (déjà dans `.gitignore`).
