@@ -159,7 +159,7 @@ pip install -r requirements.txt        # pillow, numpy, onnxruntime</code></pre>
         <tbody>
           <tr><td><code>projects/</code></td><td>5,7 Go</td><td>toutes les planches : project.json, images, rendus, cartes, exports</td><td>oui</td></tr>
           <tr><td><code>local_settings.json</code></td><td>quelques Ko</td><td>clés Anthropic et fal, machines ComfyUI, réglages de publication</td><td>oui</td></tr>
-          <tr><td><code>data/books.json</code>, <code>published.json</code>, <code>user_presets.json</code></td><td>petits</td><td>livres, registre des publications, préréglages de tremblé</td><td>oui</td></tr>
+          <tr><td><code>data/books.json</code>, <code>data/folders.json</code> (projets de rangement des planches), <code>published.json</code>, <code>user_presets.json</code></td><td>petits</td><td>livres, projets de rangement, registre des publications, préréglages de tremblé</td><td>oui</td></tr>
           <tr><td><code>data/jobs.json</code>, <code>sound_index.json</code></td><td>petits</td><td>file de rendus (historique), empreintes des sons</td><td>utile</td></tr>
           <tr><td><code>data/books/</code></td><td>2,3 Go</td><td>livres assemblés</td><td>non : « Aperçu » les refait</td></tr>
           <tr><td><code>data/models/</code></td><td>95 Mo</td><td>Depth Anything V2 Small</td><td>non : retéléchargé au premier relief</td></tr>
@@ -511,6 +511,11 @@ page : { page: "page.jpg", frames: "frames.png", size: [W, H], fps: 24, sound: {
   <ul>
     <li>Planches en vignettes (la feuille entière, à son format) ou en liste ; recherche ; tris : modification, création,
       alphabétique naturel, mieux notées, à retoucher d'abord.</li>
+    <li><b>Projets de rangement</b> (distincts des livres, pas de publication) : barre « Toutes · Sans projet · un bouton par projet ·
+      + Nouveau projet » au-dessus des planches. Glisser une planche sur un projet la range (un seul projet par planche) ;
+      ctrl / cmd + clic sélectionne plusieurs planches à glisser ensemble ; glisser sur « Sans projet » la sort. « ✎ Modifier ce
+      projet » : nom, couleur, suppression (les planches restent). Une planche créée depuis un projet y est rangée.
+      Stocké dans <code>data/folders.json</code> ; API <code>GET / PUT /api/folders</code> ({folders: [{id, name, color}], assign: {planche: projet}}).</li>
     <li>Étoiles d'après les pastilles : vert 1, orange 0,4, rouge 0, moyenne ramenée de 1 à 5 par demi-étoile (toutes vertes = 5,
       jamais revue = 2,5).</li>
     <li>Pastille de calcul : rouge qui clignote = rendu en cours, orange = en file (toutes les 4 s).</li>
