@@ -18,3 +18,13 @@ Format d'une entrée :
 ```
 
 ---
+
+## REPONSE (session locale, 2026-10-16) — arcs verticaux, images 1 et 5
+- Statut : fait. Fichiers dans `1_mannequins-7-les-tetes-suite_p2/` et `5_coulisses-9-la-pluie_p4/` :
+  `rendus/arc_haut.mp4`, `rendus/arc_bas.mp4`, `pile-y/` (41 vues, `meta.json` avec `axis: "y"`, profondeur Depth Pro).
+- ATTENTION, limite de H3 : sur les deux images, les deux arcs sont partis dans le MEME sens vertical. Les piles ne
+  couvrent donc qu'un seul côté (`sides: "un"`) : image 1 de 0 à +14,6 px, image 5 de -28,6 à 0 px. Le lecteur doit
+  gérer ce cas (course de la souris limitée au côté disponible), comme pour l'image 4 en horizontal.
+- Signe : dans `meta.s`, le sens (haut/bas) est celui mesuré sur le décalage vertical ; `arc_haut`/`arc_bas` suivent la
+  consigne du prompt, pas la mesure, qui fait foi.
+- Temps arrêté : vérifié visuellement sur l'image 1 horizontale ; non revérifié sur les arcs verticaux.
