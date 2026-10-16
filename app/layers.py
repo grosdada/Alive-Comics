@@ -42,6 +42,10 @@ SAM_PROMPT = "person:20"       # SAM 3.1 : jusqu'a 20 personnes, un masque chacu
 # « screen » -> 98 % de la case), d'ou les garde-fous de _subjects ; parfois rien du tout (ComfyUI en erreur, voir
 # comfy.no_detection : on passe a l'objet suivant). Un ecran porte aussi les gens qu'il affiche (pas des sujets).
 PROPS = (("phone", "phone:10"), ("screen", "screen:5"))
+# surfaces qui montrent des gens sans en etre : miroir (le visage du conducteur dans le retroviseur), cadre photo. Ces
+# gens-la ne sont pas des sujets ; la surface n'est jamais rattachee a quelqu'un (pas un objet tenu)
+SURFACES = (("mirror", "mirror:5"), ("picture", "picture frame:5"))
+SURFACE_MAX = 0.3
 HANDS = "hand:20"              # un objet de SAM ne suit une personne que s'il touche une de ses mains (le panneau d'une
                                # cuisiniere juste derriere un homme sortait en « screen » a sa profondeur)
 PROP_MAX = 0.05                # un objet tenu couvre 5 % de la case au plus (le gros telephone de la planche 15 : 3 % ;
@@ -252,12 +256,14 @@ def _subjects(im, d, d_im):
     rd = d / "raw"
     props = _sam_masks(rd, W, H, "prop_*.png", PROP_MAX)
     k = lambda r: cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (r, r))  # noqa: E731
-    # une « personne » presque toute dans un ecran est une image affichee (les maries filmes, sur l'ecran du telephone
-    # d'un invite) : elle suit l'objet, ce n'est pas un sujet
-    grown = [cv2.dilate(q.astype(np.uint8), k(5)) > 0 for q in props]
+    # une « personne » presque toute dans un ecran, un miroir ou un cadre est une image (les maries filmes sur l'ecran du
+    # telephone d'un invite, le conducteur dans le retroviseur) : ce n'est pas un sujet. Si SAM rend la personne elle-meme
+    # comme « miroir » (faux objet), elle n'est pas plus petite que lui : elle reste une personne.
+    surfaces = props + _sam_masks(rd, W, H, "surf_*.png", SURFACE_MAX)
+    grown = [cv2.dilate(q.astype(np.uint8), k(5)) > 0 for q in surfaces]
     people, shown = [], []
     for m in _sam_masks(rd, W, H):
-        flat = any((m & g).sum() >= 0.7 * m.sum() and m.sum() < 0.6 * q.sum() for q, g in zip(props, grown))
+        flat = any((m & g).sum() >= 0.7 * m.sum() and m.sum() < 0.6 * q.sum() for q, g in zip(surfaces, grown))
         (shown if flat else people).append(m)
     masks = [m for m in people if m.mean() >= MIN_AREA]
     bn = rd / "birefnet.png"
@@ -495,15 +501,16 @@ def compute(server, pid, panel_id, spec, progress=print, cancelled=lambda: False
     H, W = im.shape[:2]
     if not any(m.mean() >= MIN_AREA for m in _sam_masks(rd, W, H)):   # ni objets ni profondeur : rien a detacher
         return build(pid, panel_id, dict(spec, skip="aucune personne assez grande dans la case"))
-    for key, prompt in PROPS:                             # objets tenus que BiRefNet ne voit pas
-        try:
-            e = _run(server, comfy.sam_graph(name, f"{prefix}_{key}", prompt), cancelled)
-        except comfy.ComfyError as exc:
-            if not comfy.no_detection(exc):
-                raise
-            continue
-        for i, it in enumerate(_images(e, "6")):
-            comfy.download(server, it, rd / f"prop_{key}_{i:02d}.png")
+    for kind, items in (("prop", PROPS), ("surf", SURFACES)):     # objets tenus que BiRefNet ne voit pas ; surfaces
+        for key, prompt in items:
+            try:
+                e = _run(server, comfy.sam_graph(name, f"{prefix}_{key}", prompt), cancelled)
+            except comfy.ComfyError as exc:
+                if not comfy.no_detection(exc):
+                    raise
+                continue
+            for i, it in enumerate(_images(e, "6")):
+                comfy.download(server, it, rd / f"{kind}_{key}_{i:02d}.png")
     try:
         e = _run(server, comfy.sam_graph(name, f"{prefix}_hand", HANDS), cancelled)
         for i, it in enumerate(_images(e, "6")):
@@ -645,6 +652,14 @@ def build(pid, panel_id, spec=None):
     plate = d / "raw" / "plate.png"
     if not plate.exists():
         return give_up("plaque de fond manquante")
+    filled = np.zeros((H, W), bool)                       # ou les plaques ont vraiment refait le decor
+    for f in (d / "raw" / "painted.png", d / "raw" / "hole.png"):
+        if f.exists():
+            x = np.asarray(Image.open(f).convert("RGB").resize((W, H), Image.NEAREST))
+            filled |= (x[..., 0] > 200) & (x[..., 1] < 60) & (x[..., 2] > 200) if f.name == "painted.png" else x[..., 0] > 127
+    core = cv2.erode((a_all > 0.5).astype(np.uint8), np.ones((5, 5), np.uint8)) > 0
+    if core.any() and (core & ~filled).sum() > 0.02 * core.sum():
+        return give_up("les sujets ont change depuis le calcul du decor cache : relancer le calcul")
 
     # 2) groupes devant / derriere par ecart de profondeur
     front, back, how = subs, [], "un seul plan"
