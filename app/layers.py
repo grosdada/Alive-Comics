@@ -523,8 +523,10 @@ def compute(server, pid, panel_id, spec, progress=print, cancelled=lambda: False
     d = folder(pid, panel_id)
     rd = d / "raw"
     rd.mkdir(parents=True, exist_ok=True)
-    for old in [*rd.glob("*.png"), *rd.glob("*.npy")]:
-        old.unlink()                                      # jamais de sortie d'un calcul precedent
+    for old in [*rd.glob("*.png"), *rd.glob("*.npy")]:    # jamais de sortie d'un calcul precedent, sauf la profondeur
+        if old.name == "depth.npy" and old.stat().st_mtime > spec["src_mtime"]:   # de la meme image (20-90 s sur le
+            continue                                                               # processeur quand le GPU est pris)
+        old.unlink()
     sub, prefix = f"alivecomics/{pid}", f"AliveComics/{pid}/{panel_id}_C"
     seed = int(spec.get("seed") or 20261015)
 
