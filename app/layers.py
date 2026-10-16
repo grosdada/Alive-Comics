@@ -42,8 +42,9 @@ SAM_PROMPT = "person:20"       # SAM 3.1 : jusqu'a 20 personnes, un masque chacu
 # objets cherches par SAM 3.1 en plus des personnes, tous dans un seul graphe (masques reunis : un objet absent donne
 # un masque vide). Objet absent : SAM rend parfois un faux objet (« giraffe » -> un doigt, « screen » -> 98 % de la case),
 # d'ou les garde-fous de _subjects. Revue des 71 cases de demo : sans eux, gobelets, feuilles, bouquets, parapluie,
-# telephones, cigarettes restaient au fond pendant que la main glissait.
-OBJECTS = ("phone", "screen", "cup", "glass", "bottle", "paper", "book", "bouquet", "flower", "umbrella", "camera",
+# telephones, cigarettes restaient au fond pendant que la main glissait. « drinking glass » et pas « glass » : SAM y
+# prenait la vitre d'une fenetre, qui partait avec la personne dont la main la touchait.
+OBJECTS = ("phone", "screen", "cup", "drinking glass", "bottle", "paper", "book", "bouquet", "flower", "umbrella", "camera",
            "microphone", "cigarette", "bag", "knife")             # tenus : suivent la main qui les touche
 WORN = ("necktie", "hat", "scarf", "strap")                       # portes : suivent la personne qu'ils touchent
 SURFACES = ("mirror", "picture frame")                            # montrent des gens (images, pas des sujets)
