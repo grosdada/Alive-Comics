@@ -39,7 +39,13 @@ class App {
   // ================================================================ accueil : projets et livres
   async home() {
     this.project = null; this.selected = null;
-    const [projects, books, jobs] = await Promise.all([get("projects"), get("books"), get("jobs?active=1").catch(() => [])]);
+    const [projects, books, jobs, fdata] = await Promise.all([get("projects"), get("books"), get("jobs?active=1").catch(() => []),
+                                                    get("folders").catch(() => ({ folders: [], assign: {} }))]);
+    const folders = fdata.folders, assign = fdata.assign;            // projets de rangement : une planche dans un seul projet
+    const saveFolders = () => put("folders", { folders, assign });
+    let cur = pref("ac-folder", "all");                               // all | none | <id d'un projet>
+    if (cur !== "all" && cur !== "none" && !folders.some(f => f.id === cur)) cur = "all";
+    const selected = new Set();                                       // planches cochees (ctrl / cmd + clic) pour un deplacement groupe
     this.homeJobs = jobs.filter(j => j.status === "running" || j.status === "queued");
     this.root.textContent = "";
     this.root.append(this.topbar(true));
@@ -55,13 +61,43 @@ class App {
     };
     const holder = h("div");
     const draw = () => {
-      const list = projects.filter(p => !q || p.name.toLowerCase().includes(q)).sort(CMP[sort] || CMP.updated);
+      const inCur = (p) => cur === "all" || (cur === "none" ? !assign[p.id] : assign[p.id] === cur);
+      const pool = projects.filter(inCur);
+      const list = pool.filter(p => !q || p.name.toLowerCase().includes(q)).sort(CMP[sort] || CMP.updated);
       holder.textContent = "";
       holder.append(view === "list" ? this.projectList(list, inBooks) : this.projectGrid(list));
-      count.textContent = q ? `${list.length} / ${projects.length}` : String(projects.length);
+      count.textContent = q ? `${list.length} / ${pool.length}` : String(pool.length);
       this.paintCalc();
+      this.dragSetup(holder, selected, async (pids, fid) => {       // glisse-depose : vers un projet, ou « sans projet »
+        for (const pid of pids) { if (fid) assign[pid] = fid; else delete assign[pid]; }
+        selected.clear(); await saveFolders(); drawBar(); draw();
+        const n = pids.length, s = n > 1 ? "s" : "";
+        toast(fid ? `${n} planche${s} rangée${s} dans « ${folders.find(f => f.id === fid).name} »` : `${n} planche${s} sortie${s} de leur projet`);
+      });
     };
     const count = h("span.muted");
+    // barre des projets : Toutes / Sans projet / un bouton par projet (cible de glisse-depose) / + Nouveau projet
+    const bar = h("div.fbar");
+    const nOf = (k) => k === "all" ? projects.length : k === "none" ? projects.filter(p => !assign[p.id]).length
+                                                     : projects.filter(p => assign[p.id] === k).length;
+    const drawBar = () => {
+      bar.textContent = "";
+      const chip = (key, label, color, fid) => {
+        const b = h("button.fchip" + (cur === key ? ".on" : ""), { "data-folder": fid === undefined ? null : fid,
+          title: fid ? "Clic : afficher · double-clic : renommer / supprimer · glisse des planches dessus pour les ranger"
+                     : key === "none" ? "Glisse des planches ici pour les sortir de leur projet" : "",
+          on: { click: () => { cur = key; setPref("ac-folder", key); drawBar(); draw(); },
+                dblclick: fid ? () => this.folderMenu(fid, folders, assign, saveFolders, () => { drawBar(); draw(); }) : null } },
+          color ? h("i.fdot", { style: "background:" + color }) : null, h("span", label), h("small", String(nOf(key))));
+        return b;
+      };
+      bar.append(chip("all", "Toutes", null), chip("none", "Sans projet", null, ""));
+      for (const f of folders) bar.append(chip(f.id, f.name, f.color, f.id));
+      if (folders.some(f => f.id === cur)) bar.append(h("button.fchip.fedit", { title: "Renommer, changer la couleur ou supprimer ce projet",
+        on: { click: () => this.folderMenu(cur, folders, assign, saveFolders, () => { drawBar(); draw(); }) } }, "✎ Modifier ce projet"));
+      bar.append(h("button.fchip.fnew", { on: { click: () => this.folderMenu(null, folders, assign, saveFolders, () => { drawBar(); draw(); },
+        (id) => { cur = id; setPref("ac-folder", id); }) } }, "+ Nouveau projet"));
+    };
     const search = h("input.search", { type: "search", placeholder: "Rechercher une planche…" });
     search.addEventListener("input", () => { q = search.value.trim().toLowerCase(); draw(); });
     const sortSel = h("select", { title: "Ordre des planches" },
@@ -98,7 +134,7 @@ class App {
       sync();
       return [head, body];
     };
-    const newPlanche = h("button.primary", { on: { click: () => this.newProjectDialog() } }, "+ Nouvelle planche");
+    const newPlanche = h("button.primary", { on: { click: () => this.newProjectDialog(cur !== "all" && cur !== "none" ? cur : null) } }, "+ Nouvelle planche");
     const newBook = h("button", { on: { click: async () => {
       const id = Math.random().toString(36).slice(2, 8);
       books.push({ id, title: "Nouveau livre", pages: [] });
@@ -108,8 +144,9 @@ class App {
     } } }, "+ Nouveau livre");
     const bookTools = [h("button.mini", { on: { click: () => allBooks(true) } }, "Tout déplier"),
                        h("button.mini", { on: { click: () => allBooks(false) } }, "Tout replier")];
+    drawBar();
     this.root.append(h("main.home",
-      ...section("planches", "Planches", count, [search, sortSel, seg], [newPlanche], holder),
+      ...section("planches", "Planches", count, [search, sortSel, seg], [newPlanche], h("div", bar, holder)),
       ...section("livres", "Livres", h("span.muted", String(books.length)), bookTools, [newBook], bookList)));
     draw();
   }
@@ -256,7 +293,7 @@ class App {
     setTimeout(() => document.addEventListener("pointerdown", away, true), 0);
   }
 
-  newProjectDialog() {
+  newProjectDialog(folderId) {
     const name = h("input", { value: "Planche " + new Date().toLocaleDateString("fr-FR") });
     const fmt = h("select", FORMATS.map(f => h("option", { value: f.id }, f.label)));
     let preset = "david", orient = "portrait";
@@ -289,8 +326,65 @@ class App {
         p.nextId = n + 1;
         for (const id of leaves(layout)) p.panels[id] = NEW_PANEL();
         await put("projects/" + p.id, p);
+        if (folderId) {                                              // planche creee depuis un projet : rangee dedans
+          const fd = await get("folders").catch(() => ({ folders: [], assign: {} }));
+          fd.assign[p.id] = folderId; await put("folders", fd);
+        }
         location.hash = "#p=" + p.id;
       } }]);
+  }
+
+  // dialogue d'un projet : creer (fid null) / renommer / couleur / supprimer (les planches restent, « sans projet »)
+  folderMenu(fid, folders, assign, save, redraw, onCreated) {
+    const f = fid ? folders.find(x => x.id === fid) : { id: Math.random().toString(36).slice(2, 8), name: "", color: "#f2b45c" };
+    const name = h("input", { value: f.name, placeholder: "Nom du projet (ex. Mariage Provence)" });
+    const color = h("input", { type: "color", value: f.color });
+    modal(fid ? "Projet" : "Nouveau projet", h("div.form", h("label.field", h("span.lab", "Nom"), name), h("label.field", h("span.lab", "Couleur"), color)), [
+      { label: "Annuler" },
+      fid ? { label: "Supprimer le projet", click: async () => {
+        if (!confirm(`Supprimer le projet « ${f.name} » ? Les planches ne sont pas supprimées : elles passent « sans projet ».`)) return false;
+        folders.splice(folders.indexOf(f), 1);
+        for (const k of Object.keys(assign)) if (assign[k] === fid) delete assign[k];
+        await save(); this.home();
+      } } : null,
+      { label: fid ? "Enregistrer" : "Créer", primary: true, click: async () => {
+        f.name = name.value.trim() || "Projet"; f.color = color.value;
+        if (!fid) { folders.push(f); onCreated?.(f.id); }
+        await save(); redraw();
+      } }].filter(Boolean));
+    setTimeout(() => name.focus(), 50);
+  }
+
+  // glisse-depose des planches (cartes ou lignes de liste) vers les boutons de projet ; ctrl / cmd + clic = selection multiple
+  dragSetup(holder, selected, onDrop) {
+    for (const el of holder.querySelectorAll("[data-pid]")) {
+      el.draggable = true;
+      el.classList.toggle("sel", selected.has(el.dataset.pid));
+      el.addEventListener("click", (e) => {
+        if (!(e.ctrlKey || e.metaKey)) return;
+        e.preventDefault();
+        const pid = el.dataset.pid;
+        if (selected.has(pid)) selected.delete(pid); else selected.add(pid);
+        el.classList.toggle("sel", selected.has(pid));
+      });
+      el.addEventListener("dragstart", (e) => {
+        const pid = el.dataset.pid;
+        e.dataTransfer.setData("text/ac-planches", JSON.stringify(selected.has(pid) ? [...selected] : [pid]));
+        e.dataTransfer.effectAllowed = "move";
+        el.classList.add("dragging");
+        document.body.classList.add("dragging-planche");
+      });
+      el.addEventListener("dragend", () => { el.classList.remove("dragging"); document.body.classList.remove("dragging-planche"); });
+    }
+    for (const chip of this.root.querySelectorAll(".fchip[data-folder]")) {
+      chip.ondragover = (e) => { if ([...e.dataTransfer.types].includes("text/ac-planches")) { e.preventDefault(); chip.classList.add("over"); } };
+      chip.ondragleave = () => chip.classList.remove("over");
+      chip.ondrop = (e) => {
+        e.preventDefault(); chip.classList.remove("over");
+        const pids = JSON.parse(e.dataTransfer.getData("text/ac-planches") || "[]");
+        if (pids.length) onDrop(pids, chip.dataset.folder || null);
+      };
+    }
   }
 
   // ================================================================ espace de travail

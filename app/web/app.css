@@ -245,3 +245,17 @@ audio { width: 100%; height: 34px; }
 .home-tools .sec-title { cursor: pointer; user-select: none; }
 .home-tools .sec-title:hover { color: var(--accent); }
 main.home > div[hidden], .home-tools [hidden] { display: none !important; }
+
+/* ---------- projets de rangement des planches (distincts des livres) */
+.fbar { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 14px; }
+.fchip { border-radius: 10px; padding: 6px 12px; background: var(--panel); border: 1px solid var(--line); }
+.fchip small { color: var(--muted); margin-left: 2px; }
+.fchip.on { background: var(--panel2); border-color: var(--accent); box-shadow: inset 0 -3px 0 var(--accent); }
+.fchip.fnew { border-style: dashed; color: var(--muted); }
+.fchip .fdot { width: 11px; height: 11px; border-radius: 3px; display: inline-block; }
+.fchip.over { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.fchip.over small { color: var(--accent-ink); }
+body.dragging-planche .fchip[data-folder] { border-style: dashed; border-color: var(--accent); }
+.card.sel, .prow.sel { outline: 2px solid var(--accent); outline-offset: -2px; }
+.card.dragging, .prow.dragging { opacity: .45; }
+.fchip.fedit { color: var(--muted); }

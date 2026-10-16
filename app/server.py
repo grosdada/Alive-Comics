@@ -28,6 +28,7 @@ ROOT = Path(__file__).resolve().parent.parent
 WEB = ROOT / "app" / "web"
 PLAYER = ROOT / "player"
 BOOKS = ROOT / "data" / "books.json"
+FOLDERS = ROOT / "data" / "folders.json"      # projets de rangement : {"folders": [{id, name, color}], "assign": {planche: projet}}
 VERSION = "0.1.0"
 mimetypes.add_type("text/javascript", ".js")
 mimetypes.add_type("video/mp4", ".mp4")
@@ -291,6 +292,18 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json(edit.save_user_preset(self.jbody()))
         if head == "books":
             return self.books(m, parts, q)
+        if head == "folders":                        # rangement des planches par projet (distinct des livres)
+            if m == "GET":
+                return self.send_json(json.loads(FOLDERS.read_text(encoding="utf-8")) if FOLDERS.exists() else {"folders": [], "assign": {}})
+            if m == "PUT":
+                b = self.jbody()
+                ids = {f["id"] for f in b.get("folders", [])}
+                clean = {"folders": [{"id": f["id"], "name": str(f.get("name") or "Projet"), "color": f.get("color") or "#f2b45c"}
+                                     for f in b.get("folders", [])],
+                         "assign": {k: v for k, v in (b.get("assign") or {}).items() if v in ids}}
+                FOLDERS.parent.mkdir(exist_ok=True)
+                FOLDERS.write_text(json.dumps(clean, indent=1, ensure_ascii=False), encoding="utf-8")
+                return self.send_json({"ok": True})
         if head == "projects":
             return self.projects(m, parts, q)
         raise ApiError("route inconnue : /api/" + "/".join(parts), 404)
