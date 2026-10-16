@@ -511,6 +511,16 @@ def _plate_faults(im, plate, blob):
 
 
 # ------------------------------------------------------------------ calcul complet (tache de la file)
+def extra_prompts():
+    """Recherches SAM en plus des personnes -> {fichier raw sans .png : texte}. Le « :N » est indispensable : sans lui,
+    SAM 3.1 ne rend que sa meilleure detection (une seule main par photo, un seul gobelet...)."""
+    out = {f"obj_{x.replace(' ', '_')}": f"{x}:10" for x in OBJECTS}
+    out.update({f"worn_{x.replace(' ', '_')}": f"{x}:10" for x in WORN})
+    out.update({f"surf_{x.replace(' ', '_')}": f"{x}:5" for x in SURFACES})
+    out["hand"] = f"{HANDS}:30"
+    return out
+
+
 def _run(server, graph, cancelled):
     from . import comfy
     pid = comfy.submit(server, graph)
@@ -564,10 +574,7 @@ def compute(server, pid, panel_id, spec, progress=print, cancelled=lambda: False
     H, W = im.shape[:2]
     if not any(m.mean() >= MIN_AREA for m in _sam_masks(rd, W, H)):   # ni objets ni profondeur : rien a detacher
         return build(pid, panel_id, dict(spec, skip="aucune personne assez grande dans la case"))
-    prompts = {f"obj_{x.replace(' ', '_')}": x for x in OBJECTS}              # objets, surfaces, mains : un seul graphe
-    prompts.update({f"worn_{x.replace(' ', '_')}": x for x in WORN})
-    prompts.update({f"surf_{x.replace(' ', '_')}": x for x in SURFACES})
-    prompts["hand"] = HANDS
+    prompts = extra_prompts()                             # objets, surfaces, mains : un seul graphe
     g, outs = comfy.sam_multi_graph(name, f"{prefix}_obj", prompts)
     e = _run(server, g, cancelled)
     for key, node in outs.items():
