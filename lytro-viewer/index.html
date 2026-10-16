@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lytro viewer</title>
+<style>
+  :root { --bg: #111312; --panel: #1b1e1d; --ink: #e8ece9; --muted: #9aa49f; --accent: #e3b45c; --line: #2b302e; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.45 system-ui, "Segoe UI", sans-serif; }
+  header { padding: 14px 16px 4px; display: flex; flex-wrap: wrap; gap: 6px 22px; align-items: baseline; }
+  header h1 { font-size: 18px; margin: 0; font-weight: 600; }
+  header p { margin: 0; color: var(--muted); font-size: 13px; }
+  .ctl { display: flex; flex-wrap: wrap; gap: 8px 20px; padding: 8px 16px; color: var(--muted); font-size: 13px; align-items: center; }
+  .ctl label { display: flex; gap: 7px; align-items: center; }
+  .ctl input[type=range] { width: 120px; accent-color: var(--accent); }
+  .ctl output { min-width: 3.6em; color: var(--ink); font-variant-numeric: tabular-nums; }
+  .ctl button { background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: 4px; padding: 5px 10px; font: inherit; cursor: pointer; }
+  .ctl button:hover { border-color: var(--accent); }
+  #stats { padding: 0 16px 10px; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; white-space: pre-wrap; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 460px), 1fr)); gap: 12px; padding: 0 16px 24px; }
+  .lv-cell { position: relative; background: var(--panel); border-radius: 4px; overflow: hidden; user-select: none; -webkit-user-select: none; }
+  .lv-cell canvas { display: block; width: 100%; height: 100%; cursor: crosshair; }
+  .lv-lab { position: absolute; left: 8px; bottom: 6px; right: 8px; font-size: 12px; color: #fff; text-shadow: 0 1px 3px #000; pointer-events: none; }
+  .lv-wait { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); font-size: 13px; padding: 16px; text-align: center; }
+  .lv-ring { position: absolute; width: 46px; height: 46px; margin: -23px 0 0 -23px; border: 2px solid var(--accent); border-radius: 50%;
+             pointer-events: none; opacity: 0; transition: opacity .6s, transform .6s; transform: scale(1.4); }
+  .lv-ring.on { opacity: .95; transform: scale(1); transition: opacity .15s, transform .25s; }
+  #drop { position: fixed; inset: 0; background: rgba(17, 19, 18, .86); border: 3px dashed var(--accent); display: none; place-items: center;
+          font-size: 20px; z-index: 10; pointer-events: none; }
+  body.dragging #drop { display: grid; }
+  .empty { color: var(--muted); padding: 24px 16px; }
+  .empty code { color: var(--ink); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Lytro viewer</h1>
+  <p>Bouge la souris sur une photo : la perspective suit. Clique : la mise au point va là (double-clic : tout net).
+     Téléphone : glisse pour la perspective, touche pour la mise au point. Dépose un dossier de piles ou un zip n'importe où.</p>
+</header>
+<div class="ctl">
+  <label>Relief <input id="relief" type="range" min="0.25" max="3" step="0.25" value="1"><output id="reliefv"></output></label>
+  <label>Flou <input id="blur" type="range" min="0" max="1" step="0.05" value="0.5"><output id="blurv"></output></label>
+  <label>Bande nette <input id="band" type="range" min="0" max="0.15" step="0.005" value="0.03"><output id="bandv"></output></label>
+  <label>Glissé <input id="focusTime" type="range" min="0.1" max="2" step="0.05" value="0.5"><output id="focusTimev"></output></label>
+  <label title="Écart minimal entre deux vues chargées : plus grand = moins de mémoire, plus de recalage">Pas des vues
+    <input id="minGap" type="range" min="0.5" max="4" step="0.25" value="1.5"><output id="minGapv"></output></label>
+</div>
+<div class="ctl">
+  <label><input id="warp" type="checkbox" checked> Fondu guidé par la profondeur</label>
+  <label><input id="snap" type="checkbox" checked> Se poser sur une vue réelle</label>
+  <label><input id="allSharp" type="checkbox"> Net partout</label>
+  <label><input id="showDepth" type="checkbox"> Voir la profondeur</label>
+  <label><input id="idle" type="checkbox"> Oscillation au repos</label>
+  <label><input id="gyro" type="checkbox"> Gyroscope</label>
+  <button id="openDir">Ouvrir un dossier…</button>
+  <button id="openZip">Ouvrir un zip…</button>
+  <button id="clear">Vider</button>
+  <button id="bench">Mesurer (6 s)</button>
+  <input id="dirInput" type="file" webkitdirectory multiple hidden>
+  <input id="zipInput" type="file" accept=".zip" multiple hidden>
+</div>
+<div id="stats"></div>
+<div class="grid" id="grid"></div>
+<div id="drop">Dépose ici un dossier de piles ou un zip</div>
+<script src="zip.js"></script>
+<script src="lytro-viewer.js"></script>
+<script>
+(() => {
+  "use strict";
+  const LV = window.LytroViewer, qs = new URLSearchParams(location.search);
+  const grid = document.getElementById("grid"), stats = document.getElementById("stats");
+  const set = Object.assign({}, LV.defaults);
+  const coarse = matchMedia("(pointer: coarse)").matches;
+  if (coarse) set.minGap = 2.5;                       // telephone : moins de vues en memoire
+  for (const k of Object.keys(set)) if (qs.has(k)) set[k] = qs.get(k) === "1" ? true : qs.get(k) === "0" ? false : parseFloat(qs.get(k));
+  const opts = { forceWebGL1: qs.get("webgl1") === "1", preserve: qs.get("preserve") === "1", noHint: qs.get("hint") === "0",
+                 onReady: () => showStats(), onLoaded: () => showStats(), onCalibrated: () => showStats() };
+
+  // reglages
+  const fmt = { relief: v => v + " %", blur: v => Math.round(v * 100) + " %", band: v => v.toFixed(3), focusTime: v => v + " s", minGap: v => v + " px" };
+  for (const k of Object.keys(fmt)) {
+    const el = document.getElementById(k), out = document.getElementById(k + "v");
+    el.value = set[k]; out.textContent = fmt[k](set[k]);
+    el.addEventListener("input", () => {
+      set[k] = parseFloat(el.value); out.textContent = fmt[k](set[k]);
+      LV.viewers.forEach(v => { v.dirty = true; if (k === "relief" || k === "minGap") v.ready.then(() => v.extend()); });
+    });
+  }
+  for (const k of ["warp", "snap", "allSharp", "showDepth", "idle", "gyro"]) {
+    const el = document.getElementById(k); el.checked = !!set[k];
+    el.addEventListener("change", async () => {
+      if (k === "gyro") { const ok = await LV.enableGyro(el.checked); if (!ok) { el.checked = false; alert("Gyroscope refusé ou absent."); } }
+      set[k] = el.checked; LV.viewers.forEach(v => { v.dirty = true; });
+    });
+  }
+
+  const addAll = (sources) => {
+    grid.querySelector(".empty")?.remove();
+    for (const s of sources) LV.add(grid, s, set, opts);
+    showStats();
+  };
+
+  // ouverture : dossier, zip, glisser-deposer
+  const dirInput = document.getElementById("dirInput"), zipInput = document.getElementById("zipInput");
+  document.getElementById("openDir").onclick = () => dirInput.click();
+  document.getElementById("openZip").onclick = () => zipInput.click();
+  for (const inp of [dirInput, zipInput]) inp.addEventListener("change", async () => {
+    try { const s = await LV.stacksFromFileList(inp.files); if (!s.length) alert("Aucune pile (meta.json) trouvée."); addAll(s); }
+    catch (e) { alert(e.message); }
+    inp.value = "";
+  });
+  let dragN = 0;
+  addEventListener("dragenter", (e) => { e.preventDefault(); dragN++; document.body.classList.add("dragging"); });
+  addEventListener("dragleave", () => { if (--dragN <= 0) { dragN = 0; document.body.classList.remove("dragging"); } });
+  addEventListener("dragover", (e) => e.preventDefault());
+  addEventListener("drop", async (e) => {
+    e.preventDefault(); dragN = 0; document.body.classList.remove("dragging");
+    try { const s = await LV.stacksFromDrop(e.dataTransfer); if (!s.length) alert("Aucune pile (meta.json) trouvée."); addAll(s); }
+    catch (err) { alert(err.message); }
+  });
+  document.getElementById("clear").onclick = () => { [...LV.viewers].forEach(v => LV.remove(v)); showStats(); };
+
+  // chiffres : memoire GPU par case, vues chargees, recalage mesure, images par seconde
+  function showStats(extra) {
+    const vs = [...LV.viewers].filter(v => v.meta);
+    if (!vs.length) { stats.textContent = extra || ""; return; }
+    const g = vs[0];
+    const lines = [`${g.gl2 ? "WebGL2 (TEXTURE_2D_ARRAY)" : "WebGL1 (repli)"} · ${vs.length} case(s) · mémoire GPU totale ≈ ${(vs.reduce((a, v) => a + v.gpuBytes(), 0) / 1048576).toFixed(0)} Mo`];
+    for (const v of vs) {
+      const L = v.L, tot = L.cols * L.rows;
+      lines.push(`${v.src.label} : ${v.loaded.size}/${tot} vues${L.dups ? ` (+${L.dups} doublons écartés)` : ""} · ${v.tw}×${v.th} · ` +
+                 `${(v.gpuBytes() / 1048576).toFixed(1)} Mo GPU · recalage k=${v.K[0].toFixed(2)} c=${v.K[1].toFixed(2)}` +
+                 (L.rows > 1 ? ` / y k=${v.K[2].toFixed(2)} c=${v.K[3].toFixed(2)}` : "") + (v.calibMs != null ? ` (${v.calibMs} ms)` : ""));
+    }
+    if (extra) lines.push(extra);
+    stats.textContent = lines.join("\n");
+  }
+
+  // mesure : toutes les cases oscillent, mise au point active, 6 s ; images par seconde (navigateur) et temps GPU
+  document.getElementById("bench").onclick = async () => {
+    const vs = [...LV.viewers].filter(v => v.meta); if (!vs.length) return;
+    const was = set.idle; set.idle = true;
+    vs.forEach(v => { v.active = false; v.apTo = 1; v.ap = 1; v.stats.gpuMs = []; v.idleT = 0; });
+    showStats("mesure en cours…");
+    let n = 0, t0 = performance.now(), worst = 0, prev = t0;
+    await new Promise(ok => { const f = (now) => { n++; worst = Math.max(worst, now - prev); prev = now; if (now - t0 < 6000) requestAnimationFrame(f); else ok(); }; requestAnimationFrame(f); });
+    set.idle = was;
+    const fps = n / ((performance.now() - t0) / 1000);
+    const gpu = vs.flatMap(v => v.stats.gpuMs), gm = gpu.length ? (gpu.reduce((a, b) => a + b, 0) / gpu.length) : null;
+    const res = `Mesure : ${fps.toFixed(1)} images/s (pire intervalle ${worst.toFixed(0)} ms), ${vs.length} case(s) animées avec flou` +
+                (gm != null ? ` · GPU ${gm.toFixed(2)} ms par case et par image` : " · temps GPU non disponible sur ce navigateur") +
+                ` · ${navigator.userAgent.replace(/^Mozilla\/5\.0 /, "")}`;
+    showStats(res); window.__lvBench = { fps, worst, gpuMs: gm };
+  };
+
+  // piles a afficher : ?piles=chemin1,chemin2 (relatifs a cette page), sinon la liste de demo.json
+  (async () => {
+    let paths = (qs.get("piles") || "").split(",").filter(Boolean);
+    if (!paths.length) {
+      try { paths = await (await fetch("demo.json")).json(); }
+      catch (e) { paths = []; }
+    }
+    if (!paths.length || location.protocol === "file:") {
+      grid.innerHTML = `<div class="empty">Aucune pile chargée. Dépose un dossier de piles ou un zip, ou sers le dépôt en HTTP
+        (<code>python -m http.server</code> à la racine, puis <code>/lytro-viewer/</code>).</div>`;
+      return;
+    }
+    addAll(paths.map(p => new LV.UrlSource(p)));
+    window.__lv = { LV, set };
+  })();
+})();
+</script>
+</body>
+</html>
