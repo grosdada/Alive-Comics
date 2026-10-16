@@ -69,8 +69,12 @@ def build(pid, pan):
     d0 = depth.normalize(depth.raw(cv2.resize(start, (MEAS_W, mh), interpolation=cv2.INTER_AREA).astype(np.float32) / 255))
     gm = np.hypot(cv2.Sobel(g0, cv2.CV_32F, 1, 0), cv2.Sobel(g0, cv2.CV_32F, 0, 1))
     tex = gm > np.percentile(gm, 50)
-    near = tex & (d0 > np.percentile(d0, 70))
-    far = tex & (d0 < np.percentile(d0, 30))
+    near = tex & (d0 >= np.percentile(d0, 70))
+    far = tex & (d0 <= np.percentile(d0, 30))
+    if far.sum() < 200:                                    # fond lisse (ciel, mur uni) : on garde tous ses pixels
+        far = d0 <= np.percentile(d0, 30)
+    if near.sum() < 200:
+        near = d0 >= np.percentile(d0, 70)
 
     ax = 1 if (panel.get("camera") or {}).get("id") == "vertical" else 0      # arc vertical : decalage vertical
 
