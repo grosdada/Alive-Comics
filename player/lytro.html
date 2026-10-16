@@ -59,7 +59,9 @@
     uniform vec2 uPx;
     vec3 col(vec2 p){ return mix(texture2D(uA, p).rgb, texture2D(uB, p).rgb, uT); }
     float dep(vec2 p){ return mix(texture2D(uDA, p).r, texture2D(uDB, p).r, uT); }
-    float coc(float d){ return clamp(abs(d - uFocus) * uAp, 0.0, uMaxR); }
+    // bande nette autour du plan de mise au point (le Lytro en gardait une : un visage n'est pas plat, et la profondeur
+    // estimee y est bruitee)
+    float coc(float d){ return clamp(max(abs(d - uFocus) - 0.03, 0.0) * uAp, 0.0, uMaxR); }
     void main(){
       float cd = dep(v);
       if (uShowDepth > 0.5) { float k = coc(cd) / max(uMaxR, 1.0); gl_FragColor = vec4(mix(vec3(cd), vec3(1.0, 0.55, 0.1), 0.6 * (1.0 - k) * step(k, 0.15)), 1.0); return; }
