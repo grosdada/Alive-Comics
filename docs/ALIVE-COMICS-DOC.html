@@ -519,6 +519,12 @@ page : { page: "page.jpg", frames: "frames.png", size: [W, H], fps: 24, sound: {
     <li>Étoiles d'après les pastilles : vert 1, orange 0,4, rouge 0, moyenne ramenée de 1 à 5 par demi-étoile (toutes vertes = 5,
       jamais revue = 2,5).</li>
     <li>Pastille de calcul : rouge qui clignote = rendu en cours, orange = en file (toutes les 4 s).</li>
+    <li><b>Plusieurs PC, un seul serveur</b> : l'app tourne sur un seul PC (HITCHCOCK, 192.168.1.60, réglage <code>server.host = "0.0.0.0"</code>
+      dans <code>local_settings.json</code>) ; les autres PC l'ouvrent dans leur navigateur à <code>http://192.168.1.60:8790</code>. Ne jamais
+      lancer un 2<sup>e</sup> serveur sur les mêmes dossiers (verrou local seulement : risque d'écritures croisées). Port 8790 à ouvrir au
+      pare-feu (réseau privé). Pas de mot de passe : réseau local seulement. Sauvegarde : <code>tools/backup_nas.ps1</code>, tâche planifiée
+      « Alive-Comics sauvegarde NAS » chaque nuit à 3 h 30 vers <code>\192.168.1.44
+as\Backup\Alive-Comics-HITCHCOCK</code> (copie sans miroir).</li>
     <li><b>Onglets « Planches | Livres »</b> en haut de l'accueil (l'onglet est retenu) : on passe de l'un à l'autre sans faire défiler.</li>
     <li>Livres repliables ; ◀ ▶ pour l'ordre des pages ; clic sur une page : l'ouvrir, la voir, l'éditer seule ou dans le livre ;
       « Aperçu » et « Publier le livre ».</li>
