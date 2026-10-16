@@ -70,6 +70,8 @@ courant ; monter le relief en charge d'autres sans redécoder les premières (co
 | Machine | Résultat |
 |---|---|
 | Cloud, rendu logiciel SwiftShader, 7 cases animées avec flou | 2 images/s, ~210 ms de « GPU » par case : **non représentatif** |
+| PC de David (HITCHCOCK), Chrome 128, Windows, 7 cases animées avec flou, cases de 496 px | **60,1 images/s** (plafond de l'écran), pire intervalle 17 ms, **GPU 0,11 ms par case et par image** ; 203 Mo GPU pour les 7 cases (relief monté : 17 à 25 vues par pile H3, 45 pour la grille) |
+| Téléphone moyen | à mesurer |
 
 **À mesurer chez David** : ouvrir la démo sur le PC puis sur un téléphone, cliquer « Mesurer (6 s) ». Les 7 cases
 oscillent avec le flou actif ; la page affiche les images par seconde, le pire intervalle et, si le navigateur le

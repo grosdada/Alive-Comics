@@ -61,7 +61,7 @@ ci-dessus. Les gros fichiers bruts peuvent être absents du dépôt : dans ce ca
 
 ### Étape 1 — Lecteur autonome « lytro-viewer » (priorité)
 > **Fait** (session cloud du 16/10/2026) : `lytro-viewer/` (voir son `LISEZMOI.md`), mesures dans
-> `lytro-viewer/tests/RESULTATS.md`. Reste à mesurer les images par seconde sur le PC et un téléphone (bouton « Mesurer »).
+> `lytro-viewer/tests/RESULTATS.md`. PC : 60 images/s, 0,11 ms GPU par case. Reste à mesurer sur un téléphone (bouton « Mesurer »).
 
 Un dossier `lytro-viewer/` indépendant de l'app : `index.html` + JS sans dépendance, qui lit une ou plusieurs piles
 (chemin relatif ou glisser-déposer d'un dossier / d'un zip).
