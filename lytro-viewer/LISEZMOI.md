@@ -10,7 +10,7 @@
 - **Autres piles** : `index.html?piles=chemin1,chemin2` (chemins relatifs à la page), ou **glisser-déposer** un dossier
   (une ou plusieurs piles, sous-dossiers compris) ou un **zip** n'importe où dans la page. Boutons « Ouvrir un
   dossier… » / « Ouvrir un zip… » sinon. Toute pile = un dossier qui contient `meta.json`.
-- Paramètres d'adresse utiles : `webgl1=1` (forcer le repli WebGL1), `relief=1.5`, `minGap=2.5`, `blur=0.7`,
+- Paramètres d'adresse utiles : `webgl1=1` (forcer le repli WebGL1), `relief=1.5`, `minGap=2.5`, `blur=0.7`, `maxDpr=3`,
   `hint=0` (sans balancement d'accueil).
 
 ## Gestes
@@ -32,7 +32,7 @@ Réglages exposés : relief (% de la largeur), force du flou, bande nette, duré
 
 1. **Treillis de vues.** Axe x (une ligne), axe y (une colonne) ou grille 2D (`meta.grid`). Les vues en double
    (même `s`, images identiques : 1 à 21 par pile du jeu de test) sont écartées. Seules les vues utiles au relief
-   courant sont chargées, en gardant un écart d'au moins `minGap` px entre voisines (1,5 px ; 2,5 px sur téléphone),
+   courant sont chargées, en gardant un écart d'au moins `minGap` px entre voisines (2,5 px ; 3 px sur téléphone),
    la photo d'abord puis du centre vers les bouts. La course de la souris s'arrête aux vues déjà chargées.
 2. **Synthèse de la vue demandée** (WebGL2 : `TEXTURE_2D_ARRAY` couleur RGBA8 + disparité R8 ; WebGL1 : une
    texture par vue). Fondu des 2 vues voisines (4 pour une grille, poids bilinéaires). Chaque vue est **recalée
@@ -47,6 +47,9 @@ Réglages exposés : relief (% de la largeur), force du flou, bande nette, duré
    sujet net ; un premier plan flou déborde sur ce qui est derrière. Bande nette réglable. Au repos, 4 images
    accumulées (disque tourné) : flou sans grain d'échantillonnage. Moitié moins d'échantillons pendant un mouvement.
 4. Copie à l'écran. Rendu seulement quand quelque chose change.
+5. **Mémoire** : vues à la taille d'affichage (densité de pixels plafonnée à 2), réserve allouée au plus juste, et
+   seules les cases proches de l'écran gardent de la mémoire GPU (libérée 3 s après s'en être éloignée, rechargée
+   sans réseau en revenant). Chiffres : `tests/RESULTATS.md`, section 4.
 
 ## Format de pile (rappel, contrat avec le générateur)
 
