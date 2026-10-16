@@ -396,10 +396,11 @@ def _plan(subs, d_im):
             break
         gap = subs[i - 1]["z"] - (subs[i]["z"] if i < len(subs) else z_rest)
         # au-dela de 35 % de la case, seulement un premier plan tres net (ecart 0,3) : la mariee devant des invites
-        # lointains oui ; 9 personnes sur 52 % d'une foule dansante (ecart 0,12 avec le fond) non
-        if gap >= FRONT_GAP and (covers[i - 1] <= 0.35 or gap >= 0.3):
+        # lointains oui ; 9 personnes sur 52 % d'une foule dansante (ecart 0,12 avec le fond) non. Tout le monde
+        # detache (il ne reste que le decor derriere : rien a prolonger) : l'ecart ordinaire suffit.
+        if gap >= FRONT_GAP and (covers[i - 1] <= 0.35 or gap >= 0.3 or i == len(subs)):
             k = i
-    return subs[:k], True, covers[-1]
+    return subs[:k], k < len(subs), covers[-1]
 
 
 def _painted(im, subs, crowd=False):
@@ -410,13 +411,15 @@ def _painted(im, subs, crowd=False):
     import numpy as np
     k = lambda r: cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (r, r))  # noqa: E731
     blob = np.zeros(im.shape[:2], np.uint8)
+    hulls = np.zeros(im.shape[:2], np.uint8)
     for s in subs:
-        if crowd:
-            blob |= s["region"].astype(np.uint8)
-            continue
+        blob |= s["region"].astype(np.uint8)
         cnts, _ = cv2.findContours(s["region"].astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         if cnts:
-            cv2.fillConvexPoly(blob, cv2.convexHull(np.concatenate(cnts)), 1)
+            cv2.fillConvexPoly(hulls, cv2.convexHull(np.concatenate(cnts)), 1)
+    crowd = crowd or hulls.mean() > 0.35                  # gros sujets : la forme convexe couvrirait la case (mur vide)
+    if not crowd:
+        blob = hulls
     if crowd:
         blob = cv2.morphologyEx(cv2.dilate(blob, k(31)), cv2.MORPH_CLOSE, k(max(15, round(0.05 * im.shape[1])) | 1))
     else:
