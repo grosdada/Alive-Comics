@@ -251,7 +251,7 @@
       const pj = await fetch(`/api/projects/${pid}`).then(r => r.json());
       names.push(pj.name || pid);
       const only = (qs.get("only") || "").split(",").filter(Boolean);
-      for (const pan of Object.keys(pj.panels).sort().filter(x => !only.length || only.includes(x))) {
+      for (const pan of Object.keys(pj.panels).sort().filter(x => (!only.length || only.includes(x)) && pj.panels[x].image)) {
         const src = ((pj.panels[pan].image || {}).name || "").replace(/\.png$/, "");
         cells.push(makeCell(pid, pan, `${pan} · ${src}`));
       }
