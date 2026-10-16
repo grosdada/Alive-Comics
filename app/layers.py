@@ -450,6 +450,20 @@ def _plan(subs, d_im):
         if gap >= FRONT_GAP and (covers[i - 1] <= 0.35 or gap >= 0.3 or i == len(subs)):
             k = i
     chosen = subs[:k]
+    if chosen:                                            # rang coherent : un voisin en contact, a profondeur voisine,
+        zmin = min(s["z"] for s in chosen)                # rejoint les choisis (revue : une invitee laissee au fond entre
+        grow = True                                       # deux voisines detachees)
+        while grow:
+            grow = False
+            reg = np.any([s["region"] for s in chosen], axis=0).astype(np.uint8)
+            near = cv2.dilate(reg, np.ones((7, 7), np.uint8)) > 0
+            for s in subs:
+                if any(s is c for c in chosen) or s["z"] < zmin - 0.1 or (s["mask"] & near).sum() <= 50:
+                    continue
+                if float(np.any([c["soft"] > 0.5 for c in chosen + [s]], axis=0).mean()) <= FRONT_MAX:
+                    chosen.append(s)
+                    grow = True
+        chosen.sort(key=lambda s: -s["z"])
     if chosen and len(subs) < len(every):
         zmin = min(s["z"] for s in chosen)
         chosen = sorted(chosen + [s for s in every if s.get("intruder") and s["z"] >= zmin], key=lambda s: -s["z"])
