@@ -333,9 +333,12 @@ def _subjects(im, d, d_im):
             continue
         inside = [int((q & o).sum()) for o in people]
         j = max(range(len(people)), key=lambda i: (inside[i], touch[i]))   # recouvrement reel d'abord (egalites)
-        if inside[j] > 0.5 * q.sum() or not in_hand(q, j):
-            continue                                      # deja dans son masque, ou ne touche aucune de ses mains
-        if zof(q) >= z_people[j] - 0.08 and q.sum() <= (4.0 if cut[j] else 1.5) * people[j].sum():
+        if inside[j] > 0.5 * q.sum():                     # deja a moitie dans son masque : l'objet entier la suit
+            held.setdefault(j, []).append(q)              # (un bouquet coupe en deux restait a moitie au fond)
+            continue
+        if not in_hand(q, j):
+            continue                                      # ne touche aucune de ses mains : pas tenu
+        if zof(q) >= z_people[j] - 0.15 and q.sum() <= (4.0 if cut[j] else 1.5) * people[j].sum():
             held.setdefault(j, []).append((cv2.dilate(q.astype(np.uint8), grow_screen) > 0) if scr else q)
     # objets portes (cravate, chapeau, couronne en papier, echarpe, sangle) : a la personne qu'ils touchent le plus
     for q in _components(rd, W, H, [f"worn_{x.replace(' ', '_')}*" for x in WORN], OBJ_MAX):
@@ -360,6 +363,11 @@ def _subjects(im, d, d_im):
             near_objs = cv2.dilate(objs.astype(np.uint8), k(15)) > 0      # voyait bouger comme un contour)
             closed = cv2.morphologyEx(region.astype(np.uint8), cv2.MORPH_CLOSE, k(9)) > 0
             region |= closed & near_objs & ~others
+        # devant la personne (bouteille, accoudoir, couteau, etincelles) : une encoche etroite dans son masque, plus proche
+        # qu'elle, rejoint sa carte (sinon elle reste au fond, derriere la carte, et laisse un trou qui bouge)
+        kk = max(9, round(0.015 * W)) | 1
+        notch = (cv2.morphologyEx(region.astype(np.uint8), cv2.MORPH_CLOSE, k(kk)) > 0) & ~region & ~others
+        region |= notch & (d_im >= z_people[j] - 0.05)
         region = _fill_holes(region, alpha) & ~others
         others &= ~region
         out.append({"mask": m, "region": region, "soft": _sharp(region & ~others), "area": float(m.mean()),
@@ -511,6 +519,23 @@ def _plate_faults(im, plate, blob):
 
 
 # ------------------------------------------------------------------ calcul complet (tache de la file)
+def lama_hole(subs, W, rd):
+    """Zone que LaMa refait : les sujets choisis, leur bord doux (BiRefNet) et 2,2 % de largeur autour. Plus serree,
+    LaMa recopiait la couleur du bord de la personne en bavure le long de sa silhouette (revue des 71 cases)."""
+    import cv2
+    import numpy as np
+    from PIL import Image
+    region = np.any([s["region"] for s in subs], axis=0).astype(np.uint8)
+    H = region.shape[0]
+    bn = rd / "birefnet.png"
+    if bn.exists():
+        a = np.asarray(Image.open(bn).convert("L").resize((W, H), Image.BILINEAR)) > 40
+        near = cv2.dilate(region, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (31, 31))) > 0
+        region = (region > 0) | (a & near)
+    r = max(6, round(0.022 * W))
+    return cv2.dilate(region.astype(np.uint8), cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * r + 1, 2 * r + 1)))
+
+
 def extra_prompts():
     """Recherches SAM en plus des personnes -> {fichier raw sans .png : texte}. Le « :N » est indispensable : sans lui,
     SAM 3.1 ne rend que sa meilleure detection (une seule main par photo, un seul gobelet...)."""
@@ -613,9 +638,7 @@ def compute(server, pid, panel_id, spec, progress=print, cancelled=lambda: False
     mode = spec.get("plate") or PLATE
     if lama:                                              # LaMa sur la place des sujets (~1 s) : plaque « lama »
         progress("décor caché (LaMa)")
-        region = np.any([s["region"] for s in subs], axis=0).astype(np.uint8)
-        r = max(5, round(0.012 * W))
-        hole = cv2.dilate(region, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * r + 1, 2 * r + 1)))
+        hole = lama_hole(subs, W, rd)
         Image.fromarray(hole * 255).save(rd / "hole.png")
         try:
             g = comfy.lama_graph(name, comfy.upload(server, rd / "hole.png", sub), prefix + "_lama")
