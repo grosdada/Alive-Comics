@@ -639,7 +639,7 @@ def build(pid, panel_id, spec=None):
 
     # 1) sujets : masques exacts (SAM 3.1), bords doux (BiRefNet)
     d_im = _depth(im, d)
-    subs, _, _ = _subjects(im, d, d_im)
+    subs, people, _ = _subjects(im, d, d_im)
     if not subs:
         return give_up("aucune personne assez grande dans la case", True)
     n_all = len(subs)
@@ -669,10 +669,28 @@ def build(pid, panel_id, spec=None):
         k = int(np.argmax(gaps))
         if gaps[k] > 0.12:
             front, back, how = subs[:k + 1], subs[k + 1:], "profondeur"
-    a_front = np.max([s["soft"] for s in front], axis=0)
-    a_back = np.max([s["soft"] for s in back], axis=0) if back else None
-    if a_back is not None:                                # un pixel ne sert qu'a un calque : celui de devant gagne
-        a_back = a_back * (1 - a_front)
+    # alpha de chaque carte : l'union de ses sujets, sans fente entre voisins. Chaque masque rentre d'un pixel laissait
+    # entre deux invites cote a cote une fente ou l'on voyait le decor reconstruit (un tronc sombre) : des lignes qui
+    # bougent autour des gens. Les fentes de quelques pixels entre sujets detaches vont a une carte (photo), jamais au
+    # decor ; seul le contour exterieur du groupe rentre d'un pixel.
+    union = lambda g: np.any([s["region"] for s in g], axis=0)    # noqa: E731
+    R_front = union(front)
+    R_back = union(back) if back else np.zeros((H, W), bool)
+    detached = R_front | R_back
+    chosen = [s["mask"] for s in subs]
+    rest = np.any([m for m in people if not any(m is c for c in chosen)] or [np.zeros((H, W), bool)], axis=0)
+    gaps = (cv2.morphologyEx(detached.astype(np.uint8), cv2.MORPH_CLOSE,
+                             cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))) > 0) & ~detached & ~rest
+    if back:
+        near_f = cv2.dilate(R_front.astype(np.uint8), np.ones((9, 9), np.uint8)) > 0
+        near_b = cv2.dilate(R_back.astype(np.uint8), np.ones((9, 9), np.uint8)) > 0
+        R_front |= gaps & near_f & ~near_b                # fente entre deux sujets de devant : carte de devant
+        R_back |= gaps & ~(near_f & ~near_b)              # sinon la carte de derriere (elle est dessous)
+    else:
+        R_front |= gaps
+    a_front = _sharp(R_front)
+    a_back = _sharp(R_back) * (1 - a_front) if back else None   # un pixel ne sert qu'a un calque : celui de devant
+    a_all = np.maximum(a_front, a_back) if back else a_front
 
     # 3) plaque : recalee hors de la forme peinte, lumiere de la photo prolongee sous les sujets
     margin = max(6, round(0.012 * W))
