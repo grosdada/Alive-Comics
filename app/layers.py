@@ -26,8 +26,9 @@ docs/INSTALL-MODELES-RELIEF.md) :
 Au repos, l'image est celle de la photo : l'IA ne sert que DANS la place des sujets.
 
 Fichiers : projects/<id>/layers/<case>/ : raw/ (sam_XX.png, obj_*.png, worn_*.png, surf_*.png, hand.png, birefnet.png,
-depth.npy, painted.png, plate.png = Qwen, lama.png = LaMa), bg.jpg (fond sans les sujets), l1.webp et l2.webp (sujets RGBA, du plus loin au plus proche), ld.png (profondeurs : R = fond, G = l1,
-B = l2, demi-resolution), meta.json (n calques, profondeurs, plan net conseille, controles).
+depth.npy, painted.png, plate.png = Qwen, lama.png = LaMa), bg.jpg (fond sans les sujets), l1.webp et l2.webp (sujets
+RGBA, du plus loin au plus proche), ld.png (profondeurs : R = fond, G = l1, B = l2, demi-resolution), meta.json (n
+calques, profondeurs, plan net conseille, controles).
 """
 
 import json
