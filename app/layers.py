@@ -6,26 +6,27 @@ qui cache quoi. Le lecteur dessine les calques du fond vers l'avant (player/aliv
 
 Une tache « couches » de la file, sur un PC ComfyUI qui a SAM 3.1, BiRefNet, Qwen-Image-Edit 2509 et LaMa (voir
 docs/INSTALL-MODELES-RELIEF.md) :
-1. ComfyUI : SAM 3.1 (« person ») donne un masque exact par personne ; BiRefNet voit les objets ; SAM 3.1 cherche aussi
-   telephones, ecrans et mains. Un objet suit une personne s'il touche une de ses mains (valise, livre, telephone) ou
-   s'il borde son contour (un bout de costume) ; les gens affiches sur un ecran ne sont pas des sujets.
+1. ComfyUI : SAM 3.1 (« person ») donne un masque exact par personne ; puis, en un seul graphe, les objets tenus
+   (OBJECTS), portes (WORN), les surfaces qui montrent des gens (SURFACES) et les mains. Un objet tenu suit la personne
+   dont il touche une main, un objet porte celle qu'il touche ; les gens vus sur un ecran, dans un miroir ou un cadre ne
+   sont pas des sujets. BiRefNet : seulement les lisieres oubliees par SAM et le bord doux (cheveux, flou).
 2. Ici : profondeur de la photo (Depth Pro d'Apple si present, sinon Depth Anything V2 Small). Sujets = les personnes
    assez grandes ; foule (sujets sur plus de 45 % de la case) : seulement le premier plan net (les plus proches, bien
-   separes du reste en profondeur), le reste de la foule reste dans le decor ; aucun premier plan net : nappe simple.
+   separes du reste en profondeur), le reste de la foule reste dans le decor ; aucun premier plan net : pas de couches
+   (la case glisse d'un bloc, carte plane).
 3. Decor cache (voir PLATE) : LaMa sur la place des sujets (prolonge les couleurs, n'invente rien), et Qwen-Image-Edit
    sur une forme neutre (magenta) peinte a leur place : forme convexe (peinte en silhouette, Qwen redessinait des
    jambes) ; foule : silhouette elargie, Qwen y prolonge les gens de derriere. SAM 3.1 controle la plaque Qwen (personne
    inventee, photo recomposee, magenta restant -> autre graine, puis LaMa).
 4. Ici, theatre de papier (version 3, demande de David le 16/10) : chaque groupe (devant / derriere par ecart de
-   profondeur) est une CARTE PLATE au contour net (masque SAM, trous bouches, 1 pixel en dedans, adouci d'un pixel,
-   couleurs de la photo) ; le fond est un PLAN (ajuste sur la profondeur de la photo hors des sujets) ; le decor
-   reconstruit ne remplace la photo que sous les sujets et sur 3-4 pixels autour. Rien ne s'etire, ni dans un
-   personnage ni autour de lui, et aucun contour ne bouge.
+   profondeur, une seule carte s'ils se touchent) est une CARTE PLATE au contour net (masque SAM, trous bouches, fentes
+   entre voisins comblees, 1 pixel en dedans, adouci d'un pixel, couleurs de la photo) ; le fond est un PLAN (ajuste sur
+   la profondeur de la photo hors des sujets) ; le decor reconstruit ne remplace la photo que sous les sujets, sur 3-4
+   pixels autour et sur leur bord doux. Rien ne s'etire, ni dans un personnage ni autour de lui.
 Au repos, l'image est celle de la photo : l'IA ne sert que DANS la place des sujets.
 
-Fichiers : projects/<id>/layers/<case>/ : raw/ (sam_XX.png, prop_*.png, hand_*.png, birefnet.png, depth.npy,
-painted.png, plate.png = Qwen, lama.png = LaMa), bg.jpg (fond sans
-les sujets), l1.webp et l2.webp (sujets RGBA, du plus loin au plus proche), ld.png (profondeurs : R = fond, G = l1,
+Fichiers : projects/<id>/layers/<case>/ : raw/ (sam_XX.png, obj_*.png, worn_*.png, surf_*.png, hand.png, birefnet.png,
+depth.npy, painted.png, plate.png = Qwen, lama.png = LaMa), bg.jpg (fond sans les sujets), l1.webp et l2.webp (sujets RGBA, du plus loin au plus proche), ld.png (profondeurs : R = fond, G = l1,
 B = l2, demi-resolution), meta.json (n calques, profondeurs, plan net conseille, controles).
 """
 

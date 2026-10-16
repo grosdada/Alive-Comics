@@ -468,7 +468,9 @@ SAM 3.1 + BiRefNet (détourage), Depth Pro (profondeur), Qwen-Image-Edit 2509 (d
 tâche « Couches relief » dans la file.
 <code>meta.n</code> = nombre de calques ; <code>n = 0</code> avec <code>reason</code> : la case ne se découpe pas (paysage, foule…),
 elle garde la nappe simple. Foules (sujets sur plus de 45 % de la case) : seul le premier plan net est détaché, le reste
-de la foule reste dans le décor ; <code>meta.crowd</code> = true. Pas de premier plan net : nappe simple. À contrôler dans l'aperçu (mode édition,
+de la foule reste dans le décor ; <code>meta.crowd</code> = true. Pas de premier plan net : pas de couches, la case
+glisse d'un bloc (carte plane, sans déformation). Version 3 : cartes plates à contour net, objets tenus (SAM), décor
+<code>PLATE</code> = qwen | lama | hybride (voir ALIVE-COMICS-DOC). À contrôler dans l'aperçu (mode édition,
 onglet Relief, vue « Calques »).</p>
 <ul>
 <li>Réglages : <code>panels[case].relief = {&quot;preset&quot;: &quot;respire|glisse|tourne|vertigo&quot;, &quot;amount&quot;: 0.025, &quot;focus&quot;: 0..1, &quot;duration&quot;: 2, &quot;trigger&quot;: &quot;hover|click&quot;}</code>.

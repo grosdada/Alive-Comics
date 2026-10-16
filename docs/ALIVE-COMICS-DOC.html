@@ -310,29 +310,40 @@ page : { page: "page.jpg", frames: "frames.png", size: [W, H], fps: 24, sound: {
       photo. En attendant les couches (ou si la case ne se découpe pas), une <b>nappe</b> de profondeur sans pli sert de relief.
       Détails : <code>docs/PARALLAXE-RELIEF.html</code>, <code>app/layers.py</code>.</p></div>
   <div class="block">
-    <h3>Les couches, version 2 (tâche « Couches relief » de la file, ~1 min à chaud, ~3 min si les modèles sont froids)</h3>
+    <h3>Les couches, version 3 « théâtre de papier » (16/10/2026 ; tâche « Couches relief », 1 à 4 min par case)</h3>
+    <p>Demande de David : les personnages <b>coupés net</b>, <b>aucun contour qui bouge</b>, <b>aucune déformation</b> autour
+      d'eux. Chaque groupe de personnages est une <b>carte plate</b> (une seule profondeur, rien ne s'étire dedans), le décor
+      est un <b>plan</b> (perspective d'ensemble, aucune bosse), et le décor caché derrière les personnages est reconstruit.</p>
     <ol>
-      <li><b>Détourage</b> sur une machine ComfyUI : <b>SAM 3.1</b> (« person », un masque exact par personne) et
-        <b>BiRefNet</b> (bord doux des cheveux, objets tenus). Un objet va à la personne qu'il touche s'il ne touche qu'elle
-        et reste petit devant elle (valise, verre, téléphone) ; un gâteau entouré d'invités ou un banc restent au décor.</li>
-      <li><b>Profondeur</b> sur ce PC : <b>Depth Pro</b> d'Apple (carte du GPU s'il reste 6 Go, sinon processeur), à défaut
-        Depth Anything V2 Small. Sujets = personnes sur 0,4 % de la case au moins.</li>
-      <li><b>Foules</b> (sujets sur plus de 45 % de la case) : seul le <b>premier plan net</b> est détaché (les plus proches,
-        séparés de la personne suivante par un écart de profondeur, sur 35 % de la case au plus) ; le reste de la foule reste
-        dans le décor. Pas de premier plan net : la nappe simple.</li>
-      <li><b>Décor caché</b> : une forme magenta est peinte à la place des sujets (forme convexe ; foule : silhouette élargie et
-        arrondie) et <b>Qwen-Image-Edit 2509</b> (fp8 + LoRA Lightning 8 pas) la remplit. Contrôles : SAM 3.1 sur la plaque
-        (personne inventée dans la forme ; foule : sujet redessiné à sa place), photo recomposée (écart hors de la forme),
-        magenta restant. Essai raté : autre graine (3 essais), puis <b>LaMa</b> (flou mais sans invention).</li>
-      <li>Sur ce PC (~5 s) : groupes devant / derrière par écart de profondeur, plaque recalée (ECC) et accordée en couleur,
-        ombre portée prolongée sous le sujet, couleurs des sujets sans liseré, sujets en cartes à peine bombées, profondeur du
-        fond calculée sur la plaque, pente bornée.</li>
+      <li><b>Détourage</b> (ComfyUI) : <b>SAM 3.1</b> « person », un masque exact par personne ; puis, en un seul graphe, SAM
+        cherche aussi les <b>objets tenus</b> (téléphone, écran, gobelet, verre, bouteille, papier, livre, bouquet, fleur,
+        parapluie, appareil photo, micro, cigarette, sac, couteau), les <b>objets portés</b> (cravate, chapeau, écharpe,
+        sangle), les <b>surfaces</b> qui montrent des gens (miroir, cadre photo) et les <b>mains</b>. <b>BiRefNet</b> ne sert
+        plus qu'aux lisières oubliées par SAM et au bord doux (cheveux, flou).</li>
+      <li><b>Qui va avec qui</b> : un objet tenu suit la personne dont il touche une main (et pas un saladier qui touche un
+        bras) ; un objet porté suit la personne qu'il touche ; les gens vus sur un écran, dans un miroir ou dans un cadre ne
+        sont pas des sujets ; trous du masque bouchés ; fentes entre voisins comblées par la photo.</li>
+      <li><b>Profondeur</b> (ce PC) : <b>Depth Pro</b> d'Apple (gardée entre deux calculs), à défaut Depth Anything V2 Small.
+        Sujets = personnes sur 0,4 % de la case au moins. <b>Foule</b> (plus de 45 % de la case) : le premier plan net (écart
+        de profondeur), jusqu'à 35 % de la case, ou 60 % s'il est très net ou si tout le monde se détache du décor ; un
+        morceau coupé par le bord du cadre (avant-bras, tête de dos) ne suffit jamais seul. Pas de premier plan net : pas de
+        couches, la case glisse d'un bloc (carte plane, sans déformation).</li>
+      <li><b>Deux cartes</b> (devant / derrière) seulement si les deux groupes sont séparés par un écart de profondeur
+        <b>et ne se touchent pas</b> ; sinon une seule carte (la partie cachée de la carte de derrière n'est pas reconstruite :
+        elle s'ouvrait en croissant de décor).</li>
+      <li><b>Décor caché</b> : LaMa (prolonge les couleurs autour, n'invente rien) et Qwen-Image-Edit 2509 (invente un décor
+        plausible dans une forme magenta ; contrôles SAM, photo recomposée, magenta restant ; 3 graines). Le réglage
+        <code>PLATE</code> de <code>app/layers.py</code> choisit : <code>qwen</code>, <code>lama</code> ou
+        <code>hybride</code> (LaMa près du contour, là où la parallaxe le montre, Qwen plus loin). Le décor reconstruit ne
+        remplace la photo que sous les personnages, sur 3-4 px autour et sur leur bord doux.</li>
       <li>Export : <code>images/&lt;case&gt;_bg.jpg</code>, <code>_l1.webp</code>, <code>_l2.webp</code> (RGBA),
-        <code>depth/&lt;case&gt;_ld.png</code> (R = fond, G = l1, B = l2), environ 0,25 Mo par case.</li>
+        <code>depth/&lt;case&gt;_ld.png</code> (R = plan du fond, G et B = profondeur constante de chaque carte).</li>
     </ol>
-    <p>Mesuré (planche 15, Heures creuses 3) : bonnes cases 14 à 37 % de sujets, foules 54 à 67 % ; en foule, le premier plan
-      détaché couvre 12 à 30 % de la case. Fichiers bruts dans <code>layers/&lt;case&gt;/raw/</code> (masques SAM, BiRefNet,
-      profondeur, forme peinte, plaque) ; <code>meta.json</code> garde les essais (<code>fill</code>) et les temps (<code>timing</code>).</p>
+    <p>Fichiers bruts dans <code>layers/&lt;case&gt;/raw/</code> (masques SAM des personnes, objets <code>obj_*</code>,
+      <code>worn_*</code>, <code>surf_*</code>, <code>hand</code>, BiRefNet, profondeur, forme peinte, plaques
+      <code>plate.png</code> = Qwen et <code>lama.png</code>) ; <code>meta.json</code> garde les essais (<code>fill</code>),
+      les temps (<code>timing</code>) et la plaque utilisée (<code>plate</code>). Contrôle hors navigateur :
+      les outils de test rendent les images exactement comme le lecteur (shader recopié en numpy).</p>
     <p>Lancement : « Calculer » (cases en relief, sauf les vertes et celles déjà calculées) ou, dans l'aperçu en mode édition,
       onglet Relief : « Calculer les couches » / « Recalculer (autre essai) », « Utiliser les couches », vue « 🧩 Calques »
       (bleu = sujet du fond, orange = sujet de devant).</p>
@@ -343,13 +354,14 @@ page : { page: "page.jpg", frames: "frames.png", size: [W, H], fps: 24, sound: {
   </div>
   <div class="grid2">
     <div class="block">
-      <h3>La carte</h3>
+      <h3>La carte (case sans couches)</h3>
       <ul>
         <li>Modèle : <b>Depth Anything V2 Small</b>, licence <b>Apache 2.0</b> (distribuable, usage commercial permis), ONNX
           (<code>onnx-community/depth-anything-v2-small</code>), téléchargé une fois dans <code>data/models/</code>.</li>
         <li>Entrée : l'image de départ de la case (<code>start/</code>), petit côté 518 px ; sortie normalisée (centiles 1–99),
-          lissée en suivant les bords (Fast Global Smoother d'OpenCV), puis pente bornée : la nappe ne peut plus se replier,
-          donc plus de dédoublement (elle ondule un peu autour des sujets ; les couches règlent ça).</li>
+          puis un <b>plan</b> ajusté sur cette profondeur (version 3, 16/10/2026) : la case glisse d'un bloc avec une légère
+          perspective, sans aucune déformation (l'ancienne « nappe » s'étirait autour des personnages ; les cases vertes
+          gardent leur carte validée).</li>
         <li>Recalculée seule si l'image change ; bouton « Recalculer » dans l'aperçu ; plan net automatique = médiane du centre.</li>
       </ul>
       <div class="warn">Depth Anything V2 Base / Large / Giant et Depth Anything 3 Large / Giant sont en CC-BY-NC : interdits.</div>
