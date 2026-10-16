@@ -393,11 +393,12 @@ def _fill_holes(region, alpha):
 
 
 def _sharp(region):
-    """Alpha net d'une region : 1 pixel en dedans (jamais de liseré du fond qui partirait avec le sujet), bord adouci
-    d'un pixel (pas d'escalier). Le pixel retire au bord est dans le trou de la plaque : remplace par le decor."""
+    """Alpha net d'une region : 2 pixels en dedans (revue : a 1 pixel, un liseré clair du fond partait avec la carte sur
+    les fonds lumineux), bord adouci d'un pixel (pas d'escalier). Les pixels retires au bord sont dans le trou de la
+    plaque : remplaces par le decor."""
     import cv2
     import numpy as np
-    m = cv2.erode(region.astype(np.uint8), np.ones((3, 3), np.uint8)).astype(np.float32)
+    m = cv2.erode(region.astype(np.uint8), cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))).astype(np.float32)
     return np.clip(cv2.GaussianBlur(m, (0, 0), 0.7), 0, 1).astype(np.float32)
 
 
@@ -779,9 +780,10 @@ def build(pid, panel_id, spec=None):
 
     # 3) plaque : recalee hors de la forme peinte, lumiere de la photo prolongee sous les sujets
     margin = max(6, round(0.012 * W))
-    # la plaque ne remplace la photo que dans une bande fine autour du contour net (3-4 px) : une bande large se voyait
-    # comme un halo, un « contour mouvant » qui suit le personnage (la plaque n'est jamais identique a la photo)
-    edge = max(3, round(0.003 * W))
+    # la plaque remplace la photo sur ~7 px autour du contour net : plus serre, les pixels de bord flous (cheveux, doigts,
+    # sujet hors mise au point) restaient au fond en fantome (revue 3). Au repos le lecteur montre la photo : cette bande
+    # n'apparait qu'a mesure que le personnage s'ecarte (shader : gapPx / near).
+    edge = max(5, round(0.006 * W))
     _, blob = _painted(im, subs, crowd)
     P = _load(plate, (W, H))
     keep = ~(cv2.dilate(blob.astype(np.uint8), np.ones((15, 15), np.uint8)) > 0)
@@ -820,6 +822,8 @@ def build(pid, panel_id, spec=None):
         w = np.array([s["area"] for s in group])
         return np.full((H, W), float(np.sum(w * np.array([s["z"] for s in group])) / max(1e-9, w.sum())), np.float32)
 
+    # (essai du 16/10 : couleur du bord « demelangee » du fond estime par LaMa -> liseré sombre ou clair de 1 px, le bord
+    # rentre de 2 px est deja dans le sujet : abandonne)
     layers = []                                           # (couleur, alpha, profondeur), du plus loin au plus proche
     if a_back is not None:
         layers.append((_extend(im, a_back), a_back, card(back)))
