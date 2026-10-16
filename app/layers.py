@@ -37,18 +37,19 @@ from . import depth, store
 VERSION = 3                    # 3 : cartes plates a contour net, fond en plan (16/10/2026)
 SIDE = "C"                     # tache « couches » dans la file de rendus
 SAM_PROMPT = "person:20"       # SAM 3.1 : jusqu'a 20 personnes, un masque chacune
-# objets tenus que BiRefNet rate (un telephone devant un sujet plus saillant ; le gros telephone d'un invite au premier
-# plan sort en « screen », pas en « phone »). Objet absent : SAM rend souvent un faux objet (« giraffe » -> un doigt,
-# « screen » -> 98 % de la case), d'ou les garde-fous de _subjects ; parfois rien du tout (ComfyUI en erreur, voir
-# comfy.no_detection : on passe a l'objet suivant). Un ecran porte aussi les gens qu'il affiche (pas des sujets).
-PROPS = (("phone", "phone:10"), ("screen", "screen:5"))
-# surfaces qui montrent des gens sans en etre : miroir (le visage du conducteur dans le retroviseur), cadre photo. Ces
-# gens-la ne sont pas des sujets ; la surface n'est jamais rattachee a quelqu'un (pas un objet tenu)
-SURFACES = (("mirror", "mirror:5"), ("picture", "picture frame:5"))
+# objets cherches par SAM 3.1 en plus des personnes, tous dans un seul graphe (masques reunis : un objet absent donne
+# un masque vide). Objet absent : SAM rend parfois un faux objet (« giraffe » -> un doigt, « screen » -> 98 % de la case),
+# d'ou les garde-fous de _subjects. Revue des 71 cases de demo : sans eux, gobelets, feuilles, bouquets, parapluie,
+# telephones, cigarettes restaient au fond pendant que la main glissait.
+OBJECTS = ("phone", "screen", "cup", "glass", "bottle", "paper", "book", "bouquet", "flower", "umbrella", "camera",
+           "microphone", "cigarette", "bag", "knife")             # tenus : suivent la main qui les touche
+WORN = ("necktie", "hat", "scarf", "strap")                       # portes : suivent la personne qu'ils touchent
+SURFACES = ("mirror", "picture frame")                            # montrent des gens (images, pas des sujets)
+HANDS = "hand"
+OBJ_MAX = 0.15                 # un objet tenu couvre 15 % de la case au plus (parapluie au-dessus d'un couple : 9 %)
 SURFACE_MAX = 0.3
-HANDS = "hand:20"              # un objet de SAM ne suit une personne que s'il touche une de ses mains (le panneau d'une
-                               # cuisiniere juste derriere un homme sortait en « screen » a sa profondeur)
-PROP_MAX = 0.05                # un objet tenu couvre 5 % de la case au plus (le gros telephone de la planche 15 : 3 % ;
+INTRUDER = 0.05                # morceau de personne coupe par le bord du cadre (un avant-bras, une tete de dos)
+PROP_MAX = 0.05                # telephone ou ecran : 5 % de la case au plus (le gros telephone de la planche 15 : 3 % ;
                                # faux « ecran » rendu par SAM sur une case sans ecran : 98 %)
 MIN_AREA = 0.004               # un sujet couvre au moins 0,4 % de la case (les silhouettes lointaines restent au decor)
 # decor cache derriere les sujets : "qwen" (Qwen-Image-Edit invente un decor plausible, parfois faux : un trou noir),
@@ -244,6 +245,31 @@ def _sam_masks(rd, W, H, pattern="sam_*.png", max_area=1.0):
     return masks
 
 
+def _components(rd, W, H, patterns, max_area):
+    """Objets d'une famille (fichiers raw/ : un masque par objet, ou tous reunis) : une composante connexe par objet,
+    les plus grandes que max_area ignorees (faux objets geants), doublons fusionnes."""
+    import cv2
+    import numpy as np
+    from PIL import Image
+    out = []
+    for pat in patterns:
+        for f in sorted(rd.glob(pat)):
+            m = np.asarray(Image.open(f).convert("L").resize((W, H), Image.NEAREST)) > 127
+            n, lab, st, _ = cv2.connectedComponentsWithStats(m.astype(np.uint8), connectivity=8)
+            for c in range(1, n):
+                if st[c, 4] < 30 or st[c, 4] > max_area * W * H:
+                    continue
+                q = lab == c
+                for j, o in enumerate(out):
+                    inter = int((q & o).sum())
+                    if inter > 0.6 * int((q | o).sum()) or inter > 0.85 * min(int(q.sum()), int(o.sum())):
+                        out[j] = q | o
+                        break
+                else:
+                    out.append(q)
+    return out
+
+
 def _subjects(im, d, d_im):
     """Sujets de la case a partir des sorties ComfyUI rangees dans raw/ -> ([{mask, soft, region, area, held}],
     personnes de la photo, personnes affichees sur un ecran). mask = masque exact de SAM 3.1 ; region = la personne +
@@ -254,12 +280,12 @@ def _subjects(im, d, d_im):
     from PIL import Image
     H, W = im.shape[:2]
     rd = d / "raw"
-    props = _sam_masks(rd, W, H, "prop_*.png", PROP_MAX)
     k = lambda r: cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (r, r))  # noqa: E731
+    screens = _components(rd, W, H, ["prop_phone*", "prop_screen*", "obj_phone*", "obj_screen*"], PROP_MAX)
     # une « personne » presque toute dans un ecran, un miroir ou un cadre est une image (les maries filmes sur l'ecran du
-    # telephone d'un invite, le conducteur dans le retroviseur) : ce n'est pas un sujet. Si SAM rend la personne elle-meme
-    # comme « miroir » (faux objet), elle n'est pas plus petite que lui : elle reste une personne.
-    surfaces = props + _sam_masks(rd, W, H, "surf_*.png", SURFACE_MAX)
+    # telephone d'un invite, le conducteur dans le retroviseur, le couple de la photo de mariage posee sur la table) : ce
+    # n'est pas un sujet. Si SAM rend la personne elle-meme comme « miroir », elle n'est pas plus petite que lui.
+    surfaces = screens + _components(rd, W, H, ["surf_*"], SURFACE_MAX)
     grown = [cv2.dilate(q.astype(np.uint8), k(5)) > 0 for q in surfaces]
     people, shown = [], []
     for m in _sam_masks(rd, W, H):
@@ -270,13 +296,13 @@ def _subjects(im, d, d_im):
     alpha = np.asarray(Image.open(bn).convert("L").resize((W, H), Image.BILINEAR), np.float32) / 255 if bn.exists() \
         else np.zeros((H, W), np.float32)
     near = [cv2.dilate(o.astype(np.uint8), k(15)) > 0 for o in people]
-    hands = np.any(_sam_masks(rd, W, H, "hand_*.png", PROP_MAX) or [np.zeros((H, W), bool)], axis=0)
+    hands = np.any(_components(rd, W, H, ["hand*"], PROP_MAX) or [np.zeros((H, W), bool)], axis=0)
     in_hand = lambda x, j: (cv2.dilate(x.astype(np.uint8), k(11)) > 0)[hands & near[j]].sum() >= 20  # noqa: E731
-    # objets vus par BiRefNet en plus des personnes, objet par objet. Un objet va a la personne qu'il touche s'il ne
-    # touche qu'elle, reste petit devant elle (valise 16 % de la taille de l'homme, telephones 1-3 % ; un banc 92 % reste
-    # au decor) ET touche une de ses mains (valise, bouteille, epluchures) ; ou si c'est un liseré colle a son contour
-    # (un bout de costume oublie par SAM). Un bout de saladier qui touche le bras d'une femme reste au decor (sinon il
-    # se dechire en bougeant avec elle).
+    zof = lambda x: float(np.median(d_im[x])) if x.any() else 0.0  # noqa: E731
+    z_people = [zof(cv2.erode(o.astype(np.uint8), k(7)) > 0) or zof(o) for o in people]
+    cut = [bool(o[0].any() or o[-1].any() or o[:, 0].any() or o[:, -1].any()) for o in people]
+    # BiRefNet : seulement les lisieres collees au contour d'une personne (un bout de costume oublie par SAM). Les objets
+    # entiers viennent de SAM : BiRefNet emportait aussi du gravier, du riz ou de la fumee autour d'une main.
     anyone = cv2.dilate(np.any(people or [np.zeros((H, W), bool)], axis=0).astype(np.uint8), k(5)) > 0
     n, lab, stats, _ = cv2.connectedComponentsWithStats(((alpha > 0.5) & ~anyone).astype(np.uint8))
     owner, held = {}, {}
@@ -290,35 +316,40 @@ def _subjects(im, d, d_im):
         j = int(np.argmax(touch))
         alone = sum(touch) - touch[j] < 0.2 * touch[j]
         rim = (comp & (cv2.dilate(people[j].astype(np.uint8), k(13)) > 0)).sum() >= 0.8 * stats[c, 4]
-        if alone and stats[c, 4] <= 0.35 * people[j].sum() and (rim or in_hand(comp, j)):
+        if alone and rim and stats[c, 4] <= 0.1 * people[j].sum():
             owner.setdefault(j, []).append(comp)
-    # objets de SAM (telephones, ecrans) : a la personne qu'ils touchent le plus, s'ils touchent une de ses mains, sont
-    # au moins aussi proches qu'elle (une fenetre derriere quelqu'un est plus loin) et pas trop grands (4 fois la partie
-    # visible d'une personne coupee par le bord, comme une main qui tient un telephone ; sinon sa taille)
-    zof = lambda x: float(np.median(d_im[x])) if x.any() else 0.0  # noqa: E731
-    z_people = [zof(cv2.erode(o.astype(np.uint8), k(7)) > 0) or zof(o) for o in people]
-    cut = [bool(o[0].any() or o[-1].any() or o[:, 0].any() or o[:, -1].any()) for o in people]
-    for q in props:
+    # objets tenus (SAM) : a la personne qui les recouvre ou les touche le plus, s'ils touchent une de ses mains, sont au
+    # moins aussi proches qu'elle (une fenetre derriere quelqu'un est plus loin) et pas trop grands (4 fois la partie
+    # visible d'une personne coupee par le bord, comme une main qui tient un telephone ; sinon 1,5 fois sa taille).
+    # Telephones et ecrans elargis : SAM ne prend que l'ecran, le cadre et la coque restaient au fond.
+    grow_screen = k(2 * max(4, round(0.011 * W)) + 1)
+    objects = [(q, True) for q in screens] + [(q, False) for q in _components(
+        rd, W, H, [f"obj_{x.replace(' ', '_')}*" for x in OBJECTS if x not in ("phone", "screen")], OBJ_MAX)]
+    for q, scr in objects:
         touch = [int((q & z).sum()) for z in near]
         if not touch or max(touch) == 0:
             continue
         inside = [int((q & o).sum()) for o in people]
         j = max(range(len(people)), key=lambda i: (inside[i], touch[i]))   # recouvrement reel d'abord (egalites)
-        if inside[j] > 0.5 * q.sum():
-            continue                                      # deja dans le masque de quelqu'un : rien a ajouter
-        if not in_hand(q, j):
-            continue                                      # ne touche aucune de ses mains : pas tenu
-        if zof(q) >= z_people[j] - 0.08 and q.sum() <= (4.0 if cut[j] else 1.0) * people[j].sum():
+        if inside[j] > 0.5 * q.sum() or not in_hand(q, j):
+            continue                                      # deja dans son masque, ou ne touche aucune de ses mains
+        if zof(q) >= z_people[j] - 0.08 and q.sum() <= (4.0 if cut[j] else 1.5) * people[j].sum():
+            held.setdefault(j, []).append((cv2.dilate(q.astype(np.uint8), grow_screen) > 0) if scr else q)
+    # objets portes (cravate, chapeau, couronne en papier, echarpe, sangle) : a la personne qu'ils touchent le plus
+    for q in _components(rd, W, H, [f"worn_{x.replace(' ', '_')}*" for x in WORN], OBJ_MAX):
+        touch = [int((q & z).sum()) for z in near]
+        if not touch or max(touch) == 0:
+            continue
+        j = int(np.argmax(touch))
+        if touch[j] >= 0.3 * q.sum() and q.sum() <= 0.5 * people[j].sum():
             held.setdefault(j, []).append(q)
     out = []
-    grow_prop = k(2 * max(4, round(0.011 * W)) + 1)       # SAM « screen » ne prend que l'ecran : cadre et coque du
-    #                                                        telephone (sinon ils restent au fond, un contour qui bouge)
     for m in masks:
         j = next(i for i, o in enumerate(people) if o is m)
         others = np.any([o for o in people if o is not m] or [np.zeros_like(m)], axis=0)
         core = m.copy()
         for q in held.get(j, []):
-            core |= (cv2.dilate(q.astype(np.uint8), grow_prop) > 0) & ~others
+            core |= q & ~others
         region = core.copy()
         for comp in owner.get(j, []):
             region |= comp
@@ -330,7 +361,7 @@ def _subjects(im, d, d_im):
         region = _fill_holes(region, alpha) & ~others
         others &= ~region
         out.append({"mask": m, "region": region, "soft": _sharp(region & ~others), "area": float(m.mean()),
-                    "held": len(held.get(j, []))})
+                    "held": len(held.get(j, [])), "intruder": cut[j] and float(m.mean()) < INTRUDER})
     return out, people, shown
 
 
@@ -346,7 +377,7 @@ def _fill_holes(region, alpha):
         return region
     mean_a = np.bincount(lab.ravel(), weights=alpha.ravel(), minlength=n) / np.maximum(st[:, 4], 1)
     edge = (st[:, 0] == 0) | (st[:, 1] == 0) | (st[:, 0] + st[:, 2] >= W) | (st[:, 1] + st[:, 3] >= H)
-    fill = ~edge & ((mean_a > 0.5) | (st[:, 4] < 30))
+    fill = ~edge & ((mean_a > 0.5) | (st[:, 4] < max(30, 0.02 * region.sum())))   # revue : mains et manches trouees
     fill[0] = False
     return region | fill[lab]
 
@@ -394,6 +425,16 @@ def _plan(subs, d_im):
         covers.append(float(acc.mean()))
     if covers[-1] <= CROWD:
         return subs, False, covers[-1]
+    # foule : on choisit parmi les vraies personnes ; un morceau coupe par le bord du cadre (avant-bras, tete de dos) ne
+    # suffit jamais seul (revue : un avant-bras detache, les maries laisses au fond) ; il suit si les choisis sont derriere
+    total = covers[-1]
+    every = subs
+    subs = [s for s in subs if not s.get("intruder")] or subs
+    if len(subs) < len(every):
+        acc, covers = np.zeros(d_im.shape, bool), []
+        for s in subs:
+            acc |= s["soft"] > 0.5
+            covers.append(float(acc.mean()))
     allm = np.any([s["mask"] for s in subs], axis=0)
     z_rest = float(np.median(d_im[~allm])) if (~allm).any() else 0.0     # le decor, derriere le dernier sujet
     k = 0
@@ -406,7 +447,11 @@ def _plan(subs, d_im):
         # detache (il ne reste que le decor derriere : rien a prolonger) : l'ecart ordinaire suffit.
         if gap >= FRONT_GAP and (covers[i - 1] <= 0.35 or gap >= 0.3 or i == len(subs)):
             k = i
-    return subs[:k], k < len(subs), covers[-1]
+    chosen = subs[:k]
+    if chosen and len(subs) < len(every):
+        zmin = min(s["z"] for s in chosen)
+        chosen = sorted(chosen + [s for s in every if s.get("intruder") and s["z"] >= zmin], key=lambda s: -s["z"])
+    return chosen, len(chosen) < len(every), total
 
 
 def _painted(im, subs, crowd=False):
@@ -501,23 +546,15 @@ def compute(server, pid, panel_id, spec, progress=print, cancelled=lambda: False
     H, W = im.shape[:2]
     if not any(m.mean() >= MIN_AREA for m in _sam_masks(rd, W, H)):   # ni objets ni profondeur : rien a detacher
         return build(pid, panel_id, dict(spec, skip="aucune personne assez grande dans la case"))
-    for kind, items in (("prop", PROPS), ("surf", SURFACES)):     # objets tenus que BiRefNet ne voit pas ; surfaces
-        for key, prompt in items:
-            try:
-                e = _run(server, comfy.sam_graph(name, f"{prefix}_{key}", prompt), cancelled)
-            except comfy.ComfyError as exc:
-                if not comfy.no_detection(exc):
-                    raise
-                continue
-            for i, it in enumerate(_images(e, "6")):
-                comfy.download(server, it, rd / f"{kind}_{key}_{i:02d}.png")
-    try:
-        e = _run(server, comfy.sam_graph(name, f"{prefix}_hand", HANDS), cancelled)
-        for i, it in enumerate(_images(e, "6")):
-            comfy.download(server, it, rd / f"hand_{i:02d}.png")
-    except comfy.ComfyError as exc:                       # aucune main vue : aucun objet de SAM ne sera rattache
-        if not comfy.no_detection(exc):
-            raise
+    prompts = {f"obj_{x.replace(' ', '_')}": x for x in OBJECTS}              # objets, surfaces, mains : un seul graphe
+    prompts.update({f"worn_{x.replace(' ', '_')}": x for x in WORN})
+    prompts.update({f"surf_{x.replace(' ', '_')}": x for x in SURFACES})
+    prompts["hand"] = HANDS
+    g, outs = comfy.sam_multi_graph(name, f"{prefix}_obj", prompts)
+    e = _run(server, g, cancelled)
+    for key, node in outs.items():
+        for it in _images(e, node)[:1]:
+            comfy.download(server, it, rd / f"{key}.png")
 
     timing["segment"] = round(time.time() - t0, 1)
     progress("profondeur")
@@ -669,6 +706,12 @@ def build(pid, panel_id, spec=None):
         k = int(np.argmax(gaps))
         if gaps[k] > 0.12:
             front, back, how = subs[:k + 1], subs[k + 1:], "profondeur"
+            fr = np.any([s["region"] for s in front], axis=0).astype(np.uint8)
+            bk = np.any([s["region"] for s in back], axis=0)
+            if ((cv2.dilate(fr, np.ones((7, 7), np.uint8)) > 0) & bk).sum() > 20:
+                # deux cartes qui se touchent : en glissant l'une sur l'autre, la partie cachee de celle de derriere
+                # (jamais reconstruite) s'ouvrait en croissant de decor ; des gens en contact restent sur une carte
+                front, back, how = subs, [], "un seul plan (en contact)"
     # alpha de chaque carte : l'union de ses sujets, sans fente entre voisins. Chaque masque rentre d'un pixel laissait
     # entre deux invites cote a cote une fente ou l'on voyait le decor reconstruit (un tronc sombre) : des lignes qui
     # bougent autour des gens. Les fentes de quelques pixels entre sujets detaches vont a une carte (photo), jamais au
@@ -703,9 +746,20 @@ def build(pid, panel_id, spec=None):
     P, mP = _align(im, P, keep.astype(np.float32))
     P = _color_match(im, P, keep)
     hole = _grow(a_all, edge)
+    # bord doux du sujet (cheveux, flou) que le masque net laisse au fond : BiRefNet le voit, il passe sous la plaque
+    # (revue : un fantome de l'ancien contour restait sur le decor quand la personne glissait)
+    bnf = d / "raw" / "birefnet.png"
+    if bnf.exists():
+        bnm = np.asarray(Image.open(bnf).convert("L").resize((W, H), Image.BILINEAR), np.float32) / 255
+        rr = max(6, round(0.01 * W))
+        fringe = (bnm > 0.15) & (cv2.dilate((a_all > 0.5).astype(np.uint8),
+                                            cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * rr + 1, 2 * rr + 1))) > 0)
+        hole = np.maximum(hole, _grow((fringe & ~rest).astype(np.float32), 2))
     mode, lama = spec.get("plate") or PLATE, d / "raw" / "lama.png"
-    if mode in ("lama", "hybride") and lama.exists():     # LaMa : meme cadrage que la photo, rien a recaler
+    if lama.exists():                                     # hors de la forme peinte, Qwen n'a rien refait : LaMa
         PL = _load(lama, (W, H))
+        P = np.where(cv2.dilate(blob.astype(np.uint8), np.ones((5, 5), np.uint8))[..., None] > 0, P, PL)
+    if mode in ("lama", "hybride") and lama.exists():     # LaMa : meme cadrage que la photo, rien a recaler
         if mode == "lama":
             P = PL
         else:                                             # LaMa sur 1,5 % de largeur au bord, Qwen au-dela de 3 %

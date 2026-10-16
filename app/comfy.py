@@ -227,6 +227,26 @@ def sam_graph(image_name, prefix, prompt):
     return g
 
 
+def sam_multi_graph(image_name, prefix, prompts):
+    """Plusieurs recherches SAM 3.1 sur une image, modele charge une fois ; masques reunis par recherche (un objet absent
+    donne un masque vide, pas d'erreur). prompts : {cle: texte}. Renvoie (graphe, {cle: noeud SaveImage})."""
+    g = {"1": {"class_type": "LoadImage", "inputs": {"image": image_name}},
+         "2": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": SAM3_CKPT}}}
+    outs = {}
+    for i, (key, text) in enumerate(prompts.items()):
+        b = 10 + 4 * i
+        g.update({
+            str(b): {"class_type": "CLIPTextEncode", "inputs": {"clip": ["2", 1], "text": text}},
+            str(b + 1): {"class_type": "SAM3_Detect", "inputs": {"model": ["2", 0], "image": ["1", 0],
+                                                                 "conditioning": [str(b), 0], "threshold": 0.4,
+                                                                 "refine_iterations": 2, "individual_masks": False}},
+            str(b + 2): {"class_type": "MaskToImage", "inputs": {"mask": [str(b + 1), 0]}},
+            str(b + 3): {"class_type": "SaveImage", "inputs": {"images": [str(b + 2), 0], "filename_prefix": f"{prefix}_{key}"}},
+        })
+        outs[key] = str(b + 3)
+    return g, outs
+
+
 def no_detection(exc):
     """L'erreur ComfyUI est-elle celle de SAM 3.1 qui ne trouve rien (lot de masques vide) ?"""
     return "out of bounds for dimension 0 with size 0" in str(exc)
