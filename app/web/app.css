@@ -259,3 +259,9 @@ body.dragging-planche .fchip[data-folder] { border-style: dashed; border-color: 
 .card.sel, .prow.sel { outline: 2px solid var(--accent); outline-offset: -2px; }
 .card.dragging, .prow.dragging { opacity: .45; }
 .fchip.fedit { color: var(--muted); }
+
+/* ---------- onglets de l'accueil : Planches | Livres */
+.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin: 6px 0 4px; }
+.tab { border-radius: 10px 10px 0 0; border-bottom: 0; padding: 8px 20px; font-size: 16px; font-weight: 600; background: transparent; color: var(--muted); }
+.tab small { color: var(--muted); font-weight: 400; margin-left: 4px; }
+.tab.on { background: var(--panel2); color: var(--ink); border-color: var(--line); box-shadow: inset 0 3px 0 var(--accent); }

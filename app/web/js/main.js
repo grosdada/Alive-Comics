@@ -118,36 +118,32 @@ class App {
     const bookList = h("div.books", books.length ? books.map(b => this.bookRow(b, books, projects, open.has(b.id)))
                                                  : h("p.muted", "Aucun livre pour l'instant."));
     const allBooks = (on) => { for (const b of books) this.bookOpen(b.id, on); this.home(); };
-    // sections repliables (flèche) : on atteint les livres sans faire défiler toutes les planches
-    const section = (key, title, countEl, tools, actions, body) => {
-      const chev = h("button.icon.sec-chev");
-      const sync = () => {
-        const open = pref("ac-sec-" + key, "1") === "1";
-        chev.textContent = open ? "▾" : "▸";
-        chev.title = open ? "Replier" : "Déplier";
-        body.hidden = !open;
-        for (const t of tools) t.hidden = !open;
-      };
-      const toggle = () => { setPref("ac-sec-" + key, pref("ac-sec-" + key, "1") === "1" ? "0" : "1"); sync(); };
-      chev.addEventListener("click", toggle);
-      const head = h("div.home-tools", chev, h("h2.sec-title", { on: { click: toggle } }, title), countEl, h("span.sp"), ...tools, ...actions);
-      sync();
-      return [head, body];
-    };
+    // onglets Planches | Livres : on passe de l'un a l'autre sans faire defiler la page ; l'onglet est retenu
     const newPlanche = h("button.primary", { on: { click: () => this.newProjectDialog(cur !== "all" && cur !== "none" ? cur : null) } }, "+ Nouvelle planche");
-    const newBook = h("button", { on: { click: async () => {
+    const newBook = h("button.primary", { on: { click: async () => {
       const id = Math.random().toString(36).slice(2, 8);
       books.push({ id, title: "Nouveau livre", pages: [] });
       this.bookOpen(id, true);
-      setPref("ac-sec-livres", "1");
+      setPref("ac-tab", "livres");
       await put("books", books); this.home();
     } } }, "+ Nouveau livre");
     const bookTools = [h("button.mini", { on: { click: () => allBooks(true) } }, "Tout déplier"),
                        h("button.mini", { on: { click: () => allBooks(false) } }, "Tout replier")];
     drawBar();
-    this.root.append(h("main.home",
-      ...section("planches", "Planches", count, [search, sortSel, seg], [newPlanche], h("div", bar, holder)),
-      ...section("livres", "Livres", h("span.muted", String(books.length)), bookTools, [newBook], bookList)));
+    let tab = pref("ac-tab", "planches");
+    const planchesPane = h("div", h("div.home-tools", count, h("span.sp"), search, sortSel, seg, newPlanche), bar, holder);
+    const livresPane = h("div", h("div.home-tools", h("span.sp"), ...bookTools, newBook), bookList);
+    const tabsEl = h("div.tabs");
+    const syncTabs = () => {
+      tabsEl.textContent = "";
+      for (const [k, label, n] of [["planches", "Planches", h("small", String(projects.length))], ["livres", "Livres", h("small", String(books.length))]]) {
+        const t = h("button.tab" + (tab === k ? ".on" : ""), { on: { click: () => { tab = k; setPref("ac-tab", k); syncTabs(); } } }, label, " ", n);
+        tabsEl.append(t);
+      }
+      planchesPane.hidden = tab !== "planches"; livresPane.hidden = tab !== "livres";
+    };
+    syncTabs();
+    this.root.append(h("main.home", tabsEl, planchesPane, livresPane));
     draw();
   }
 
