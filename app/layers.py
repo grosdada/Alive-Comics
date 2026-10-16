@@ -731,7 +731,7 @@ def build(pid, panel_id, spec=None):
     subs, crowd, cover = _plan(subs, d_im)                # du plus proche au plus loin
     if not subs:
         return give_up("foule sans premier plan net : les personnes couvrent la moitié de la case ou plus, à des "
-                       "profondeurs voisines ; la nappe simple convient mieux", True, subjects=round(cover, 3), n=n_all)
+                       "profondeurs voisines ; la case glisse d'un bloc", True, subjects=round(cover, 3), n=n_all)
     a_all = np.max([s["soft"] for s in subs], axis=0)
     fill = float((a_all > 0.5).mean())
     plate = d / "raw" / "plate.png"
