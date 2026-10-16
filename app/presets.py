@@ -19,7 +19,9 @@ ORBIT_PROMPT = (
 FROZEN_PROMPT = ORBIT_PROMPT.replace(" In a continuous 360 orbit.", "")
 TAIL = " Then the camera stops. No zoom, no dolly."
 
-AMPLITUDES = {"petit": 40, "moyen": 55, "grand": 70}     # angle ECRIT dans le prompt (H3 en fait moins)
+AMPLITUDES = {"lytro": 16, "petit": 40, "moyen": 55, "grand": 70}   # angle ECRIT dans le prompt (H3 en fait moins)
+# « lytro » (16/10) : tout petit arc de part et d'autre de la photo, le lecteur n'en montre qu'une partie au survol
+# (emulation de la Lytro : perspective qui suit la souris, mise au point au clic)
 
 # Tremble « camera a l'epaule » ajoute au montage (ffmpeg), car H3 ne fait qu'un tremble mou et imprevisible.
 # (deplacement en fraction de l'image, rotation en radians) ; periodique : la boucle reste parfaite.

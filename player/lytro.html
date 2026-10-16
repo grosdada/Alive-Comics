@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lytro test</title>
+<style>
+  /* Essai « Lytro » : la perspective suit la souris (vues H3 temps fige), mise au point au clic (profondeur par vue). */
+  :root { --bg: #111312; --panel: #1b1e1d; --ink: #e8ece9; --muted: #9aa49f; --accent: #e3b45c; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.45 system-ui, "Segoe UI", sans-serif; }
+  header { padding: 14px 16px 6px; display: flex; flex-wrap: wrap; gap: 10px 22px; align-items: center; }
+  header h1 { font-size: 18px; margin: 0; font-weight: 600; }
+  header p { margin: 0; color: var(--muted); font-size: 13px; }
+  .ctl { display: flex; flex-wrap: wrap; gap: 8px 20px; padding: 6px 16px 12px; color: var(--muted); font-size: 13px; }
+  .ctl label { display: flex; gap: 8px; align-items: center; }
+  .ctl input[type=range] { width: 140px; accent-color: var(--accent); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 520px), 1fr)); gap: 12px; padding: 0 16px 24px; }
+  .cell { position: relative; background: var(--panel); border-radius: 4px; overflow: hidden; touch-action: pan-y; }
+  .cell canvas { display: block; width: 100%; height: auto; cursor: crosshair; }
+  .cell .lab { position: absolute; left: 8px; bottom: 6px; font-size: 12px; color: #fff; text-shadow: 0 1px 3px #000; pointer-events: none; }
+  .cell .wait { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); font-size: 13px; }
+  .ring { position: absolute; width: 46px; height: 46px; margin: -23px 0 0 -23px; border: 2px solid var(--accent); border-radius: 50%;
+          pointer-events: none; opacity: 0; transition: opacity .6s, transform .6s; transform: scale(1.4); }
+  .ring.on { opacity: .95; transform: scale(1); transition: opacity .15s, transform .25s; }
+</style>
+</head>
+<body>
+<header>
+  <h1 id="title">Lytro test</h1>
+  <p>Bouge la souris sur une photo : la perspective suit. Clique : la mise au point va là (double-clic : tout net). Sur téléphone : glisse, puis touche.</p>
+</header>
+<div class="ctl">
+  <label>Relief <input id="amp" type="range" min="0.25" max="3" step="0.25" value="1"><span id="ampv">1 %</span></label>
+  <label>Flou <input id="blur" type="range" min="0" max="1" step="0.05" value="0.45"></label>
+  <label><input id="allsharp" type="checkbox"> Net partout</label>
+  <label><input id="showd" type="checkbox"> Voir la profondeur</label>
+  <label><input id="idle" type="checkbox"> Oscillation au repos</label>
+</div>
+<div class="grid" id="grid"></div>
+<script>
+(() => {
+  "use strict";
+  const qs = new URLSearchParams(location.search);
+  const pids = (qs.get("p") || "").split(",").filter(Boolean);
+  const grid = document.getElementById("grid");
+  const ui = { amp: document.getElementById("amp"), blur: document.getElementById("blur"),
+               allsharp: document.getElementById("allsharp"), showd: document.getElementById("showd"),
+               idle: document.getElementById("idle") };
+
+  const VS = "attribute vec2 p; varying vec2 v; void main(){ v = vec2(p.x * 0.5 + 0.5, 0.5 - p.y * 0.5); gl_Position = vec4(p, 0.0, 1.0); }";
+  // Flou de mise au point en une passe (« scatter as gather », D. Gustafsson 2018) sur la vue du moment : chaque
+  // echantillon d'une spirale doree compte s'il s'etale jusqu'au pixel ; un echantillon plus loin que le pixel ne
+  // deborde pas sur un premier plan net. Deux vues voisines melangees (uT) : couleur et profondeur.
+  const FS = `precision highp float;
+    varying vec2 v;
+    uniform sampler2D uA, uB, uDA, uDB;
+    uniform float uT, uFocus, uAp, uMaxR, uShowDepth;
+    uniform vec2 uPx;
+    vec3 col(vec2 p){ return mix(texture2D(uA, p).rgb, texture2D(uB, p).rgb, uT); }
+    float dep(vec2 p){ return mix(texture2D(uDA, p).r, texture2D(uDB, p).r, uT); }
+    float coc(float d){ return clamp(abs(d - uFocus) * uAp, 0.0, uMaxR); }
+    void main(){
+      float cd = dep(v);
+      if (uShowDepth > 0.5) { float k = coc(cd) / max(uMaxR, 1.0); gl_FragColor = vec4(mix(vec3(cd), vec3(1.0, 0.55, 0.1), 0.6 * (1.0 - k) * step(k, 0.15)), 1.0); return; }
+      vec3 c = col(v);
+      if (uMaxR < 0.5) { gl_FragColor = vec4(c, 1.0); return; }
+      float cs = coc(cd), tot = 1.0, r = 0.5, ang = 0.0;
+      for (int i = 0; i < 160; i++) {
+        if (r >= uMaxR) break;
+        vec2 tc = clamp(v + vec2(cos(ang), sin(ang)) * uPx * r, 0.0, 1.0);
+        vec3 sc = col(tc); float sd = dep(tc); float ss = coc(sd);
+        if (sd < cd) ss = clamp(ss, 0.0, cs * 2.0);
+        float m = smoothstep(r - 0.5, r + 0.5, ss);
+        c += mix(c / tot, sc, m); tot += 1.0;
+        ang += 2.39996323; r += 1.0 / r;
+      }
+      gl_FragColor = vec4(c / tot, 1.0);
+    }`;
+
+  const load = (url) => new Promise((ok, ko) => { const im = new Image(); im.onload = () => ok(im); im.onerror = ko; im.src = url; });
+
+  function makeCell(pid, pan, label) {
+    const cell = document.createElement("div"); cell.className = "cell";
+    const cv = document.createElement("canvas"); cell.appendChild(cv);
+    const lab = document.createElement("div"); lab.className = "lab"; lab.textContent = label; cell.appendChild(lab);
+    const wait = document.createElement("div"); wait.className = "wait"; wait.textContent = "chargement…"; cell.appendChild(wait);
+    const ring = document.createElement("div"); ring.className = "ring"; cell.appendChild(ring);
+    grid.appendChild(cell);
+    const base = `/projects/${pid}/lytro/${pan}/`;
+    const st = { cell, cv, ring, base, meta: null, views: [], deps: [], dpx: [], tex: new Map(), pos: 0, vel: 0, target: 0,
+                 focus: 0.7, fFrom: 0.7, fTo: 0.7, fT: 1, active: false, idleT: Math.random() * 10, gl: null,
+                 ap: 0, apTo: 0 };                    // ouverture 0-1 : au repos la photo est nette partout (comme prise)
+    fetch(base + "meta.json?x=" + Date.now()).then(r => { if (!r.ok) throw new Error("pas de vues"); return r.json(); }).then(async (meta) => {
+      st.meta = meta; st.pos = st.target = meta.center;
+      const n = meta.n, idx = [...Array(n).keys()];
+      st.views = await Promise.all(idx.map(i => load(base + `v${String(i).padStart(2, "0")}.jpg`)));
+      st.deps = await Promise.all(idx.map(i => load(base + `d${String(i).padStart(2, "0")}.png`)));
+      cv.width = meta.w; cv.height = meta.h;
+      initGL(st);
+      // mise au point de depart : le sujet (les 25 % les plus proches de la vue du milieu)
+      const d = depthData(st, meta.center); const arr = Array.from(d.data).sort((a, b) => a - b);
+      st.focus = st.fFrom = st.fTo = arr[Math.floor(arr.length * 0.8)] / 255;
+      wait.remove(); draw(st);
+      // petit balancement d'accueil la premiere fois que la case est visible : on comprend qu'elle est « vivante »
+      const io = new IntersectionObserver((ents) => { if (ents.some(x => x.isIntersecting)) { io.disconnect(); st.hint = 0; } });
+      io.observe(cell);
+    }).catch(e => { wait.textContent = "pas encore de vues (" + e.message + ")"; });
+    bind(st);
+    return st;
+  }
+
+  function initGL(st) {
+    const gl = st.cv.getContext("webgl", { antialias: false, premultipliedAlpha: false });
+    const sh = (t, s) => { const o = gl.createShader(t); gl.shaderSource(o, s); gl.compileShader(o);
+      if (!gl.getShaderParameter(o, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(o)); return o; };
+    const prog = gl.createProgram(); gl.attachShader(prog, sh(gl.VERTEX_SHADER, VS)); gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, FS));
+    gl.linkProgram(prog); gl.useProgram(prog);
+    const buf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
+    const ap = gl.getAttribLocation(prog, "p"); gl.enableVertexAttribArray(ap); gl.vertexAttribPointer(ap, 2, gl.FLOAT, false, 0, 0);
+    const U = {}; for (const n of ["uA", "uB", "uDA", "uDB", "uT", "uFocus", "uAp", "uMaxR", "uShowDepth", "uPx"]) U[n] = gl.getUniformLocation(prog, n);
+    gl.uniform1i(U.uA, 0); gl.uniform1i(U.uB, 1); gl.uniform1i(U.uDA, 2); gl.uniform1i(U.uDB, 3);
+    st.gl = gl; st.U = U;
+  }
+
+  function texOf(st, i) {                     // textures d'une vue (couleur + profondeur), creees a la demande
+    if (st.tex.has(i)) return st.tex.get(i);
+    const gl = st.gl;
+    const mk = (img, fmt) => { const t = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, t);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      gl.texImage2D(gl.TEXTURE_2D, 0, fmt, fmt, gl.UNSIGNED_BYTE, img); return t; };
+    const o = { c: mk(st.views[i], gl.RGB), d: mk(st.deps[i], gl.LUMINANCE) };
+    st.tex.set(i, o);
+    return o;
+  }
+
+  function depthData(st, i) {                 // profondeur lisible cote processeur (point clique)
+    if (!st.dpx[i]) {
+      const im = st.deps[i], c = document.createElement("canvas"); c.width = im.naturalWidth; c.height = im.naturalHeight;
+      const x = c.getContext("2d", { willReadFrequently: true }); x.drawImage(im, 0, 0);
+      const d = x.getImageData(0, 0, c.width, c.height); const g = new Uint8Array(c.width * c.height);
+      for (let k = 0; k < g.length; k++) g[k] = d.data[4 * k];
+      st.dpx[i] = { data: g, w: c.width, h: c.height };
+    }
+    return st.dpx[i];
+  }
+
+  function draw(st) {
+    if (!st.gl || !st.meta) return;
+    const gl = st.gl, U = st.U, n = st.meta.n;
+    const p = Math.max(0, Math.min(n - 1, st.pos)), i = Math.min(n - 2, Math.floor(p)), t = p - i;
+    const a = texOf(st, i), b = texOf(st, i + 1);
+    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, a.c);
+    gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, b.c);
+    gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D, a.d);
+    gl.activeTexture(gl.TEXTURE3); gl.bindTexture(gl.TEXTURE_2D, b.d);
+    const maxR = ui.allsharp.checked ? 0 : 18 * parseFloat(ui.blur.value) * st.ap * st.meta.w / 1024;
+    gl.uniform1f(U.uT, t); gl.uniform1f(U.uFocus, st.focus); gl.uniform1f(U.uMaxR, maxR); gl.uniform1f(U.uAp, maxR * 3.0);
+    gl.uniform1f(U.uShowDepth, ui.showd.checked ? 1 : 0); gl.uniform2f(U.uPx, 1 / st.meta.w, 1 / st.meta.h);
+    gl.viewport(0, 0, st.cv.width, st.cv.height); gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  }
+
+  function bind(st) {
+    const cv = st.cv;
+    let down = null;
+    const setTarget = (e) => {
+      if (!st.meta) return;
+      const r = cv.getBoundingClientRect(), vert = st.meta.axis === "y";      // arc vertical : la souris en hauteur
+      let nx = vert ? 1 - ((e.clientY - r.top) / r.height) * 2 : ((e.clientX - r.left) / r.width) * 2 - 1;
+      if (e.pointerType === "touch" && down) {          // doigt : un glisser d'une demi-largeur parcourt tout l'arc
+        nx = vert ? -(e.clientY - down.y) / (0.5 * r.height) : (e.clientX - down.x) / (0.5 * r.width);
+      }
+      nx = Math.max(-1, Math.min(1, nx / 0.85));          // le bout de l'arc un peu avant le bord
+      nx = Math.abs(nx) < 0.06 ? 0 : Math.sign(nx) * (Math.abs(nx) - 0.06) / 0.94;   // zone morte : la photo exacte
+      st.target = indexOf(st, nx); st.moved = performance.now();
+    };
+    cv.addEventListener("pointerenter", (e) => { st.active = true; setTarget(e); });
+    cv.addEventListener("pointermove", (e) => { if (e.pointerType !== "touch" || down) setTarget(e); });
+    cv.addEventListener("pointerleave", () => { st.active = false; if (st.meta) st.target = st.meta.center; });
+    cv.addEventListener("dblclick", () => { st.apTo = 0; });       // tout net
+    cv.addEventListener("pointerdown", (e) => { down = { x: e.clientX, y: e.clientY }; cv.setPointerCapture(e.pointerId); });
+    cv.addEventListener("pointerup", (e) => {
+      const moved = down && Math.hypot(e.clientX - down.x, e.clientY - down.y) > 6; down = null;
+      if (e.pointerType === "touch" && st.meta) setTimeout(() => { if (!down) st.target = st.meta.center; }, 1500);
+      if (moved || !st.meta) return;
+      const r = cv.getBoundingClientRect(), fx = (e.clientX - r.left) / r.width, fy = (e.clientY - r.top) / r.height;
+      const d = depthData(st, Math.round(Math.max(0, Math.min(st.meta.n - 1, st.pos))));
+      // valeur au point clique : mediane d'un petit voisinage (bord d'un sujet : pas de valeur intermediaire)
+      const xs = Math.round(fx * (d.w - 1)), ys = Math.round(fy * (d.h - 1)), vals = [];
+      for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) {
+        const x = Math.max(0, Math.min(d.w - 1, xs + dx)), y = Math.max(0, Math.min(d.h - 1, ys + dy)); vals.push(d.data[y * d.w + x]); }
+      vals.sort((a, b) => a - b);
+      if (st.ap < 0.02) { st.focus = st.fFrom = st.fTo = vals[12] / 255; st.fT = 1; }   // premier clic : le flou monte
+      else { st.fFrom = st.focus; st.fTo = vals[12] / 255; st.fT = 0; }                 // ensuite : la mise au point glisse
+      st.apTo = 1;
+      st.ring.style.left = (fx * 100) + "%"; st.ring.style.top = (fy * 100) + "%";
+      st.ring.classList.add("on"); setTimeout(() => st.ring.classList.remove("on"), 450);
+    });
+  }
+
+  // souris -> vue : la parallaxe voulue (en % de la largeur, relief du premier plan contre le fond, mesuree a la
+  // construction : meta.s) autour de la vue de repos, puis la vue fractionnaire qui la donne (interpolation dans s)
+  function indexOf(st, nx) {
+    const s = st.meta.s, c = st.meta.center, A = parseFloat(ui.amp.value) / 100 * st.meta.w;
+    // un cote plus court (H3 a peu tourne de ce cote) : la demi-course de la souris va jusqu'au bout de ce cote
+    const lo = Math.min(A, s[c] - s[0]), hi = Math.min(A, s[s.length - 1] - s[c]);
+    const t = s[c] + (nx < 0 ? nx * lo : nx * hi);
+    for (let i = 0; i < s.length - 1; i++) {
+      if (t >= s[i] && t <= s[i + 1]) return i + (s[i + 1] > s[i] ? (t - s[i]) / (s[i + 1] - s[i]) : 0);
+    }
+    return c;
+  }
+  ui.amp.addEventListener("input", () => { document.getElementById("ampv").textContent = ui.amp.value + " %"; });
+
+  const cells = [];
+  let last = performance.now();
+  function tick(now) {
+    const dt = Math.min(0.05, (now - last) / 1000); last = now;
+    for (const st of cells) {
+      if (!st.meta) continue;
+      let changed = false;
+      if (st.hint != null && !st.active) {             // balancement d'accueil : 0 -> +0,7 -> -0,7 -> 0 en 1,8 s
+        st.hint += dt; const h = st.hint / 1.8;
+        st.target = indexOf(st, h >= 1 ? 0 : 0.7 * Math.sin(2 * Math.PI * h));
+        if (h >= 1) st.hint = null;
+      }
+      if (!st.active && ui.idle.checked) {           // oscillation lente au repos (comme les « living pictures »)
+        st.idleT += dt; st.target = indexOf(st, 0.6 * Math.sin(st.idleT * 0.9));
+      }
+      // souris immobile 150 ms : on se pose sur la vue pure la plus proche (jamais au repos sur un melange de deux vues)
+      if (st.active && st.moved && now - st.moved > 150 && st.target !== Math.round(st.target)) st.target = Math.round(st.target);
+      const w = 11, acc = w * w * (st.target - st.pos) - 2 * w * st.vel;   // ressort amorti critique
+      st.vel += acc * dt; st.pos += st.vel * dt;
+      if (Math.abs(st.target - st.pos) > 1e-3 || Math.abs(st.vel) > 1e-3) changed = true; else { st.pos = st.target; st.vel = 0; }
+      if (Math.abs(st.apTo - st.ap) > 1e-3) { st.ap += Math.sign(st.apTo - st.ap) * Math.min(Math.abs(st.apTo - st.ap), dt / 0.45); changed = true; }
+      if (st.fT < 1) { st.fT = Math.min(1, st.fT + dt / 0.5); const k = st.fT * st.fT * (3 - 2 * st.fT);
+        st.focus = st.fFrom + (st.fTo - st.fFrom) * k; changed = true; }
+      if (changed || st.dirty) { draw(st); st.dirty = false; }
+    }
+    requestAnimationFrame(tick);
+  }
+  for (const el of Object.values(ui)) el.addEventListener("input", () => cells.forEach(s => { s.dirty = true; }));
+
+  (async () => {
+    const names = [];
+    for (const pid of pids) {
+      const pj = await fetch(`/api/projects/${pid}`).then(r => r.json());
+      names.push(pj.name || pid);
+      const only = (qs.get("only") || "").split(",").filter(Boolean);
+      for (const pan of Object.keys(pj.panels).sort().filter(x => !only.length || only.includes(x))) {
+        const src = ((pj.panels[pan].image || {}).name || "").replace(/\.png$/, "");
+        cells.push(makeCell(pid, pan, `${pan} · ${src}`));
+      }
+    }
+    document.getElementById("title").textContent = "Lytro test · " + names.join(" + ");
+    // essais automatiques : etat impose puis rendu immediat (pos = vue fractionnaire, focus 0-1)
+    window.__lytro = { cells, snap: (k, pos, focus) => { const st = cells[k]; st.pos = st.target = pos; st.vel = 0;
+      if (focus != null) { st.focus = st.fFrom = st.fTo = focus; st.fT = 1; st.ap = st.apTo = 1; } draw(st); return true; } };
+    requestAnimationFrame(tick);
+  })();
+})();
+</script>
+</body>
+</html>
