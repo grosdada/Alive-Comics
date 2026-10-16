@@ -35,7 +35,7 @@
 </head>
 <body>
 <header>
-  <h1>Lytro viewer</h1>
+  <h1>Lytro viewer <small style="font-weight:400;color:var(--muted);font-size:12px">version 2026-10-16e</small></h1>
   <p>Bouge la souris sur une photo : la perspective suit. Clique : la mise au point va là (double-clic : tout net).
      Téléphone : glisse pour la perspective, touche pour la mise au point. Dépose un dossier de piles ou un zip n'importe où.</p>
 </header>
@@ -61,11 +61,20 @@
   <input id="dirInput" type="file" webkitdirectory multiple hidden>
   <input id="zipInput" type="file" accept=".zip" multiple hidden>
 </div>
+<div id="errs" style="display:none;margin:0 16px 10px;padding:8px 10px;background:#5a1d1d;color:#fff;border-radius:4px;font-size:13px;white-space:pre-wrap"></div>
 <div id="stats"></div>
 <div class="grid" id="grid"></div>
 <div id="drop">Dépose ici un dossier de piles ou un zip</div>
-<script src="zip.js"></script>
-<script src="lytro-viewer.js"></script>
+<script>
+  // toute erreur JavaScript s'affiche en rouge en haut de la page (diagnostic a distance, sur telephone)
+  (function () {
+    const show = (m) => { const e = document.getElementById("errs"); if (!e) return; e.style.display = "block"; e.textContent += (e.textContent ? "\n" : "") + "Erreur : " + m; };
+    addEventListener("error", (e) => show((e.message || e.type) + (e.filename ? " (" + e.filename.split("/").pop() + ":" + e.lineno + ")" : "")));
+    addEventListener("unhandledrejection", (e) => show("promesse : " + ((e.reason && (e.reason.message || e.reason)) || "?")));
+  })();
+</script>
+<script src="zip.js?v=2026-10-16e"></script>
+<script src="lytro-viewer.js?v=2026-10-16e"></script>
 <script>
 (() => {
   "use strict";
@@ -135,6 +144,7 @@
                    ` · page ${window.isSecureContext ? "sécurisée" : "non sécurisée (pas de gyroscope)"} · densité ×${(window.devicePixelRatio || 1).toFixed(2)}${coarse ? " · tactile" : ""}`];
     for (const v of vs) {
       const L = v.L, tot = L.cols * L.rows;
+      if (!v.tw) { lines.push(`${v.src.label} : pas encore chargée (loin de l'écran)`); continue; }
       if (!v.loaded.size && !v.loading?.size && v.cap === 0) { lines.push(`${v.src.label} : hors écran, mémoire libérée`); continue; }
       lines.push(`${v.src.label} : ${v.loaded.size}/${tot} vues${L.dups ? ` (+${L.dups} doublons écartés)` : ""} · ${v.tw}×${v.th} · ` +
                  `${(v.gpuBytes() / 1048576).toFixed(1)} Mo GPU · recalage k=${v.K[0].toFixed(2)} c=${v.K[1].toFixed(2)}` +
@@ -154,6 +164,20 @@
   }
 
   setInterval(() => showStats(), 1000);                  // chiffres vivants (position, erreurs)
+  // ?debug=1 : l'etat de chaque case ecrit sur l'image (une capture d'ecran du telephone suffit)
+  if (qs.get("debug") === "1") setInterval(() => {
+    for (const v of LV.viewers) {
+      if (!v.meta) continue;
+      const L = v.L, c0 = L.sx[L.cc], css = v.el.getBoundingClientRect().width / v.meta.w, ev = v.ev || {};
+      const a = v.useI ? L.sx[v.useI[0]] - c0 : 0, b = v.useI ? L.sx[v.useI[v.useI.length - 1]] - c0 : 0;
+      v.lab.style.cssText = "background:rgba(0,0,0,.65);padding:4px 6px;border-radius:3px;font:12px/1.35 monospace;white-space:pre-wrap";
+      v.lab.textContent = `vues ${v.loaded.size}/${L.cols * L.rows} (en cours ${v.loading ? v.loading.size : 0}) · ${v.gl2 ? "GL2" : "GL1"} ${v.tw}px` +
+        `\ncourse ${a.toFixed(1)}…+${b.toFixed(1)} px (${(Math.max(-a, b) * css).toFixed(1)} px écran) · relief ${set.relief} %` +
+        `\nposition ${(v.px - c0).toFixed(1)} · cible ${(v.tx - c0).toFixed(1)} · actif ${v.active ? "oui" : "non"} · proche ${v.near ? "oui" : "non"}` +
+        `\ndoigt : down ${ev.down || 0} move ${ev.move || 0} up ${ev.up || 0} cancel ${ev.cancel || 0}` +
+        (v.errors && v.errors.length ? `\nERREURS : ${v.errors.join(" ; ")}` : "");
+    }
+  }, 300);
 
   // mesure : toutes les cases oscillent, mise au point active, 6 s ; images par seconde (navigateur) et temps GPU
   document.getElementById("bench").onclick = async () => {

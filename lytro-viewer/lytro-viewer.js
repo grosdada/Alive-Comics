@@ -683,6 +683,9 @@
         return [nx, ny];
       };
       cv.addEventListener("pointerenter", (e) => { if (e.pointerType !== "touch") { this.active = true; this.aim(...norm(e)); } });
+      this.ev = { down: 0, move: 0, up: 0, cancel: 0 };            // compteurs (diagnostic ?debug=1)
+      for (const [n, k] of [["pointerdown", "down"], ["pointermove", "move"], ["pointerup", "up"], ["pointercancel", "cancel"]])
+        cv.addEventListener(n, () => { this.ev[k]++; });
       cv.addEventListener("pointermove", (e) => { if (e.pointerType !== "touch" || down) this.aim(...norm(e)); });
       cv.addEventListener("pointerleave", (e) => { if (e.pointerType !== "touch") { this.active = false; this.home(); } });
       cv.addEventListener("dblclick", () => { this.apTo = 0; });
