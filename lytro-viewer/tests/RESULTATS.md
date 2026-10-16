@@ -54,16 +54,22 @@ Aucun saut : le pas maximal reste dans 1,2 fois le pas médian.
 
 ## 4. Mémoire GPU par case (estimée : textures allouées)
 
-| Situation | Taille des vues | Vues chargées (relief 1 %) | Mémoire |
-|---|---|---|---|
-| Ordinateur, case de ~680 px, pas 1,5 px | 680 × 680 | 9 à 12 | 28 Mo |
-| Ordinateur, pas 3 px | 680 × 680 | 7 | 20 Mo |
-| Téléphone (Pixel 7 émulé, 412 px × 2,6), pas 2,5 px | 998 × 998 | 8 | 44 Mo |
-| WebGL1 (repli), case de 478 px | 478 × 478 | 9 à 11 | 12 à 15 Mo |
-| Grille 9 × 5 synthétique, ordinateur | 680 × 680 | 35 | 82 Mo |
+Réglages par défaut depuis le 16/10 au soir : pas des vues 2,5 px (3 px sur téléphone), densité de pixels plafonnée à 2,
+réserve allouée au plus juste, et **seules les cases proches de l'écran** (une demi-hauteur d'écran de marge) gardent
+de la mémoire : une case qui s'éloigne plus de 3 s libère tout (vues, tampons, canevas) et se recharge en revenant,
+sans réseau (fichiers gardés en mémoire, compressés). Une case jamais approchée ne réserve rien.
 
-Les vues sont chargées à la taille d'affichage (jamais plus que la pile), seulement celles qu'exige le relief
-courant ; monter le relief en charge d'autres sans redécoder les premières (copie de couches sur le GPU).
+| Situation (relief 1 %) | Taille des vues | Vues chargées | Avant | Maintenant |
+|---|---|---|---|---|
+| Ordinateur, case de ~680 px | 678 × 678 | 8 à 9 | 28 Mo | **20 à 22 Mo** |
+| PC de David, cases de 496 px | 496 × 496 | 8 à 9 | 21 à 30 Mo (relief monté) | **~12 Mo** (calcul) |
+| Téléphone (Pixel 7 émulé, 412 px × 2,6) | 998 → **760** px | 7 | 44 Mo | **23 Mo** |
+| Page de démo, haut de page (4 cases visibles sur 7) | | | 236 Mo | **84 Mo** |
+| Grille 9 × 5 synthétique (pile de test, pas une vraie case) | 678 × 678 | 35 | 82 Mo | 70 Mo |
+
+Ce qui reste par case : chaque vue (largeur × hauteur × 4 octets, plus la disparité, 1/16 de ça) et trois tampons de
+la taille de la case (vue synthétisée, accumulation du flou, écran). Piste suivante, pour les étapes 4-5 : textures
+compressées produites par le générateur (4 à 8 fois moins).
 
 ## 5. Images par seconde
 

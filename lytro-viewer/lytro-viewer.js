@@ -21,7 +21,9 @@
     blur: 0.5,            // force du flou 0-1
     band: 0.03,           // demi-largeur de la bande nette (disparite 0-1)
     focusTime: 0.5,       // duree du glisse de mise au point (s)
-    minGap: 1.5,          // pas minimal entre vues chargees (px) : moins de vues = moins de memoire
+    minGap: 2.5,          // pas minimal entre vues chargees (px) : moins de vues = moins de memoire (le fondu
+                          // guide passe sans dedoublement des ecarts de 7,5 px, voir tests/RESULTATS.md)
+    maxDpr: 2,            // densite de pixels plafonnee (ecrans x3 des telephones : x2 suffit, 2,2 fois moins de memoire)
     snap: true,           // souris immobile : on se pose sur une vue reelle
     warp: true,           // fondu guide par la profondeur (sinon fondu simple)
     allSharp: false, showDepth: false, idle: false, gyro: false,
@@ -219,6 +221,12 @@
       this.focus = 0.7; this.fFrom = 0.7; this.fTo = 0.7; this.fT = 1; this.ap = 0; this.apTo = 0;
       this.active = false; this.dirty = true; this.accum = 0; this.stats = { frames: 0, gpuMs: [] };
       this.K = [1, 0, 1, 0];                 // gain / decalage du recalage, x puis y (mesures au chargement)
+      // memoire GPU seulement pour les cases proches de l'ecran (une demi-hauteur d'ecran de marge) : une case qui
+      // s'en eloigne plus de 3 s libere ses textures, et les recharge en revenant (fichiers deja en memoire)
+      this.blobCache = new Map();
+      this.nearScreen = new Promise(ok => { this.onNear = ok; });
+      this.io = new IntersectionObserver((ents) => this.setNear(ents[ents.length - 1].isIntersecting), { rootMargin: "50% 0px" });
+      this.io.observe(this.el);
       this.ready = this.init().catch(e => { this.wait.textContent = "erreur : " + e.message; console.error(e); throw e; });
     }
 
@@ -231,11 +239,14 @@
       this.el.style.aspectRatio = meta.w + " / " + meta.h;
       this.el.style.touchAction = L.rows > 1 ? "none" : "pan-y";     // glisser vertical = perspective si la pile en a
       this.blobs = new Map(); this.depthCpu = new Map(); this.tiles = new Map();
-      this.sizeCanvas();
+      this.slots = new Map();                // fichier -> couche de texture
+      this.loaded = new Set(); this.loading = new Set(); this.gen = 0;
+      this.cv.width = this.cv.height = 1;
+      await this.nearScreen;                  // une case loin de l'ecran ne reserve rien, pas meme son canevas
+      this.sizeCanvas(true);
       this.initGL();
       this.bind();
-      this.slots = new Map();                // fichier -> couche de texture
-      this.loaded = new Set();
+      this.ensureCapacity(this.wanted().length);                    // toutes les couches d'un coup, au plus juste
       await this.loadView(L.file(L.cc, L.cr), true);                // la photo d'abord
       this.wait.remove();
       this.initialFocus();
@@ -244,8 +255,9 @@
       this.extend();                          // puis les vues voisines, du centre vers les bouts
     }
 
-    sizeCanvas() {
-      const r = this.el.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+    sizeCanvas(force) {
+      if (force) this.cw = 0;
+      const r = this.el.getBoundingClientRect(), dpr = Math.min(window.devicePixelRatio || 1, this.set.maxDpr || 2);
       const w = Math.max(64, Math.min(this.meta.w, Math.round((r.width || this.meta.w) * dpr)));
       const h = Math.round(w * this.meta.h / this.meta.w);
       if (w !== this.cv.width || h !== this.cv.height || !this.cw) { this.cv.width = w; this.cv.height = h; this.cw = w; this.ch = h; return true; }
@@ -314,7 +326,7 @@
     ensureCapacity(n) {
       const gl = this.gl;
       if (!this.gl2 || (this.cap && this.cap >= n)) return;
-      const cap = Math.max(n, Math.ceil((this.cap || 0) * 1.5));
+      const cap = n;                          // au plus juste (la liste des vues est connue avant de charger)
       const mk = (fmt, w, h) => {
         const t = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D_ARRAY, t);
         gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MIN_FILTER, gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
@@ -336,23 +348,31 @@
       this.arrC = nc; this.arrD = nd; this.cap = cap; this.used = this.used || 0;
     }
 
+    async file(name) {                       // fichiers compresses gardes en memoire (rechargement sans reseau)
+      if (!this.blobCache.has(name)) this.blobCache.set(name, this.src.blob(name));
+      return this.blobCache.get(name);
+    }
+
     async loadView(k, first) {
-      if (this.loaded.has(k) || this.loading?.has(k)) return;
-      (this.loading = this.loading || new Set()).add(k);
+      if (this.loaded.has(k) || this.loading.has(k)) return;
+      this.loading.add(k);
       const L = this.L;
-      const [bc, bd] = await Promise.all([this.src.blob(L.name(k, "v")), this.src.blob(L.name(k, "d"))]);
+      const gen = this.gen;
+      const [bc, bd] = await Promise.all([this.file(L.name(k, "v")), this.file(L.name(k, "d"))]);
       const [ic, id] = await Promise.all([
         createImageBitmap(bc, { resizeWidth: this.tw, resizeHeight: this.th, resizeQuality: "high" }),
         createImageBitmap(bd, { resizeWidth: this.dw, resizeHeight: this.dh, resizeQuality: "medium" })]);
       // disparite cote processeur (mise au point au clic, tuiles, mesure du recalage), a la resolution du fichier
-      const idf = await createImageBitmap(bd);
-      const c = document.createElement("canvas"); c.width = idf.width; c.height = idf.height;
-      const x = c.getContext("2d", { willReadFrequently: true }); x.drawImage(idf, 0, 0); idf.close();
-      const px = x.getImageData(0, 0, c.width, c.height).data, g = new Uint8Array(c.width * c.height);
-      for (let i = 0; i < g.length; i++) g[i] = px[4 * i];
-      this.depthCpu.set(k, { data: g, w: c.width, h: c.height });
-      this.tiles.set(k, this.tileMinMax(g, c.width, c.height));
-      if (this.lost) return;
+      if (!this.depthCpu.has(k)) {
+        const idf = await createImageBitmap(bd);
+        const c = document.createElement("canvas"); c.width = idf.width; c.height = idf.height;
+        const x = c.getContext("2d", { willReadFrequently: true }); x.drawImage(idf, 0, 0); idf.close();
+        const px = x.getImageData(0, 0, c.width, c.height).data, g = new Uint8Array(c.width * c.height);
+        for (let i = 0; i < g.length; i++) g[i] = px[4 * i];
+        this.depthCpu.set(k, { data: g, w: c.width, h: c.height });
+        this.tiles.set(k, this.tileMinMax(g, c.width, c.height));
+      }
+      if (this.lost || gen !== this.gen) { ic.close(); id.close(); this.loading.delete(k); return; }   // case liberee entre-temps
       const gl = this.gl;
       if (this.gl2) {
         this.ensureCapacity((this.used || 0) + 1);
@@ -394,7 +414,9 @@
       return list.sort((a, b) => a.d - b.d).map(o => o.k);
     }
     async extend() {
-      const todo = this.wanted().filter(k => !this.loaded.has(k));
+      if (!this.near || this.lost) return;
+      const todo = this.wanted().filter(k => !this.loaded.has(k) && !this.loading.has(k));
+      this.ensureCapacity((this.used || 0) + this.loading.size + todo.length);
       this.updateBounds();
       const run = async () => { while (todo.length) { await this.loadView(todo.shift()); } };
       await Promise.all([run(), run(), run(), run()]);
@@ -402,6 +424,41 @@
       if (!this.calibrated) { this.calibrated = true; setTimeout(() => this.calibrate(), 30); }
       this.opts.onLoaded && this.opts.onLoaded(this);
     }
+    // reglage change (relief, pas des vues) : on complete si la nouvelle liste contient l'ancienne, sinon on recharge
+    // juste ce qu'il faut (sans reseau)
+    refresh() {
+      if (!this.meta || !this.near || this.lost) return;
+      const want = new Set(this.wanted());
+      if ([...this.loaded, ...this.loading].some(k => !want.has(k))) { this.unloadGPU(true); this.reload(); }
+      else this.extend();
+    }
+    reload() {
+      if (this.lost) return;
+      this.sizeCanvas(true);
+      if (!this.targets) this.makeTargets();
+      this.ensureCapacity(this.wanted().length);
+      this.loadView(this.L.file(this.L.cc, this.L.cr)).then(() => this.extend());
+    }
+    unloadGPU(keepCanvas) {                   // libere toute la memoire GPU de la case (le contexte reste)
+      const gl = this.gl;
+      this.gen++;
+      if (this.gl2) { if (this.arrC) { gl.deleteTexture(this.arrC); gl.deleteTexture(this.arrD); } this.arrC = this.arrD = null; }
+      else for (const s of this.slots.values()) { gl.deleteTexture(s.c); gl.deleteTexture(s.d); }
+      for (const t of this.targets || []) { gl.deleteTexture(t.tex); gl.deleteFramebuffer(t.fb); }
+      this.targets = null; this.cap = 0; this.used = 0; this.tileKey = null;
+      this.slots.clear(); this.loaded.clear(); this.loading.clear();
+      if (!keepCanvas) { this.cv.width = this.cv.height = 1; this.cw = 0; }   // le tampon d'affichage aussi
+      this.opts.onLoaded && this.opts.onLoaded(this);
+    }
+    setNear(near) {
+      this.near = near;
+      clearTimeout(this.farT);
+      if (near) {
+        this.onNear();
+        if (this.meta && this.gl && !this.loaded.size && !this.loading.size && this.wait.isConnected === false) this.reload();
+      } else if (this.meta) this.farT = setTimeout(() => { if (!this.near && this.loaded.size) this.unloadGPU(); }, 3000);
+    }
+
     // course autorisee : le plus grand rectangle de vues retenues entierement charge autour du centre
     updateBounds() {
       const L = this.L, ci = this.pickI || [L.cc], cj = this.pickJ || [L.cr];
@@ -436,7 +493,7 @@
       const lum = async (k) => {
         if (lumCache.has(k)) return lumCache.get(k);
         const W = 256, H = Math.round(W * this.meta.h / this.meta.w);
-        const bm = await createImageBitmap(await this.src.blob(L.name(k, "v")), { resizeWidth: W, resizeHeight: H, resizeQuality: "medium" });
+        const bm = await createImageBitmap(await this.file(L.name(k, "v")), { resizeWidth: W, resizeHeight: H, resizeQuality: "medium" });
         const c = document.createElement("canvas"); c.width = W; c.height = H; const x = c.getContext("2d", { willReadFrequently: true });
         x.filter = "blur(1px)"; x.drawImage(bm, 0, 0); bm.close();
         const p = x.getImageData(0, 0, W, H).data, g = new Float32Array(W * H);
@@ -516,7 +573,7 @@
 
     // ------------------------------------------------------------------ dessin
     draw() {
-      if (!this.meta || this.lost || !this.loaded.size) return;
+      if (!this.meta || this.lost || !this.loaded.size || !this.targets) return;
       const gl = this.gl, L = this.L, S = this.set;
       if (this.timer && !this.qActive) { const q = gl.createQuery(); gl.beginQuery(this.timer.TIME_ELAPSED_EXT, q); this.qActive = q; }
       const [i0, i1, tx] = this.locate(this.useI, L.sx, this.px), [j0, j1, ty] = this.locate(this.useJ, L.sy, this.py);
@@ -606,7 +663,7 @@
       if (!this.gl) return 0;
       const views = this.gl2 ? (this.cap || 0) : this.loaded.size;
       return views * (this.tw * this.th * 4 + this.dw * this.dh * (this.gl2 ? 1 : 4))
-        + 2 * this.cw * this.ch * 4 + this.ntx * this.nty * 4 + this.cw * this.ch * 4;    // cibles + tuiles + ecran
+        + (this.targets ? 3 * this.cw * this.ch * 4 : 4) + this.ntx * this.nty * 4;    // vues + cibles et ecran + tuiles
     }
 
     // ------------------------------------------------------------------ interaction
@@ -697,7 +754,7 @@
     }
 
     resize() {
-      if (!this.meta || !this.gl) return;
+      if (!this.meta || !this.gl || !this.targets) return;
       if (this.sizeCanvas()) {
         this.makeTargets();
         if (this.cw > this.tw * 1.3 && this.tw < this.meta.w) this.lab.textContent = this.src.label + " · agrandie : recharger pour la pleine définition";
@@ -734,7 +791,7 @@
     return v;
   }
   function remove(v) {
-    viewers.delete(v);
+    viewers.delete(v); v.io && v.io.disconnect(); clearTimeout(v.farT);
     const ext = v.gl && v.gl.getExtension("WEBGL_lose_context"); if (ext) ext.loseContext();
     v.el.remove();
   }

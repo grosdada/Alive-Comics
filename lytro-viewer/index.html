@@ -45,7 +45,7 @@
   <label>Bande nette <input id="band" type="range" min="0" max="0.15" step="0.005" value="0.03"><output id="bandv"></output></label>
   <label>Glissé <input id="focusTime" type="range" min="0.1" max="2" step="0.05" value="0.5"><output id="focusTimev"></output></label>
   <label title="Écart minimal entre deux vues chargées : plus grand = moins de mémoire, plus de recalage">Pas des vues
-    <input id="minGap" type="range" min="0.5" max="4" step="0.25" value="1.5"><output id="minGapv"></output></label>
+    <input id="minGap" type="range" min="0.5" max="6" step="0.25" value="2.5"><output id="minGapv"></output></label>
 </div>
 <div class="ctl">
   <label><input id="warp" type="checkbox" checked> Fondu guidé par la profondeur</label>
@@ -73,7 +73,7 @@
   const grid = document.getElementById("grid"), stats = document.getElementById("stats");
   const set = Object.assign({}, LV.defaults);
   const coarse = matchMedia("(pointer: coarse)").matches;
-  if (coarse) set.minGap = 2.5;                       // telephone : moins de vues en memoire
+  if (coarse) set.minGap = 3;                         // telephone : moins de vues en memoire
   for (const k of Object.keys(set)) if (qs.has(k)) set[k] = qs.get(k) === "1" ? true : qs.get(k) === "0" ? false : parseFloat(qs.get(k));
   const opts = { forceWebGL1: qs.get("webgl1") === "1", preserve: qs.get("preserve") === "1", noHint: qs.get("hint") === "0",
                  onReady: () => showStats(), onLoaded: () => showStats(), onCalibrated: () => showStats() };
@@ -85,7 +85,7 @@
     el.value = set[k]; out.textContent = fmt[k](set[k]);
     el.addEventListener("input", () => {
       set[k] = parseFloat(el.value); out.textContent = fmt[k](set[k]);
-      LV.viewers.forEach(v => { v.dirty = true; if (k === "relief" || k === "minGap") v.ready.then(() => v.extend()); });
+      LV.viewers.forEach(v => { v.dirty = true; if (k === "relief" || k === "minGap") v.ready.then(() => v.refresh()); });
     });
   }
   for (const k of ["warp", "snap", "allSharp", "showDepth", "idle", "gyro"]) {
@@ -130,6 +130,7 @@
     const lines = [`${g.gl2 ? "WebGL2 (TEXTURE_2D_ARRAY)" : "WebGL1 (repli)"} · ${vs.length} case(s) · mémoire GPU totale ≈ ${(vs.reduce((a, v) => a + v.gpuBytes(), 0) / 1048576).toFixed(0)} Mo`];
     for (const v of vs) {
       const L = v.L, tot = L.cols * L.rows;
+      if (!v.loaded.size && !v.loading?.size && v.cap === 0) { lines.push(`${v.src.label} : hors écran, mémoire libérée`); continue; }
       lines.push(`${v.src.label} : ${v.loaded.size}/${tot} vues${L.dups ? ` (+${L.dups} doublons écartés)` : ""} · ${v.tw}×${v.th} · ` +
                  `${(v.gpuBytes() / 1048576).toFixed(1)} Mo GPU · recalage k=${v.K[0].toFixed(2)} c=${v.K[1].toFixed(2)}` +
                  (L.rows > 1 ? ` / y k=${v.K[2].toFixed(2)} c=${v.K[3].toFixed(2)}` : "") + (v.calibMs != null ? ` (${v.calibMs} ms)` : ""));

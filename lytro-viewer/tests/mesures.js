@@ -10,7 +10,7 @@ const { chromium } = require(process.env.PW || "playwright");
 (async () => {
   const base = process.argv[2] || "http://localhost:8799/lytro-viewer/", extra = process.argv[3] || "";
   const b = await chromium.launch({ args: ["--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"] });
-  const p = await b.newPage({ viewport: { width: 1400, height: 1000 } });
+  const p = await b.newPage({ viewport: { width: 1400, height: 6000 } });   // toutes les cases a l ecran (sinon elles ne chargent pas)
   const errs = [];
   p.on("pageerror", e => errs.push(e.message));
   p.on("console", m => { if (m.type() === "error") errs.push(m.text()); });
