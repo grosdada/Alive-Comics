@@ -520,20 +520,14 @@ def _plate_faults(im, plate, blob):
 
 # ------------------------------------------------------------------ calcul complet (tache de la file)
 def lama_hole(subs, W, rd):
-    """Zone que LaMa refait : les sujets choisis, leur bord doux (BiRefNet) et 2,2 % de largeur autour. Plus serree,
-    LaMa recopiait la couleur du bord de la personne en bavure le long de sa silhouette (revue des 71 cases)."""
+    """Zone que LaMa refait : les sujets choisis et 1,2 % de largeur autour. Revue des 71 cases : a 2,2 % avec le bord
+    doux, LaMa etalait de plus larges bavures (plus le trou est grand, plus il est flou) ; la bande que la parallaxe montre
+    est pres du contour, ou un trou serre le garde fidele."""
     import cv2
     import numpy as np
-    from PIL import Image
     region = np.any([s["region"] for s in subs], axis=0).astype(np.uint8)
-    H = region.shape[0]
-    bn = rd / "birefnet.png"
-    if bn.exists():
-        a = np.asarray(Image.open(bn).convert("L").resize((W, H), Image.BILINEAR)) > 40
-        near = cv2.dilate(region, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (31, 31))) > 0
-        region = (region > 0) | (a & near)
-    r = max(6, round(0.022 * W))
-    return cv2.dilate(region.astype(np.uint8), cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * r + 1, 2 * r + 1)))
+    r = max(5, round(0.012 * W))
+    return cv2.dilate(region, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * r + 1, 2 * r + 1)))
 
 
 def extra_prompts():
