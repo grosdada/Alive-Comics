@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Le relief par cartes de profondeur</title>
+<style>
+  :root { --bg: #f4f2ee; --paper: #fffdf9; --ink: #1d1c1a; --muted: #6a655d; --line: #ddd7cc; --accent: #a8560f; --good: #2f7a46; --bad: #a1432f; --warn: #8a6a12; --code: #efeae0; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg: #151413; --paper: #1d1c1a; --ink: #ece8e1; --muted: #a09a90; --line: #35322d; --accent: #f2b45c; --good: #6cc184; --bad: #e08a74; --warn: #d6b45a; --code: #262421; } }
+  :root[data-theme="dark"] { --bg: #151413; --paper: #1d1c1a; --ink: #ece8e1; --muted: #a09a90; --line: #35322d; --accent: #f2b45c; --good: #6cc184; --bad: #e08a74; --warn: #d6b45a; --code: #262421; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.6 system-ui, "Segoe UI", sans-serif; }
+  main { max-width: 860px; margin: 0 auto; padding: 40px 16px 72px; display: grid; gap: 30px; }
+  h1 { font: 700 clamp(28px, 5vw, 40px)/1.1 Georgia, "Times New Roman", serif; margin: 0 0 10px; }
+  h2 { font: 700 23px/1.2 Georgia, "Times New Roman", serif; margin: 0 0 10px; }
+  h3 { font-size: 16px; margin: 16px 0 4px; }
+  p, li { max-width: 70ch; }
+  .kicker { font: 600 12px/1 ui-monospace, Consolas, monospace; letter-spacing: .08em; text-transform: uppercase; color: var(--accent); margin: 0 0 10px; }
+  .lead { font-size: 18px; }
+  section { display: grid; gap: 8px; min-width: 0; }
+  ul { margin: 0; padding-left: 20px; display: grid; gap: 5px; }
+  .card { background: var(--paper); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; }
+  .cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 12px; }
+  .tl { overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; }
+  th, td { padding: 8px 10px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+  thead th { font: 600 12px/1.2 ui-monospace, Consolas, monospace; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+  tr:last-child td { border-bottom: 0; }
+  code { font: 13.5px ui-monospace, Consolas, monospace; background: var(--code); padding: 1px 5px; border-radius: 4px; }
+  .ok { color: var(--good); font-weight: 600; } .ko { color: var(--bad); font-weight: 600; } .mid { color: var(--warn); font-weight: 600; }
+  .note { border-left: 4px solid var(--accent); padding: 8px 14px; background: var(--paper); border-radius: 0 8px 8px 0; }
+  nav ol { margin: 0; padding-left: 22px; columns: 2; column-gap: 28px; }
+  nav a { color: var(--accent); text-decoration: none; }
+  @media (max-width: 560px) { nav ol { columns: 1; } }
+</style>
+</head>
+<body>
+<main>
+<header>
+  <p class="kicker">Alive-Comics · état au 17 octobre 2026</p>
+  <h1>Le relief par cartes de profondeur : ce qu'on sait</h1>
+  <p class="lead">Une photo, une carte qui dit « ce pixel est proche, celui-là est loin », et un lecteur qui décale chaque pixel
+    selon sa profondeur quand la caméra bouge. Simple sur le papier. En pratique, les bords des personnages posent presque tous
+    les problèmes. Ce document résume ce qu'on a construit, mesuré, raté et appris en trois jours de tests sur 71 photos.</p>
+</header>
+
+<nav class="card"><ol>
+  <li><a href="#principe">Le principe</a></li>
+  <li><a href="#modeles">Les modèles de profondeur</a></li>
+  <li><a href="#nappe">Version 1 : la nappe</a></li>
+  <li><a href="#couches">Versions 2 et 3 : des couches</a></li>
+  <li><a href="#shader">Le lecteur (shader)</a></li>
+  <li><a href="#mesures">Ce que les revues ont mesuré</a></li>
+  <li><a href="#regles">Règles pratiques</a></li>
+  <li><a href="#limites">Limites et licences</a></li>
+  <li><a href="#verdict">Verdict et suite</a></li>
+  <li><a href="#fichiers">Où est quoi</a></li>
+</ol></nav>
+
+<section id="principe">
+  <h2>1. Le principe</h2>
+  <ul>
+    <li><b>Carte de profondeur</b> : une image en niveaux de gris, de même taille que la photo. Blanc = proche, noir = loin
+      (ou l'inverse). Elle est <i>estimée</i> par un modèle d'IA à partir d'une seule photo : aucune mesure réelle.</li>
+    <li><b>Parallaxe</b> : quand la caméra se décale, un objet proche se déplace plus vite qu'un objet lointain. Pour chaque pixel
+      d'écran, le shader cherche quel point de la photo on voit depuis le nouveau point de vue.</li>
+    <li><b>Le décor caché</b> : en décalant la caméra, on découvre ce qui était derrière les personnages. Cette zone n'existe pas
+      dans la photo : il faut l'inventer (IA de remplissage) ou l'étirer (ce qu'on refuse).</li>
+    <li>La caméra ne bouge que de quelques pour cent de la largeur : au-delà, le relief « casse ».</li>
+  </ul>
+</section>
+
+<section id="modeles">
+  <h2>2. Les modèles de profondeur essayés</h2>
+  <div class="tl"><table>
+    <thead><tr><th>Modèle</th><th>Rôle</th><th>Constat</th></tr></thead>
+    <tbody>
+      <tr><td><b>Depth Anything V2 Small</b> (ONNX, Apache 2.0)</td><td>Profondeur de base, sur le processeur</td><td>~0,7 s par image, qualité correcte, bords flous. Sert de repli.</td></tr>
+      <tr><td><b>Depth Pro</b> (Apple)</td><td>Profondeur précise (v2, v3)</td><td>Bords bien plus nets, échelle métrique ; ~0,3 s sur GPU, ~20 s sur processeur. <span class="mid">Licence de recherche : à revoir avant un usage commercial.</span></td></tr>
+      <tr><td><b>Depth Anything 3</b> (mono et métrique), <b>MoGe-3</b>, <b>Lotus</b></td><td>Comparatifs</td><td>Installés sur les PC pour les essais. Aucun n'a fait mieux que Depth Pro pour les contours de personnes sur nos photos.</td></tr>
+    </tbody>
+  </table></div>
+  <ul>
+    <li><b>Normalisation</b> : la carte brute est ramenée à 0-1 par les centiles 1 et 99 (pas min / max : un pixel extrême écraserait tout).</li>
+    <li><b>Le fond est un plan</b> : on ajuste un plan (régression robuste en 3 passes) sur la profondeur hors des personnages, pente bornée.
+      Plus de bosses dans le fond : plus rien à étirer. C'est la correction la plus efficace de la v3.</li>
+    <li>Défaut classique : la profondeur d'un modèle est <b>floue au bord</b> des personnages (elle « bave » sur le décor). Un bord flou
+      dans la carte devient un bord étiré à l'écran.</li>
+  </ul>
+</section>
+
+<section id="nappe">
+  <h2>3. Version 1 : une seule « nappe »</h2>
+  <p>Toute la photo est une surface déformée par la profondeur. Le shader WebGL cherche, pour chaque pixel d'écran, le <b>premier point
+    touché</b> en partant du plus proche (20 pas, puis 5 pas d'affinage), plutôt qu'un simple décalage : une seule solution, jamais
+    de bord dédoublé.</p>
+  <div class="cols">
+    <div class="card"><h3 class="ok">Ce qui marche</h3><ul>
+      <li>Petits mouvements (2 à 3 %) sur des scènes sans personnage au premier plan.</li>
+      <li>Coût nul : une carte de ~1 s par case, aucune vidéo, aucun rendu.</li>
+      <li>Le lecteur reste une seule image au repos (la photo exacte).</li>
+    </ul></div>
+    <div class="card"><h3 class="ko">Ce qui casse</h3><ul>
+      <li><b>Étirement autour des personnages</b> : le bord flou de la carte tire les pixels du décor avec le personnage.</li>
+      <li>Le « dolly » fort (0,6) déformait tout : abandonné.</li>
+      <li>Les cheveux, voiles, vitres : profondeur fausse, bords en dentelle.</li>
+    </ul></div>
+  </div>
+  <p class="note">David : « ça étire le personnage derrière… je pense qu'il faut faire des masques très nets, quitte à ce que les persos soient plats. »
+    C'est ce qui a lancé les couches.</p>
+</section>
+
+<section id="couches">
+  <h2>4. Versions 2 et 3 : des couches (le « théâtre de papier »)</h2>
+  <h3>Détourage précis</h3>
+  <ul>
+    <li><b>SAM 3.1</b> : un masque exact par personne (« person:20 » : le « :N » est obligatoire, sinon SAM ne rend qu'une détection).
+      Il cherche aussi les objets tenus (téléphone, verre, bouquet, parapluie…), portés (cravate, chapeau), les mains, et les surfaces qui
+      montrent des gens (miroir, cadre : ce ne sont pas des sujets).</li>
+    <li><b>BiRefNet</b> : seulement pour les lisières oubliées et le bord doux (cheveux, flou).</li>
+    <li>Un objet suit la personne dont il touche une main ; les trous des masques sont bouchés (BiRefNet, ou trous minuscules).</li>
+  </ul>
+  <h3>Cartes plates</h3>
+  <ul>
+    <li>Chaque groupe de personnes est <b>une carte plate à profondeur constante</b> : rien ne s'étire <i>dedans</i>.</li>
+    <li>Alpha net : le masque est rentré de 2 px, bord adouci de 0,7 px. Les fentes entre voisins sont comblées (sinon on y voit le décor
+      reconstruit : un trait noir qui bouge).</li>
+    <li>Deux cartes (devant / derrière) seulement si l'écart de profondeur dépasse 0,12 <i>et</i> qu'elles ne se touchent pas ; sinon une seule.</li>
+    <li>Foule (plus de 45 % de la case) : seul le premier plan net est détaché ; sinon la case glisse d'un bloc, sans déformation.</li>
+  </ul>
+  <h3>Reconstruire le décor caché</h3>
+  <div class="tl"><table>
+    <thead><tr><th>Méthode</th><th>Principe</th><th>Points forts</th><th>Points faibles</th></tr></thead>
+    <tbody>
+      <tr><td><b>A · Qwen-Image-Edit</b></td><td>Invente un décor plausible dans une forme magenta ; contrôles SAM, « photo recomposée », magenta restant ; 3 graines</td><td>Meilleur sur les structures fines (dossiers, rétroviseurs, rangées de chaises)</td><td>Redessine parfois des gens (visages fantômes, personne inventée) ; raccord net au bord</td></tr>
+      <tr><td><b>B · LaMa</b></td><td>Prolonge les couleurs autour, n'invente rien</td><td>Fidèle près du contour</td><td>Bave quand la zone est grande ; étale la couleur du sujet sur un bord flou</td></tr>
+      <tr><td><b>C · Hybride</b></td><td>LaMa sur 1,5 % de largeur au ras du contour, Qwen au-delà</td><td>Fidélité de LaMa là où la parallaxe se voit, décor de Qwen plus loin</td><td>Presque identique à B ; <span class="ok">recommandé par défaut</span></td></tr>
+    </tbody>
+  </table></div>
+  <p>Le décor reconstruit ne remplace la photo que <b>sous les personnages et ~7 px autour</b> : plus large, la bande se voit comme un halo.</p>
+</section>
+
+<section id="shader">
+  <h2>5. Le lecteur (shader)</h2>
+  <ul>
+    <li><b>Au repos : la photo exacte</b> (aucune différence avec l'image de la page). Le relief n'apparaît qu'au mouvement.</li>
+    <li><b>Fond</b> : recherche du « premier point touché » sur le plan ; <b>cartes</b> : point fixe (la profondeur est constante par carte).</li>
+    <li><b>Mélange photo ↔ décor reconstruit</b> (la vraie cause du « double nez ») : tant que la carte n'est pas assez écartée du fond,
+      on montre la photo. Avant le 16/10 au matin, le mélange se faisait jusqu'à 6 px d'écart <i>moyen</i> : pendant ce temps, la photo
+      contenait encore le personnage, vu décalé en transparence derrière lui-même. Et sur 19 cases sur 70, l'écart maximal restait sous 6 px :
+      le mélange ne finissait jamais.
+      <b>Correctif</b> : le décor reconstruit remplace la photo dès <b>2 px d'écart local</b> entre carte et fond (le fond est un plan incliné :
+      l'écart varie dans la case).</li>
+    <li>Réplique numérique du shader (numpy), validée à 0,1/255 contre le navigateur : sert à fabriquer des vidéos et des mesures sans navigateur.</li>
+    <li>Capture dans un volet de navigateur caché : remplacer <code>requestAnimationFrame</code> par un <code>MessageChannel</code>, sinon toutes les images sont identiques.</li>
+  </ul>
+</section>
+
+<section id="mesures">
+  <h2>6. Ce que les revues ont mesuré</h2>
+  <p>Quatre revues de 71 cases, un agent par planche, trois variantes chacune, avec gros plans des contours. Elles sont sévères :
+    un seul défaut grave dans une variante classe la case « grave ».</p>
+  <div class="tl"><table>
+    <thead><tr><th>Revue</th><th>Cases graves</th><th>Contours graves</th><th>Déformation</th><th>Note A / B / C</th></tr></thead>
+    <tbody>
+      <tr><td>1 · avant corrections</td><td>55</td><td>42</td><td>—</td><td>2,94 / 2,97 / 3,08</td></tr>
+      <tr><td>2 · cartes nettes, fentes</td><td>43</td><td>18</td><td>0</td><td>3,30 / 3,48 / 3,51</td></tr>
+      <tr><td>3 · objets, mains</td><td>42</td><td>35</td><td>1</td><td>3,50 / 2,84 / 2,87</td></tr>
+      <tr><td>4 · lecteur corrigé</td><td>34</td><td>8</td><td>0</td><td>3,33 / 3,44 / 3,47</td></tr>
+    </tbody>
+  </table></div>
+  <ul>
+    <li><b>Halo au repos</b> (écart avec la photo dans une bande de 12 px autour des personnages) : de 15-17/255 à <b>0,4/255</b>.</li>
+    <li><b>Déformation : 0</b> dans les trois dernières revues. Les cartes plates tiennent cette promesse.</li>
+    <li>Part du décor révélé qui montrait encore le personnage en transparence, à petit écart : <b>57 % → 19 %</b> avec le correctif du lecteur.</li>
+  </ul>
+  <h3>Ce qui reste (par ordre d'importance)</h3>
+  <ul>
+    <li><b>Objets</b> (16 cas graves, toutes variantes) : objet tenu resté au fond quand la main n'est pas détectée ; objet posé emporté avec les gens ;
+      support resté au fond sous la personne (vélo, chaise).</li>
+    <li><b>Une seule carte pour tout un groupe</b> (32 cases) : des gens qui se touchent sont fusionnés, donc sans relief entre eux.</li>
+    <li><b>SAM plafonné à 20 personnes</b> (17 cases atteignent le plafond) : une personne du premier plan peut rester au fond.</li>
+    <li><b>Trous</b> dans les cartes (paillettes, bijoux) : agrandis par la carte rentrée de 2 px ; les trous fermés de moins de ~18×18 px sont maintenant bouchés.</li>
+    <li><b>Bords très flous</b> (flou de bougé, premier plan hors mise au point) : une ligne de l'ancien contour reste dans le décor.</li>
+    <li>Qwen invente parfois des gens dans les foules (variante A seulement).</li>
+  </ul>
+</section>
+
+<section id="regles">
+  <h2>7. Règles pratiques</h2>
+  <div class="cols">
+    <div class="card"><h3>Amplitude</h3><ul>
+      <li>Rester à <b>2-3 % de la largeur</b> ; cheveux, voiles, vitres : sous 3 %.</li>
+      <li>Moins de mouvement = moins de décor révélé = moins de défauts visibles.</li>
+    </ul></div>
+    <div class="card"><h3>Choix des sujets</h3><ul>
+      <li>Un bras ou une tête coupés par le bord du cadre ne font jamais une carte seuls.</li>
+      <li>Les gens vus dans un écran, un miroir ou un cadre ne sont pas des sujets.</li>
+      <li>Cases en contact : une seule carte.</li>
+    </ul></div>
+    <div class="card"><h3>Pièges de mise en œuvre</h3><ul>
+      <li>Toujours valider sur le <b>vrai lecteur</b> (captures), pas seulement sur la carte.</li>
+      <li>Un fichier de couches ancien peut rester en silence si un nouvel essai échoue (<code>last_try</code>) : le vérifier.</li>
+      <li>Nommer SAM « drinking glass », pas « glass » (il prenait la vitre d'une fenêtre).</li>
+    </ul></div>
+  </div>
+</section>
+
+<section id="limites">
+  <h2>8. Limites et licences</h2>
+  <ul>
+    <li><b>Limite de fond</b> : une carte de profondeur estimée ne donne que de la parallaxe <i>horizontale/verticale</i> faible. Au-delà de quelques
+      pour cent, il faut inventer ce qui est caché : c'est la source de tous les défauts qui restent.</li>
+    <li><b>Licences</b> : SAM 3.1 (licence SAM de Meta) et Depth Pro (recherche Apple) sont à revoir avant un usage commercial ;
+      BiRefNet (MIT), LaMa et Qwen-Image-Edit (Apache 2.0) sont libres. MiniMax H3 exclut l'Union européenne, affichage des sorties compris.
+      Ce n'est pas un avis juridique.</li>
+  </ul>
+</section>
+
+<section id="verdict">
+  <h2>9. Verdict et suite</h2>
+  <p>Les couches ont supprimé l'étirement (déformation : 0) et le contour qui bouge est réduit de 42 à 8 cas graves. Mais David n'était
+    satisfait d'aucune des trois variantes : les défauts restants (objets, groupes, bords flous) demandent une chaîne de détourage
+    bien plus complexe pour un gain de relief modeste.</p>
+  <p class="note">Nouvelle piste (16/10) : une <b>émulation de la Lytro</b>. Au lieu de déformer ou découper la photo, on obtient de
+    <b>vraies vues</b> d'un même instant figé (deux demi-arcs de caméra générés), et la souris choisit la vue ; la profondeur ne sert plus
+    qu'à la mise au point au clic. Peu de relief (≈ 1 % de la largeur), aucun étirement par construction.
+    Voir <code>docs/ROADMAP-LYTRO-CLOUD.md</code>.</p>
+</section>
+
+<section id="fichiers">
+  <h2>10. Où est quoi</h2>
+  <div class="tl"><table>
+    <thead><tr><th>Élément</th><th>Fichier</th></tr></thead>
+    <tbody>
+      <tr><td>Découpage, plaques, cartes, profondeur par carte</td><td><code>app/layers.py</code></td></tr>
+      <tr><td>Profondeur (Depth Pro, Depth Anything V2, plan du fond)</td><td><code>app/depth.py</code></td></tr>
+      <tr><td>Graphes ComfyUI : SAM, BiRefNet, LaMa, Qwen-Image-Edit</td><td><code>app/comfy.py</code></td></tr>
+      <tr><td>Shader du lecteur (WebGL)</td><td><code>player/alive-player.js</code> (<code>RELIEF_FS</code>)</td></tr>
+      <tr><td>Réglages par case (mouvement, amplitude, plan net)</td><td><code>player/alive-edit.js</code></td></tr>
+      <tr><td>Installer les modèles de précision</td><td><code>tools/install_relief_models.py</code></td></tr>
+      <tr><td>Documentation complète</td><td><code>docs/ALIVE-COMICS-DOC.html</code> (section « Les couches, version 3 »)</td></tr>
+    </tbody>
+  </table></div>
+</section>
+</main>
+</body>
+</html>
