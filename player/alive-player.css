@@ -46,3 +46,13 @@
 .ac-panel.relief { cursor: grab; }
 .ac-panel.relief:active { cursor: grabbing; }
 .ac-view canvas.ac-relief-view { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+
+/* filtres de case (Blur / N&B / sepia = filtres CSS ; teinte, vignette, grain, halation = calques) */
+.ac-fl { position: absolute; inset: 0; pointer-events: none; opacity: 0; }
+.ac-fl.ac-ftint { mix-blend-mode: color; z-index: 1; }
+.ac-fl.ac-fhalo { mix-blend-mode: screen; z-index: 1; }
+.ac-fl.ac-fvig { z-index: 2; }
+.ac-fl.ac-fgrain { mix-blend-mode: overlay; z-index: 2; background-size: 160px 160px; animation: ac-grain .45s steps(1) infinite; }
+@keyframes ac-grain { 0% { background-position: 0 0; } 20% { background-position: -37px 21px; } 40% { background-position: 52px -64px; }
+  60% { background-position: -81px -23px; } 80% { background-position: 24px 70px; } }
+@media (prefers-reduced-motion: reduce) { .ac-fl.ac-fgrain { animation: none; } }

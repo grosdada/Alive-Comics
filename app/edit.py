@@ -12,6 +12,7 @@ Plus : volumes des sons, sons ajoutes (extraSounds), regeneration de la video ou
 """
 
 import json
+import re
 import secrets
 import time
 from pathlib import Path
@@ -19,6 +20,7 @@ from pathlib import Path
 from . import jobs, llm, presets, settings, store
 
 GRADE = {"sat": (0, 3, 1), "bright": (0.3, 2, 1), "contrast": (0.3, 2, 1), "temp": (-1, 1, 0), "hue": (-180, 180, 0)}
+FILTERS = {"mono": (0, 1), "sepia": (0, 1), "blur": (0, 20), "vignette": (0, 1), "grain": (0, 1), "halation": (0, 1), "ca": (0, 1)}
 USER_PRESETS = Path(__file__).resolve().parent.parent / "data" / "user_presets.json"
 
 
@@ -73,6 +75,20 @@ def clean(e):
                     gg[k] = v
         if gg:
             out["grade"] = gg
+    fl = e.get("filters")                          # filtres : {mono, sepia, blur, vignette, grain, halation, ca, tint: {c, a}}
+    if isinstance(fl, dict):
+        ff = {}
+        for k, (lo, hi) in FILTERS.items():
+            v = round(_num(fl.get(k), lo, hi, 0), 3)
+            if v:
+                ff[k] = v
+        t = fl.get("tint")
+        if isinstance(t, dict) and re.fullmatch(r"#[0-9a-fA-F]{6}", str(t.get("c") or "")):
+            a = round(_num(t.get("a"), 0, 1, 0), 3)
+            if a:
+                ff["tint"] = {"c": str(t["c"]).lower(), "a": a}
+        if ff:
+            out["filters"] = ff
     fr = e.get("frame")
     if isinstance(fr, dict):
         z, x, y = _num(fr.get("zoom"), 1, 3, 1), _num(fr.get("x"), -1, 1, 0), _num(fr.get("y"), -1, 1, 0)

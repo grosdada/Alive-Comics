@@ -19,7 +19,7 @@
   "use strict";
   const C = window.AliveBookCtl, P = window.AlivePlayer;
   if (!C || !P) return;
-  const KEYS = ["shake", "grade", "frame", "range", "xfade", "speed", "bounce", "start", "ease"];
+  const KEYS = ["shake", "grade", "filters", "frame", "range", "xfade", "speed", "bounce", "start", "ease"];
   const SHAKES = {
     aucun: { size: 0, freq: 0.2, rot: 0 }, leger: { size: 0.4, freq: 0.2, rot: 0.046 },
     moyen: { size: 0.8, freq: 0.2, rot: 0.092 }, fort: { size: 1.3, freq: 0.2, rot: 0.143 },
@@ -456,7 +456,7 @@
     const tabs = h("div.ae-tabs");
     const tabBody = h("div.ae-tab");
     const NAMES = st.relief ? { relief: "Relief", color: "Couleur", frame: "Cadrage", sound: "Son", treat: "Vidéo H3" }
-                            : { loop: "Boucle", shake: "Tremblé", color: "Couleur", frame: "Cadrage", sound: "Son", regen: "Régénérer" };
+                            : { loop: "Boucle", shake: "Tremblé", color: "Couleur", filters: "Filtres", frame: "Cadrage", sound: "Son", regen: "Régénérer" };
     for (const [k, label] of Object.entries(NAMES)) {
       tabs.append(h("button", { dataset: { tab: k }, on: { click: () => { lastTab = k; renderTab(); } } }, label));
     }
@@ -788,7 +788,7 @@
     const box = cur.tabBody;
     box.textContent = "";
     cur.shakeInfo = null;
-    ({ loop: tabLoop, shake: tabShake, color: tabColor, frame: tabFrame, sound: tabSound, regen: tabRegen,
+    ({ loop: tabLoop, shake: tabShake, color: tabColor, filters: tabFilters, frame: tabFrame, sound: tabSound, regen: tabRegen,
        relief: tabRelief, treat: tabTreat })[lastTab](box);
   }
 
@@ -943,12 +943,46 @@
         "Appliquer à toute la page")));
   }
 
+  // onglet Filtres : empilables, chacun dosable ; rendu identique dans l'apercu, l'agrandissement et la page exportee
+  function tabFilters(box) {
+    const f = () => cur.fx.filters || {};
+    const set = (k, v) => change("filters", (fx) => {
+      const ff = Object.assign({}, fx.filters);
+      if (!v) delete ff[k]; else ff[k] = v;
+      if (Object.keys(ff).length) fx.filters = ff; else delete fx.filters;
+    });
+    const pct = (v) => Math.round(v * 100) + " %";
+    const row = (label, k, max, fmt) => slider(label, () => f()[k] || 0, (v) => set(k, v), { min: 0, max, step: max > 1 ? 0.5 : 0.01, neutral: 0, fmt });
+    box.append(h("p.ae-note", "Les filtres s'empilent : dose chacun avec son curseur (0 = sans effet). Ils s'appliquent à la lecture, " +
+                 "dans l'aperçu comme dans la page exportée."));
+    box.append(row("Flou", "blur", 20, (v) => v ? v.toFixed(1) + " ‰" : "aucun"));
+    box.append(row("Noir et blanc", "mono", 1, pct));
+    box.append(row("Sépia", "sepia", 1, pct));
+    const t = () => f().tint || { c: "#c8503c", a: 0 };
+    const col = h("input", { type: "color", value: t().c });
+    col.addEventListener("input", () => { const a = t().a || 0.35; change("filters", (fx) => { fx.filters = Object.assign({}, fx.filters, { tint: { c: col.value, a } }); }); renderTab(); });
+    box.append(slider("Teinte", () => t().a, (v) => change("filters", (fx) => {
+      const ff = Object.assign({}, fx.filters);
+      if (v) ff.tint = { c: col.value, a: v }; else delete ff.tint;
+      if (Object.keys(ff).length) fx.filters = ff; else delete fx.filters;
+    }), { min: 0, max: 1, step: 0.01, neutral: 0, fmt: pct }));
+    box.append(h("div.ae-row", h("span.ae-lab", "Couleur de la teinte"), col));
+    box.append(row("Vignette", "vignette", 1, pct));
+    box.append(row("Grain", "grain", 1, pct));
+    box.append(row("Halation", "halation", 1, pct));
+    box.append(row("Aberration chromatique", "ca", 1, pct));
+    box.append(h("div.ae-row",
+      h("button.ae-btn", { on: { click: () => { change("filters", (fx) => { delete fx.filters; }); renderTab(); } } }, "↺ Aucun filtre"),
+      h("button.ae-btn", { title: "Mêmes filtres pour toutes les cases vidéo de cette page", on: { click: () => applyAll("filters") } },
+        "Appliquer à toute la page")));
+  }
+
   // meme reglage (couleurs, tremble) sur toutes les cases video de la page
   async function applyAll(key) {
     const c = cur, inst = C.inst(), others = inst.panels.filter(x => x !== c.st);
     let val = clone(c.fx[key]);
     if (key === "shake" && !val) val = { size: 0, freq: 0.2, rot: 0, seed: 0 };      // « aucun » explicite
-    status(`${key === "shake" ? "tremblé" : "couleurs"} : toute la page…`);
+    status(`${key === "shake" ? "tremblé" : key === "filters" ? "filtres" : "couleurs"} : toute la page…`);
     try {
       for (const st of others) {
         const v = clone(val);

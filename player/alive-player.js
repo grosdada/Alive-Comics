@@ -194,6 +194,7 @@
     if (g.contrast != null && g.contrast !== 1) f.push(`contrast(${g.contrast})`);
     if (g.hue) f.push(`hue-rotate(${g.hue}deg)`);
     st.filter = f.join(" ");
+    st.F = fx.filters || null;                       // filtres de case : voir applyFilters
     const t = +g.temp || 0;
     st.tint = t ? [t > 0 ? "rgb(255,138,40)" : "rgb(40,120,255)", Math.min(1, Math.abs(t) * 0.55)] : ["transparent", 0];
   }
@@ -251,6 +252,71 @@
     return `translate(${(tx + dx).toFixed(3)}%, ${(ty + dy).toFixed(3)}%) rotate(${rot.toFixed(4)}deg) scale(${(z * s).toFixed(4)})`;
   }
 
+  // ---------------------------------------------------------------- filtres de case
+  // Blur / N&B / sepia : filtres CSS ; aberration chromatique : filtre SVG (canaux rouge et bleu decales) ; teinte, vignette,
+  // grain, halation : calques au-dessus de la video (modes de fusion CSS). Meme rendu dans l'apercu, l'agrandissement et l'export.
+  let svgHost = null, caN = 0, noiseUrl = "";
+  function noiseTile() {
+    if (noiseUrl) return noiseUrl;
+    const c = document.createElement("canvas"); c.width = c.height = 160;
+    const x = c.getContext("2d"), d = x.createImageData(160, 160);
+    for (let i = 0; i < d.data.length; i += 4) { const v = Math.random() * 255; d.data[i] = d.data[i + 1] = d.data[i + 2] = v; d.data[i + 3] = 255; }
+    x.putImageData(d, 0, 0);
+    return (noiseUrl = c.toDataURL("image/png"));
+  }
+  function caFilter(st) {                            // filtre SVG de l'aberration chromatique (un par case)
+    if (!st.caId) {
+      if (!svgHost) {
+        svgHost = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+        svgHost.setAttribute("width", "0"); svgHost.setAttribute("height", "0");
+        svgHost.style.cssText = "position:absolute;width:0;height:0;pointer-events:none";
+        document.body.append(svgHost);
+      }
+      st.caId = "ac-ca-" + (++caN);
+      svgHost.insertAdjacentHTML("beforeend", `<filter id="${st.caId}" color-interpolation-filters="sRGB" x="-3%" y="-3%" width="106%" height="106%">
+        <feColorMatrix in="SourceGraphic" type="matrix" values="1 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 1 0" result="r"/>
+        <feOffset in="r" dx="0" dy="0" result="r2" class="ac-ca-r"/>
+        <feColorMatrix in="SourceGraphic" type="matrix" values="0 0 0 0 0  0 1 0 0 0  0 0 0 0 0  0 0 0 1 0" result="g"/>
+        <feColorMatrix in="SourceGraphic" type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 1 0 0  0 0 0 1 0" result="b"/>
+        <feOffset in="b" dx="0" dy="0" result="b2" class="ac-ca-b"/>
+        <feBlend in="r2" in2="g" mode="screen" result="rg"/><feBlend in="rg" in2="b2" mode="screen"/></filter>`);
+    }
+    return st.caId;
+  }
+  function filterLayers(vw) {                        // calques d'une vue, crees a la demande
+    if (vw.fl) return vw.fl;
+    const mk = (cls) => { const d = document.createElement("div"); d.className = "ac-fl " + cls; vw.host.insertBefore(d, vw.tint); return d; };
+    return (vw.fl = { tint: mk("ac-ftint"), halo: mk("ac-fhalo"), vig: mk("ac-fvig"), grain: mk("ac-fgrain") });
+  }
+  function applyFilters(st) {
+    const F = st.F || {}, base = st.filter || "";
+    for (const vw of st.views) {
+      const w = Math.max(200, vw.host.clientWidth || 600);
+      const f = [base];
+      if (F.mono) f.push(`grayscale(${F.mono})`);
+      if (F.sepia) f.push(`sepia(${F.sepia})`);
+      if (F.blur) f.push(`blur(${(F.blur * w / 1000).toFixed(2)}px)`);
+      if (F.ca) {                                     // decalage horizontal des canaux rouge / bleu, en pixels de la case
+        const id = caFilter(st), d = (F.ca * 0.007 * w).toFixed(2), el = svgHost.querySelector("#" + id);
+        el.querySelector(".ac-ca-r").setAttribute("dx", d); el.querySelector(".ac-ca-b").setAttribute("dx", "-" + d);
+        f.push(`url(#${id})`);
+      }
+      const css = f.filter(Boolean).join(" ");
+      for (const t of [vw.main, vw.xt]) if (t) t.v.style.filter = css;
+      const need = F.tint || F.vignette || F.grain || F.halation;
+      if (!need && !vw.fl) continue;
+      const L = filterLayers(vw);
+      L.tint.style.background = F.tint ? F.tint.c : "transparent"; L.tint.style.opacity = F.tint ? F.tint.a : 0;
+      L.vig.style.opacity = F.vignette ? 1 : 0;
+      L.vig.style.background = `radial-gradient(ellipse at center, transparent ${Math.round(62 - 30 * (F.vignette || 0))}%, rgba(0,0,0,${(0.95 * (F.vignette || 0)).toFixed(2)}) 100%)`;
+      L.grain.style.opacity = F.grain ? 0.08 + 0.42 * F.grain : 0;
+      if (F.grain) L.grain.style.backgroundImage = `url(${noiseTile()})`;
+      L.halo.style.opacity = F.halation ? 0.15 + 0.4 * Math.min(1, F.halation) : 0;
+      const bf = `blur(${Math.round(6 + 16 * w / 1000)}px) brightness(.7) contrast(2.4) saturate(1.5) sepia(1) hue-rotate(-38deg)`;
+      L.halo.style.backdropFilter = F.halation ? bf : ""; L.halo.style.webkitBackdropFilter = F.halation ? bf : "";
+    }
+  }
+
   function applyFx(st, force) {
     const T = transformOf(st);
     if (force || T !== st._T) {
@@ -259,8 +325,10 @@
     }
     if (force || st.filter !== st._F) {
       st._F = st.filter;
-      for (const vw of st.views) for (const t of [vw.main, vw.xt]) if (t) t.v.style.filter = st.filter;
+      applyFilters(st);
     }
+    const fkey = JSON.stringify(st.F || null);
+    if (force || fkey !== st._FK) { st._FK = fkey; applyFilters(st); }
     const tint = st.tint.join("|");
     if (force || tint !== st._tint) {
       st._tint = tint;
@@ -295,6 +363,7 @@
     v.style.transform = st._T || ""; v.style.filter = st.filter || "";
     vw.tint.style.background = st.tint[0]; vw.tint.style.opacity = st.tint[1];
     if (st.xf) ensureX(st, vw);
+    if (st.F) applyFilters(st);
     return vw;
   }
 
@@ -313,6 +382,7 @@
     st.views = st.views.filter(o => o !== vw);
     for (const t of [vw.main, vw.xt]) if (t) { t.v.removeAttribute("src"); t.v.load(); t.v.remove(); }
     vw.tint.remove();
+    if (vw.fl) for (const d of Object.values(vw.fl)) d.remove();
   }
 
   function seek(st, t, idx) {
