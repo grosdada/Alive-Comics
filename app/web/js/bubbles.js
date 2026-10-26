@@ -125,8 +125,14 @@ export async function openBubbleEditor(app, caseId) {
     const hasTail = b.tx != null;
     const tail = h("input", { type: "checkbox" }); tail.checked = hasTail;
     tail.addEventListener("change", () => { change(() => { if (tail.checked) { b.tx = clamp(b.x + 0.08, -0.3, 1.3); b.ty = clamp(b.y + 0.22, -0.3, 1.3); } else { delete b.tx; delete b.ty; } }); syncPanel(); });
-    side.append(h("div.row", h("label", tail, " Queue (glisse le losange violet)"),
-      h("span.sp"), h("button.mini.danger", { on: { click: () => { list.splice(list.indexOf(b), 1); sel = list[0]?.id || null; rebuild(); syncPanel(); save(); } } }, "Supprimer")));
+    side.append(h("div.row", h("label", tail, " Queue (glisse le losange violet)")));
+    if (hasTail) {
+      const tw = h("input", { type: "range", min: 0.3, max: 2.5, step: 0.05, value: b.tw || 1, style: { flex: 1 } });
+      tw.addEventListener("input", () => { b.tw = parseFloat(tw.value); ctl.layout(); });
+      tw.addEventListener("change", save);
+      side.append(h("div.row", h("span.lab", "Largeur de la queue"), tw));
+    }
+    side.append(h("div.row", h("span.sp"), h("button.mini.danger", { on: { click: () => { list.splice(list.indexOf(b), 1); sel = list[0]?.id || null; rebuild(); syncPanel(); save(); } } }, "Supprimer")));
   }
   syncPanel();
   ctl.select(sel);

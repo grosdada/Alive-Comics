@@ -118,9 +118,11 @@
     const base = { fill, stroke, "stroke-width": sw, "stroke-linejoin": "round", "stroke-linecap": "round" };
     const add = (d, extra) => { const p = el("path", Object.assign({ d }, base, extra)); svg.append(p); return p; };
     const rx = bw * 0.66, ry = bh * 0.68, dash = b.type === "whisper" ? { "stroke-dasharray": `${sw * 2.2} ${sw * 1.9}` } : {};
-    const spread = Math.max(0.2, Math.min(0.42, 26 / Math.max(30, Math.min(rx, ry)))) ;
+    // largeur de la queue : b.tw (0,2 a 3, defaut 1) ; le defaut est fin
+    const tw = Math.max(0.2, Math.min(3, b.tw || 1));
+    const spread = Math.max(0.07, Math.min(0.9, tw * Math.max(0.1, Math.min(0.2, 13 / Math.max(30, Math.min(rx, ry))))));
     if (b.type === "box") {
-      const hw = bw / 2 * 1.04, hh = bh / 2 * 1.02, t = hasTail ? boxTail(hw, hh, ux, uy, Math.max(sw * 3, Math.min(hw, hh) * 0.3)) : null;
+      const hw = bw / 2 * 1.04, hh = bh / 2 * 1.02, t = hasTail ? boxTail(hw, hh, ux, uy, Math.max(sw * 2, Math.min(hw, hh) * 0.17 * tw)) : null;
       if (t) add(t.tail);
       add(roundRect(hw, hh, Math.min(hw, hh) * 0.16));
       if (t) add(t.cover, { stroke: "none" });

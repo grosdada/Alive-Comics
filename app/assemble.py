@@ -147,6 +147,8 @@ def clean_bubbles(lst):
              "anim": b.get("anim") if b.get("anim") in ("pop", "fade", "rise", "shake", "type") else "pop"}
         if isinstance(b.get("tx"), (int, float)) and isinstance(b.get("ty"), (int, float)):
             o["tx"], o["ty"] = round(num(b["tx"], -0.35, 1.35, 0.5), 4), round(num(b["ty"], -0.35, 1.35, 0.5), 4)
+        if isinstance(b.get("tw"), (int, float)) and not isinstance(b.get("tw"), bool) and abs(b["tw"] - 1) > 0.01:
+            o["tw"] = round(max(0.2, min(3, float(b["tw"]))), 2)
         for k in ("fill", "ink"):
             if re.fullmatch(r"#[0-9a-fA-F]{6}", str(b.get(k) or "")):
                 o[k] = str(b[k]).lower()
