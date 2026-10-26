@@ -6,7 +6,7 @@
 .ac-page > img.ac-frames { position: absolute; inset: 0; z-index: 5; }       /* traits des cadres au-dessus des videos */
 .ac-panel { position: absolute; overflow: hidden; cursor: ew-resize; touch-action: pan-y; }
 .ac-panel.static { cursor: default; }
-.ac-panel video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: fill; opacity: 0;
+.ac-panel video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0;
                   transition: opacity .25s; pointer-events: none; }
 .ac-panel video.ready { opacity: 1; }
 .ac-panel video.idle { opacity: 0; }
@@ -33,7 +33,7 @@
 .ac-lightbox video.ac-x { position: absolute; inset: 0; width: 100%; height: 100%; max-width: none; max-height: none; }
 /* vue supplementaire d'une case (editeur) */
 .ac-view { position: relative; overflow: hidden; background: #000; }
-.ac-view video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: fill; opacity: 0; transition: opacity .25s; }
+.ac-view video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0; transition: opacity .25s; }
 .ac-view video.ready { opacity: 1; }
 /* mode edition : les cases se designent au survol */
 .ac-page.ac-editing .ac-panel { cursor: pointer; }
