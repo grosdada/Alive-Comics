@@ -129,6 +129,24 @@ BUB_FONTS = ("bd", "hand", "type", "serif", "sans", "impact")
 BUB_COLORS = ("white", "black", "yellow", "pink", "blue", "red", "green")
 
 
+GEO_RANGES = {"pad": (0.7, 1.8), "mw": (14, 80), "round": (0, 0.5), "n": (5, 30), "len": (0.05, 0.7), "irr": (0, 1),
+              "bumps": (6, 20), "wob": (0, 1), "line": (0.4, 4), "curve": (-1, 1)}
+
+
+def clean_geo(g):
+    """Geometrie d'une bulle : reglages connus seulement, bornes."""
+    out = {}
+    if not isinstance(g, dict):
+        return out
+    for k, (lo, hi) in GEO_RANGES.items():
+        v = g.get(k)
+        if isinstance(v, (int, float)) and not isinstance(v, bool):
+            out[k] = round(max(lo, min(hi, float(v))), 3)
+    if g.get("ls") in ("dashed", "dotted", "double"):
+        out["ls"] = g["ls"]
+    return out
+
+
 def clean_bubbles(lst):
     """Bulles d'une case : champs connus, valeurs bornees (les bulles peuvent depasser un peu du cadre)."""
     import re
@@ -149,10 +167,32 @@ def clean_bubbles(lst):
             o["tx"], o["ty"] = round(num(b["tx"], -0.35, 1.35, 0.5), 4), round(num(b["ty"], -0.35, 1.35, 0.5), 4)
         if isinstance(b.get("tw"), (int, float)) and not isinstance(b.get("tw"), bool) and abs(b["tw"] - 1) > 0.01:
             o["tw"] = round(max(0.2, min(3, float(b["tw"]))), 2)
+        geo = clean_geo(b.get("geo"))
+        if geo:
+            o["geo"] = geo
         for k in ("fill", "ink"):
             if re.fullmatch(r"#[0-9a-fA-F]{6}", str(b.get(k) or "")):
                 o[k] = str(b[k]).lower()
         out.append(o)
+    return out
+
+
+def clean_bubble_presets(lst):
+    """Modeles de bulles : [{id, name, type, size, color, fill, ink, font, tw, tail, show, anim, geo}] (jamais le texte ni la position)."""
+    import re
+    out = []
+    for p in (lst if isinstance(lst, list) else [])[:60]:
+        if not isinstance(p, dict) or not str(p.get("name") or "").strip():
+            continue
+        one = clean_bubbles([{"text": "x", "type": p.get("type"), "size": p.get("size"), "color": p.get("color"), "font": p.get("font"),
+                              "anim": p.get("anim"), "show": p.get("show"), "tw": p.get("tw"), "geo": p.get("geo"),
+                              "fill": p.get("fill"), "ink": p.get("ink")}])[0]
+        for k in ("id", "text", "x", "y", "at"):
+            one.pop(k, None)
+        one["id"] = re.sub(r"[^A-Za-z0-9_-]", "", str(p.get("id") or ""))[:12] or "p" + str(len(out))
+        one["name"] = str(p["name"]).strip()[:40]
+        one["tail"] = bool(p.get("tail"))
+        out.append(one)
     return out
 
 

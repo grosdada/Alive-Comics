@@ -38,8 +38,8 @@
 .ac-bub.on { opacity: 1; visibility: visible; transition: opacity .12s, visibility 0s; }
 .ac-bin { position: relative; }
 .ac-bin svg { position: absolute; left: 50%; top: 50%; width: 1px; height: 1px; overflow: visible; pointer-events: none; }
-.ac-btxt { position: relative; font-family: var(--bf); font-weight: var(--bw8, 700); text-transform: var(--bt, none); text-align: center; white-space: pre-wrap; overflow-wrap: anywhere; max-width: calc(var(--mw, 34) * 1cqw);
-  padding: .55em .8em; width: max-content; font-size: calc(var(--fs, 5.6) * 1cqw); }
+.ac-btxt { position: relative; font-family: var(--bf); font-weight: var(--bw8, 700); text-transform: var(--bt, none); text-align: center; white-space: pre-wrap; overflow-wrap: normal; word-break: normal; hyphens: none; max-width: calc(var(--mw, 34) * 1cqw);
+  min-width: min-content; padding: .55em .8em; width: max-content; font-size: calc(var(--fs, 5.6) * 1cqw); }
 .ac-btxt .h { visibility: hidden; }
 .ac-bub.ed { pointer-events: auto; cursor: grab; }
 .ac-bub.ed.sel .ac-btxt { outline: 2px dashed rgba(179, 107, 255, .9); outline-offset: 4px; border-radius: 6px; }
@@ -76,17 +76,27 @@
 
   // ------------------------------------------------------------------ formes (coordonnees relatives au centre du texte)
   function ellipse(rx, ry) { return `M ${f2(-rx)} 0 A ${f2(rx)} ${f2(ry)} 0 1 0 ${f2(rx)} 0 A ${f2(rx)} ${f2(ry)} 0 1 0 ${f2(-rx)} 0 Z`; }
-  function ellipseTail(rx, ry, ux, uy, spread) {
+  // flancs de la queue : droits, ou courbes (curve -1..1 : la pointe se recourbe d'un cote)
+  function flanks(b1, b2, tx, ty, curve) {
+    if (!curve) return `L ${tx} ${ty} L ${b2}`;
+    const mx = (b1[0] + b2[0]) / 2, my = (b1[1] + b2[1]) / 2, dx = tx - mx, dy = ty - my, L = Math.hypot(dx, dy) || 1;
+    const off = curve * L * 0.3, nx = -dy / L * off, ny = dx / L * off;
+    const c = (p) => [(p[0] + tx) / 2 + nx, (p[1] + ty) / 2 + ny];
+    return `Q ${c(b1)} ${tx} ${ty} Q ${c(b2)} ${b2}`;
+  }
+  function tailShapes(b1, b2, i1, i2, ux, uy, curve) {
+    const mx = (b1[0] + b2[0]) / 2, my = (b1[1] + b2[1]) / 2;
+    const cx = mx + (ux - mx) * 0.97, cy = my + (uy - my) * 0.97;       // pointe un peu en retrait pour que le trait ne depasse pas
+    return { tail: `M ${b1} ${flanks(b1, b2, ux, uy, curve)} Z`, cover: `M ${i1} L ${b1} ${flanks(b1, b2, cx, cy, curve)} L ${i2} Z` };
+  }
+  function ellipseTail(rx, ry, ux, uy, spread, curve) {
     const d = Math.hypot(ux / rx, uy / ry);
     if (d < 1.06) return null;
     const phi = Math.atan2(uy / ry, ux / rx);
     const pt = (a, k) => [rx * k * Math.cos(a), ry * k * Math.sin(a)];
-    const b1 = pt(phi - spread, 1), b2 = pt(phi + spread, 1);
-    const i1 = pt(phi - spread, 0.82), i2 = pt(phi + spread, 0.82);
-    // pointe : un peu en retrait pour que le trait ne depasse pas
-    return { tail: `M ${b1} L ${ux} ${uy} L ${b2} Z`, cover: `M ${b1} L ${ux * 0.97 + (b1[0] + b2[0]) * 0.015} ${uy * 0.97 + (b1[1] + b2[1]) * 0.015} L ${b2} L ${i2} L ${i1} Z` };
+    return tailShapes(pt(phi - spread, 1), pt(phi + spread, 1), pt(phi - spread, 0.82), pt(phi + spread, 0.82), ux, uy, curve);
   }
-  function boxTail(hw, hh, ux, uy, spread) {
+  function boxTail(hw, hh, ux, uy, spread, curve) {
     if (Math.abs(ux) < hw && Math.abs(uy) < hh) return null;
     let b1, b2, i1, i2;
     if (Math.abs(uy) * hw >= Math.abs(ux) * hh) {                 // bord haut ou bas
@@ -96,17 +106,28 @@
       const sx = ux > 0 ? 1 : -1, cy = Math.max(-hh * 0.7, Math.min(hh * 0.7, uy * 0.5));
       b1 = [sx * hw, cy - spread]; b2 = [sx * hw, cy + spread]; i1 = [sx * hw * 0.8, cy - spread]; i2 = [sx * hw * 0.8, cy + spread];
     }
-    return { tail: `M ${b1} L ${ux} ${uy} L ${b2} Z`, cover: `M ${b1} L ${ux * 0.97} ${uy * 0.97} L ${b2} L ${i2} L ${i1} Z` };
+    return tailShapes(b1, b2, i1, i2, ux, uy, curve);
   }
   function roundRect(hw, hh, r) {
     return `M ${-hw + r} ${-hh} H ${hw - r} Q ${hw} ${-hh} ${hw} ${-hh + r} V ${hh - r} Q ${hw} ${hh} ${hw - r} ${hh} H ${-hw + r} ` +
            `Q ${-hw} ${hh} ${-hw} ${hh - r} V ${-hh + r} Q ${-hw} ${-hh} ${-hw + r} ${-hh} Z`;
   }
-  function star(rx, ry, n, seed) {
-    const pts = [];
+  // n pointes, len : longueur des pointes (0,32 par defaut), irr : irregularite (0,35 par defaut)
+  function star(rx, ry, n, seed, len, irr) {
+    const pts = [], ko = 1 + len * 0.375, ki = 1 - len * 0.625, jo = irr * 0.285, ji = irr * 0.17;
     for (let i = 0; i < n * 2; i++) {
       const a = (i * Math.PI) / n + 0.2, out = i % 2 === 0;
-      const k = out ? 1.12 + 0.1 * (hash(seed + "o" + i) - 0.5) : 0.8 + 0.06 * (hash(seed + "i" + i) - 0.5);
+      const k = out ? ko + jo * (hash(seed + "o" + i) - 0.5) : ki + ji * (hash(seed + "i" + i) - 0.5);
+      pts.push([rx * k * Math.cos(a), ry * k * Math.sin(a)]);
+    }
+    return "M " + pts.map((p) => p.map(f2).join(" ")).join(" L ") + " Z";
+  }
+
+  // ellipse a contour irregulier (dessine a la main) : amp 0..1
+  function wobbly(rx, ry, amp, seed) {
+    const n = 56, ph = [1, 2, 3].map((i) => hash(seed + "w" + i) * 6.283), pts = [];
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * 6.283, k = 1 + amp * 0.1 * (Math.sin(a * 3 + ph[0]) * 0.6 + Math.sin(a * 5 + ph[1]) * 0.3 + Math.sin(a * 8 + ph[2]) * 0.2);
       pts.push([rx * k * Math.cos(a), ry * k * Math.sin(a)]);
     }
     return "M " + pts.map((p) => p.map(f2).join(" ")).join(" L ") + " Z";
@@ -114,22 +135,30 @@
 
   function draw(svg, b, bw, bh, ux, uy, hasTail, sw) {
     svg.textContent = "";
-    const [fill, stroke] = colorOf(b);
+    const g = b.geo || {}, [fill, stroke] = colorOf(b);
+    sw *= g.line || 1;
+    const ls = g.ls || (b.type === "whisper" ? "dashed" : "solid");
     const base = { fill, stroke, "stroke-width": sw, "stroke-linejoin": "round", "stroke-linecap": "round" };
     const add = (d, extra) => { const p = el("path", Object.assign({ d }, base, extra)); svg.append(p); return p; };
-    const rx = bw * 0.66, ry = bh * 0.68, dash = b.type === "whisper" ? { "stroke-dasharray": `${sw * 2.2} ${sw * 1.9}` } : {};
+    const pad = g.pad || 1, curve = g.curve || 0;
+    const rx = bw * 0.66 * pad, ry = bh * 0.68 * pad;
+    const dash = ls === "dashed" ? { "stroke-dasharray": `${sw * 2.2} ${sw * 1.9}` } : ls === "dotted" ? { "stroke-dasharray": `0.01 ${sw * 2.4}` } : {};
+    const body = (d, extra) => {                                         // contour : plein, pointille, ou double trait
+      if (ls === "double") { add(d, Object.assign({ "stroke-width": sw * 3.4 }, extra)); return add(d, Object.assign({ stroke: fill, "stroke-width": sw * 1.2 }, extra)); }
+      return add(d, Object.assign({}, dash, extra));
+    };
     // largeur de la queue : b.tw (0,2 a 3, defaut 1) ; le defaut est fin
     const tw = Math.max(0.2, Math.min(3, b.tw || 1));
     const spread = Math.max(0.07, Math.min(0.9, tw * Math.max(0.1, Math.min(0.2, 13 / Math.max(30, Math.min(rx, ry))))));
     if (b.type === "box") {
-      const hw = bw / 2 * 1.04, hh = bh / 2 * 1.02, t = hasTail ? boxTail(hw, hh, ux, uy, Math.max(sw * 2, Math.min(hw, hh) * 0.17 * tw)) : null;
-      if (t) add(t.tail);
-      add(roundRect(hw, hh, Math.min(hw, hh) * 0.16));
+      const hw = bw / 2 * 1.04 * pad, hh = bh / 2 * 1.02 * pad, t = hasTail ? boxTail(hw, hh, ux, uy, Math.max(sw * 2, Math.min(hw, hh) * 0.17 * tw), curve) : null;
+      if (t) add(t.tail, dash);
+      body(roundRect(hw, hh, Math.min(hw, hh) * (g.round ?? 0.16)));
       if (t) add(t.cover, { stroke: "none" });
       return;
     }
     if (b.type === "thought") {
-      const n = 11, r = Math.min(rx, ry) * 0.36;
+      const n = g.bumps || 11, r = Math.min(rx, ry) * 0.36 * Math.min(1.5, 11 / n);
       for (let i = 0; i < n; i++) {
         const a = (i / n) * Math.PI * 2;
         add(`M ${f2(rx * 0.86 * Math.cos(a) - r)} ${f2(ry * 0.86 * Math.sin(a))} a ${f2(r)} ${f2(r)} 0 1 0 ${f2(2 * r)} 0 a ${f2(r)} ${f2(r)} 0 1 0 ${f2(-2 * r)} 0 Z`);
@@ -148,15 +177,15 @@
       return;
     }
     if (b.type === "shout") {
-      const R = [rx * 1.05, ry * 1.1], t = hasTail ? ellipseTail(rx * 0.95, ry * 0.95, ux, uy, spread) : null;
-      if (t) add(t.tail);
-      add(star(R[0], R[1], 13, b.id || "x"));
+      const R = [rx * 1.05, ry * 1.1], t = hasTail ? ellipseTail(rx * 0.95, ry * 0.95, ux, uy, spread, curve) : null;
+      if (t) add(t.tail, dash);
+      body(star(R[0], R[1], g.n || 13, b.id || "x", g.len ?? 0.32, g.irr ?? 0.35));
       if (t) add(t.cover, { stroke: "none" });
       return;
     }
-    const t = hasTail ? ellipseTail(rx, ry, ux, uy, spread) : null;       // oval, chuchotement
+    const t = hasTail ? ellipseTail(rx, ry, ux, uy, spread, curve) : null;       // oval, chuchotement
     if (t) add(t.tail, dash);
-    add(ellipse(rx, ry), dash);
+    body(g.wob ? wobbly(rx, ry, g.wob, b.id || "x") : ellipse(rx, ry));
     if (t) add(t.cover, { stroke: "none" });
   }
 
@@ -201,7 +230,7 @@
         const b = it.b, text = colorOf(b)[2], F = FONTS[b.font] || FONTS.bd;
         it.node.style.left = (b.x ?? 0.5) * 100 + "%"; it.node.style.top = (b.y ?? 0.5) * 100 + "%";
         it.txt.style.setProperty("--fs", SIZES[b.size] || SIZES.M);
-        it.txt.style.setProperty("--mw", b.type === "box" ? 62 : b.type === "shout" ? 36 : 32);
+        it.txt.style.setProperty("--mw", (b.geo && b.geo.mw) || (b.type === "box" ? 62 : b.type === "shout" ? 36 : 32));
         it.txt.style.color = text;
         it.txt.style.setProperty("--bf", F[1]); it.txt.style.setProperty("--bw8", F[2]); it.txt.style.setProperty("--bt", F[3] || "none");
         if (!it.timer) it.txt.textContent = b.text || (ctl.edit ? "…" : "");

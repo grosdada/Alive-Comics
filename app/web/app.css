@@ -281,3 +281,16 @@ body.dragging-planche .fchip[data-folder] { border-style: dashed; border-color: 
 .bub-sw { display: flex; gap: 5px; flex-wrap: wrap; }
 .bub-sw .sw { width: 28px; height: 28px; padding: 0; justify-content: center; font-weight: 700; border-radius: 50%; border: 2px solid #555; }
 .bub-sw .sw.on { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
+
+/* ---------- panneau « Forme de la bulle » + presets */
+.bub-geo { position: fixed; right: 24px; top: 90px; width: 320px; z-index: 60; background: var(--panel, #1c1c1c); border: 1px solid #555; border-radius: 10px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, .5); padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; max-height: 80vh; overflow: auto; }
+.bub-geo header { display: flex; justify-content: space-between; align-items: center; }
+.bub-geo .geo-body { display: flex; flex-direction: column; gap: 8px; }
+.bub-geo .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.bub-geo .row .lab { min-width: 110px; font-size: 12.5px; }
+.bub-geo .val { min-width: 44px; text-align: right; font-size: 12px; opacity: .8; }
+.bub-presets { display: flex; flex-direction: column; gap: 6px; }
+.bub-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.bub-chips .chip { display: inline-flex; border: 1px solid #555; border-radius: 999px; overflow: hidden; }
+.bub-chips .chip button { border: 0; border-radius: 0; }
