@@ -67,6 +67,25 @@ export function debounce(fn, ms) {
   return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); };
 }
 
+// deplace une fenetre en la saisissant par son en-tete (translate : marche pour une fenetre centree ou fixe)
+export function dragByHeader(box, handle) {
+  let o = null, x = 0, y = 0;
+  handle.style.cursor = "move";
+  handle.addEventListener("pointerdown", (e) => {
+    if (e.target.closest("button, input, select, textarea")) return;
+    o = { px: e.clientX - x, py: e.clientY - y };
+    handle.setPointerCapture(e.pointerId);
+  });
+  handle.addEventListener("pointermove", (e) => {
+    if (!o) return;
+    x = e.clientX - o.px; y = e.clientY - o.py;
+    box.style.transform = `translate(${x}px, ${y}px)`;
+  });
+  const end = () => { o = null; };
+  handle.addEventListener("pointerup", end);
+  handle.addEventListener("pointercancel", end);
+}
+
 export function modal(title, body, buttons) {
   const back = h("div.modal-back");
   const close = () => back.remove();
@@ -74,6 +93,7 @@ export function modal(title, body, buttons) {
                 h("div.modal-body", body),
                 h("footer", (buttons || []).map(b => h("button" + (b.primary ? ".primary" : ""),
                   { on: { click: async () => { if ((await b.click?.(close)) !== false) close(); } } }, b.label))));
+  dragByHeader(box, box.querySelector("header"));
   back.append(box);
   back.addEventListener("pointerdown", (e) => { if (e.target === back) close(); });
   document.body.append(back);

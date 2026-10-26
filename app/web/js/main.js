@@ -1,5 +1,5 @@
 // Alive-Comics : application (etat, projets, edition, rendus, export, publication, reglages, livres).
-import { api, get, post, put, upload, uploadSound, h, toast, debounce, modal, loadImage } from "./api.js";
+import { api, get, post, put, upload, uploadSound, h, toast, debounce, modal, loadImage, dragByHeader } from "./api.js";
 import { compute, PRESETS, PAGE_DEFAULTS, FORMATS, pageSize, transpose, randomLayout, removeLeaf, splitLeaf, leaves, clone } from "./geometry.js";
 import { Editor, icon } from "./editor.js";
 import { startImage, pageImages } from "./exporter.js";
@@ -592,6 +592,7 @@ class App {
     const pop = h("div.popover", h("div.pop-head", icon(kind), h("b", { camera: "Prompt caméra", action: "Prompt action", audio: "Sons de la case" }[kind]),
                                    h("button.icon", { on: { click: () => pop.remove() } }, "✕")), form);
     document.body.append(pop);
+    dragByHeader(pop, pop.querySelector(".pop-head"));
     pop.style.left = Math.min(window.innerWidth - 340, Math.max(8, r.left)) + "px";
     pop.style.top = Math.min(window.innerHeight - 80, r.bottom + 6) + "px";
     const close = (e) => { if (!pop.contains(e.target) && e.target !== anchor) { pop.remove(); document.removeEventListener("pointerdown", close, true); } };

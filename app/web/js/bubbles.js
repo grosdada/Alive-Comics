@@ -1,7 +1,7 @@
 // Editeur de bulles d'une case : on place les bulles sur la case, on glisse la bulle et sa queue, on regle quelques options.
 // Double-clic sur une bulle : panneau « Forme de la bulle » (geometrie). Suppr efface la bulle choisie.
 // Le dessin et l'apparition sont ceux du lecteur (player/alive-bubbles.js, window.AliveBubbles).
-import { h, modal, get, put, toast } from "./api.js";
+import { h, modal, get, put, toast, dragByHeader } from "./api.js";
 
 const uid = () => Math.random().toString(36).slice(2, 8);
 const TAIL = { oval: true, thought: true, shout: true, whisper: true, box: false };
@@ -273,6 +273,7 @@ export async function openBubbleEditor(app, caseId) {
     if (!geoEl) {
       geoEl = h("div.bub-geo", h("header", h("b", "Forme de la bulle"), h("button.icon", { title: "Fermer", on: { click: closeGeo } }, "✕")), h("div.geo-body"));
       document.body.append(geoEl);
+      dragByHeader(geoEl, geoEl.querySelector("header"));
     }
     renderGeo();
   }
