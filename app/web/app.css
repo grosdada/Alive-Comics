@@ -265,3 +265,19 @@ body.dragging-planche .fchip[data-folder] { border-style: dashed; border-color: 
 .tab { border-radius: 10px 10px 0 0; border-bottom: 0; padding: 8px 20px; font-size: 16px; font-weight: 600; background: transparent; color: var(--muted); }
 .tab small { color: var(--muted); font-weight: 400; margin-left: 4px; }
 .tab.on { background: var(--panel2); color: var(--ink); border-color: var(--line); box-shadow: inset 0 3px 0 var(--accent); }
+
+/* ---------- editeur de bulles */
+.bub-modal { width: min(1120px, 96vw); }
+.bub-edit { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 16px; align-items: start; }
+@media (max-width: 820px) { .bub-edit { grid-template-columns: 1fr; } }
+.bub-stage { padding: 7%; background: #0d0d0d; border-radius: 10px; touch-action: none; user-select: none; }
+.bub-case { position: relative; width: 100%; background: #2a2a2a; box-shadow: 0 0 0 2px #555; }
+.bub-case img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; pointer-events: none; }
+.bub-side { display: flex; flex-direction: column; gap: 10px; }
+.bub-add, .bub-list { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.bub-side .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.bub-side .row .lab { min-width: 84px; }
+.bub-side textarea { width: 100%; }
+.bub-sw { display: flex; gap: 5px; flex-wrap: wrap; }
+.bub-sw .sw { width: 28px; height: 28px; padding: 0; justify-content: center; font-weight: 700; border-radius: 50%; border: 2px solid #555; }
+.bub-sw .sw.on { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }

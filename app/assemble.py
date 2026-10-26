@@ -124,6 +124,36 @@ def _mtime(f):
         return None
 
 
+BUB_TYPES = ("oval", "thought", "shout", "whisper", "box")
+BUB_FONTS = ("bd", "hand", "type", "serif", "sans", "impact")
+BUB_COLORS = ("white", "black", "yellow", "pink", "blue", "red", "green")
+
+
+def clean_bubbles(lst):
+    """Bulles d'une case : champs connus, valeurs bornees (les bulles peuvent depasser un peu du cadre)."""
+    import re
+    out = []
+    num = lambda v, lo, hi, d: max(lo, min(hi, float(v))) if isinstance(v, (int, float)) and not isinstance(v, bool) else d  # noqa: E731
+    for b in (lst or [])[:40]:
+        if not isinstance(b, dict) or not str(b.get("text") or "").strip():
+            continue
+        o = {"id": str(b.get("id") or "")[:12], "type": b.get("type") if b.get("type") in BUB_TYPES else "oval",
+             "text": str(b["text"])[:400], "x": round(num(b.get("x"), -0.25, 1.25, 0.5), 4), "y": round(num(b.get("y"), -0.25, 1.25, 0.3), 4),
+             "size": b.get("size") if b.get("size") in ("S", "M", "L") else "M",
+             "color": b.get("color") if b.get("color") in BUB_COLORS else "white",
+             "font": b.get("font") if b.get("font") in BUB_FONTS else "bd",
+             "show": b.get("show") if b.get("show") in ("always", "hover", "time") else "always",
+             "at": round(num(b.get("at"), 0, 60, 0), 2),
+             "anim": b.get("anim") if b.get("anim") in ("pop", "fade", "rise", "shake", "type") else "pop"}
+        if isinstance(b.get("tx"), (int, float)) and isinstance(b.get("ty"), (int, float)):
+            o["tx"], o["ty"] = round(num(b["tx"], -0.35, 1.35, 0.5), 4), round(num(b["ty"], -0.35, 1.35, 0.5), 4)
+        for k in ("fill", "ink"):
+            if re.fullmatch(r"#[0-9a-fA-F]{6}", str(b.get(k) or "")):
+                o[k] = str(b[k]).lower()
+        out.append(o)
+    return out
+
+
 def player_fx(panel, pid, plan):
     """Effets appliques par le lecteur : tremble (preset ou reglage), et retouches du mode edition."""
     e = panel.get("edit") or {}
@@ -159,6 +189,7 @@ def page_key(p, d):
                       relief_layers.used(panel), _mtime(d / f"layers/{pid_}/meta.json")]
         panels[pid_] = {"player": plan["player"], "autoplay": plan["autoplay"], "loop": plan["loop"],
                         "fx": player_fx(panel, pid_, plan), "extra": extra, "relief": relief,
+                        "bubbles": clean_bubbles(panel.get("bubbles")),
                         "sides": [j["side"] for j in plan["jobs"]],
                         "chosen": {k: [v, _mtime(d / v)] for k, v in sorted(chosen.items())}, "layers": layers}
     ps = p.get("pageSound") or {}
@@ -168,7 +199,7 @@ def page_key(p, d):
     blob = {"v": 5, "name": p.get("name"), "geometry": p.get("geometry"), "pageSound": page_sound,
             "stroke": (p.get("page") or {}).get("strokeWidth"), "panels": panels,
             "page": [_mtime(d / "page" / n) for n in ("page.jpg", "frames.png")],
-            "player": [_mtime(PLAYER / n) for n in ("book.html", "alive-player.js", "alive-player.css")]}
+            "player": [_mtime(PLAYER / n) for n in ("book.html", "alive-player.js", "alive-player.css", "alive-bubbles.js")]}
     return hashlib.sha1(json.dumps(blob, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
 
 
@@ -217,6 +248,9 @@ def _build(pid, log=print, force=False):
         plan = presets.plan_panel(panel, p.get("style", ""))
         entry = {"id": g["id"], "rect": [round(v) for v in g["rect"]], "poly": grow(g["poly"], stroke / 2 + 1),
                  "video": None}
+        bubbles = clean_bubbles(panel.get("bubbles"))
+        if bubbles:
+            entry["bubbles"] = bubbles
         chosen = panel.get("chosen") or {}
         need = [j["side"] for j in plan["jobs"]]
         srcs = {s: d / chosen[s] for s in need if chosen.get(s) and (d / chosen[s]).exists()}
@@ -307,7 +341,7 @@ def _build(pid, log=print, force=False):
                                                            "data": data}]}
     (out / "book.js").write_text("window.ALIVE_BOOK = " + json.dumps(book, ensure_ascii=False) + ";\n", encoding="utf-8")
     shutil.copy2(PLAYER / "book.html", out / "index.html")
-    for f in ("alive-player.js", "alive-player.css"):
+    for f in ("alive-player.js", "alive-player.css", "alive-bubbles.js"):
         shutil.copy2(PLAYER / f, out / f)
     (out / "robots.txt").write_text("User-agent: *\nDisallow: /\n", encoding="utf-8")
     # ne garder que les videos et sons encore utilises
@@ -405,7 +439,7 @@ def sync_book_page(book, pid):
         pg["data"], pg["project"], hit = data, pid, data
     if hit is not None:
         bj.write_text("window.ALIVE_BOOK = " + json.dumps(B, ensure_ascii=False) + ";\n", encoding="utf-8")
-        for f in ("alive-player.js", "alive-player.css"):
+        for f in ("alive-player.js", "alive-player.css", "alive-bubbles.js"):
             shutil.copy2(PLAYER / f, out / f)
         shutil.copy2(PLAYER / "book.html", out / "index.html")
     return hit
@@ -430,7 +464,7 @@ def build_book(book, out, log=print):
     (out / "book.js").write_text("window.ALIVE_BOOK = " + json.dumps({"title": book["title"], "pages": pages},
                                                                        ensure_ascii=False) + ";\n", encoding="utf-8")
     shutil.copy2(PLAYER / "book.html", out / "index.html")
-    for f in ("alive-player.js", "alive-player.css"):
+    for f in ("alive-player.js", "alive-player.css", "alive-bubbles.js"):
         shutil.copy2(PLAYER / f, out / f)
     (out / "robots.txt").write_text("User-agent: *\nDisallow: /\n", encoding="utf-8")
     return out

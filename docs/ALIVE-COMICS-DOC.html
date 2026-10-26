@@ -525,6 +525,13 @@ page : { page: "page.jpg", frames: "frames.png", size: [W, H], fps: 24, sound: {
       pare-feu (réseau privé). Pas de mot de passe : réseau local seulement. Sauvegarde : <code>tools/backup_nas.ps1</code>, tâche planifiée
       « Alive-Comics sauvegarde NAS » chaque nuit à 3 h 30 vers <code>\192.168.1.44
 as\Backup\Alive-Comics-HITCHCOCK</code> (copie sans miroir).</li>
+    <li><b>Bulles de BD</b> : icône 💬 dans la barre de chaque case (éditeur de planche) → éditeur de bulles : la case avec ses bulles,
+      qu'on glisse (le losange violet = pointe de la queue). Réglages : type (parole, pensée, cri, chuchote, narration), texte, taille S/M/L,
+      typo (BD, manuscrite, machine à écrire, classique, moderne, cri), couleur (7 pastilles + fond / texte libres), apparition
+      (toujours · au survol · à t secondes de la lecture de la case), animation d'apparition (pop, fondu, montée, secousse, machine à écrire).
+      Les bulles peuvent dépasser un peu du cadre. Données : <code>panel.bubbles</code> (nettoyées par <code>assemble.clean_bubbles</code>,
+      <code>entry.bubbles</code> dans la page exportée) ; dessin et apparition : <code>player/alive-bubbles.js</code> (calque sur la page,
+      pas dans la case), partagé avec l'éditeur (<code>app/web/js/bubbles.js</code>).</li>
     <li><b>Filtres de case</b> (onglet « Filtres » du mode édition, cases vidéo) : Flou, Noir et blanc, Sépia, Teinte (couleur au choix),
       Vignette, Grain, Halation, Aberration chromatique. Empilables, chacun dosé de 0 à 100 %, « Appliquer à toute la page ». Appliqués par le
       lecteur comme les couleurs (<code>fx.filters</code>, <code>panel.edit.filters</code>, validés par <code>edit.clean</code>) : filtres CSS

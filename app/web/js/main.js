@@ -3,6 +3,7 @@ import { api, get, post, put, upload, uploadSound, h, toast, debounce, modal, lo
 import { compute, PRESETS, PAGE_DEFAULTS, FORMATS, pageSize, transpose, randomLayout, removeLeaf, splitLeaf, leaves, clone } from "./geometry.js";
 import { Editor, icon } from "./editor.js";
 import { startImage, pageImages } from "./exporter.js";
+import { openBubbleEditor } from "./bubbles.js";
 import { cameraForm, actionForm, audioForm, renderSection, pageForm, statusText, sideName, treatmentForm } from "./forms.js";
 
 const NEW_PANEL = () => ({ camera: { id: "arc", fields: {} }, action: { id: "fige", fields: {} }, audio: { mode: "none" } });
@@ -586,6 +587,7 @@ class App {
     const r = anchor.getBoundingClientRect();            // avant select() : il redessine les icones
     if (this.selected !== id) this.select(id);
     if (kind === "image") return this.pickImage(id);
+    if (kind === "bubble") return openBubbleEditor(this, id);
     const form = kind === "camera" ? cameraForm(this, id, true) : kind === "action" ? actionForm(this, id, true) : audioForm(this, id);
     const pop = h("div.popover", h("div.pop-head", icon(kind), h("b", { camera: "Prompt caméra", action: "Prompt action", audio: "Sons de la case" }[kind]),
                                    h("button.icon", { on: { click: () => pop.remove() } }, "✕")), form);

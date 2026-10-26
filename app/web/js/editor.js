@@ -15,6 +15,7 @@ export const ICONS = {
   image: '<path d="M4 5h16v14H4z M4 16l5-5 4 4 3-3 4 4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><circle cx="15.5" cy="9" r="1.6" fill="currentColor"/>',
   camera: '<path d="M3 7h12v10H3z M15 10.5l6-3.5v10l-6-3.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>',
   action: '<circle cx="13" cy="4.5" r="2" fill="currentColor"/><path d="M8 21l3-7 3 3v5 M6 12l3-4h5l3 4 M11 14l1-6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>',
+  bubble: '<path d="M4 5h16v11h-8l-4 4v-4H4z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M8 9.5h8 M8 12.5h5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>',
   audio: '<path d="M9 18V6l11-2v12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><circle cx="6.5" cy="18" r="2.5" fill="currentColor"/><circle cx="17.5" cy="16" r="2.5" fill="currentColor"/>',
 };
 export const icon = (name) => {
@@ -134,6 +135,7 @@ export class Editor {
         this.tool(g.id, "camera", "Caméra : " + this.app.label("camera", panel.camera?.id)),
         this.tool(g.id, "action", "Action : " + this.app.label("action", panel.action?.id)),
         this.tool(g.id, "audio", "Sons : " + this.app.audioLabel(panel), this.app.hasSound(panel)),
+        this.tool(g.id, "bubble", (panel.bubbles || []).length ? `Bulles : ${panel.bubbles.length}` : "Ajouter des bulles", (panel.bubbles || []).length > 0),
         st ? h("span.dot." + st.kind, { title: st.text }) : null);
       box.append(bar);
       if (!panel.image) {

@@ -105,6 +105,14 @@
       const pts = p.poly.map(([x, y]) => `${(x - x0) / (x1 - x0) * 100}% ${(y - y0) / (y1 - y0) * 100}%`);
       el.style.clipPath = `polygon(${pts.join(", ")})`;
     }
+    // bulles : calque sur la page (pas dans la case : elles peuvent depasser un peu du cadre)
+    if (p.bubbles && p.bubbles.length && window.AliveBubbles) {
+      el._bub = window.AliveBubbles.mount(inst.pageEl, p.bubbles, { rect: [x0 / PW * 100, y0 / PH * 100, (x1 - x0) / PW * 100, (y1 - y0) / PH * 100] });
+      if (!p.video && !p.depth) {                                  // case fixe : « a t secondes » et « au survol » = survol
+        el.addEventListener("pointerenter", () => el._bub.update({ hover: true, t: null }));
+        el.addEventListener("pointerleave", () => el._bub.update({ hover: false, t: null }));
+      }
+    }
     if (!p.video && p.depth) { makeRelief(inst, p, el, base); return; }
     if (!p.video) {
       el.classList.add("static");
@@ -460,6 +468,10 @@
   function step(st, now, dt) {
     if (st.relief) { stepRelief(st, now, dt); return; }
     const fps = st.inst.fps;
+    if (st.el._bub) {                         // bulles : au survol, ou a t secondes de la boucle de la case
+      const t0 = st.loopMode ? st.lo : st.a;
+      st.el._bub.update({ hover: st.over || st.pinned || st.inst.play === "always", t: Math.max(0, (st.pos - t0) / fps) });
+    }
     // editeur : le tremble vit meme sur une image fixe (il parcourt sa boucle en temps reel)
     if (st.freeShake) st.shFree += dt / Math.max(0.2, shakeLoop(st).sec); else st.shFree = 0;
     if (st.anim) {
@@ -961,6 +973,7 @@
 
   // mouvement d'une case en relief : boucle douce tant qu'elle est survolee (ou un tour au clic), plus le glisser
   function stepRelief(st, now, dt) {
+    if (st.el._bub) st.el._bub.update({ hover: st.over || st.pinned || st.inst.play === "always", t: null });
     const c = st.p.depth || {}, rv = st.rv, a = c.amount || 0.025, dur = Math.max(0.5, c.duration || 2);
     const move = RELIEF_MOVES[c.preset] || RELIEF_MOVES.respire;
     const hoverOn = (c.trigger || "hover") === "hover" && (st.over || st.pinned || st.inst.play === "always");
