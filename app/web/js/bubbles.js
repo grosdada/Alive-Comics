@@ -43,7 +43,7 @@ export async function openBubbleEditor(app, caseId) {
   const rebuild = () => { ctl.setList(list); ctl.select(sel); };
 
   // ---- glisser une bulle ou sa queue ; double-clic = forme
-  let drag = null;
+  let drag = null, lastDown = null;
   const pt = (e) => { const r = caseEl.getBoundingClientRect(); return [(e.clientX - r.left) / r.width, (e.clientY - r.top) / r.height]; };
   stage.addEventListener("pointerdown", (e) => {
     const tip = e.target.closest(".ac-btip"), bub = e.target.closest(".ac-bub");
@@ -51,6 +51,7 @@ export async function openBubbleEditor(app, caseId) {
     if (!id) return;
     const b = list.find((x) => x.id === id);
     if (!b) return;
+    lastDown = id;
     sel = id; ctl.select(id); syncPanel();
     const [px, py] = pt(e);
     drag = { b, tip: !!tip, px, py, x: b.x, y: b.y, tx: b.tx, ty: b.ty };
@@ -70,9 +71,9 @@ export async function openBubbleEditor(app, caseId) {
   const end = () => { if (drag) { drag = null; save(); } };
   stage.addEventListener("pointerup", end);
   stage.addEventListener("pointercancel", end);
-  stage.addEventListener("pointerdown", (e) => { if (!e.target.closest(".ac-bub, .ac-btip") && sel) { sel = null; ctl.select(null); syncPanel(); } });
-  stage.addEventListener("dblclick", (e) => {
-    const id = e.target.closest(".ac-bub")?.dataset.id;
+  stage.addEventListener("pointerdown", (e) => { if (!e.target.closest(".ac-bub, .ac-btip")) { lastDown = null; if (sel) { sel = null; ctl.select(null); syncPanel(); } } });
+  stage.addEventListener("dblclick", (e) => {       // la capture du pointeur redirige le double-clic vers la scene : on retient la bulle saisie
+    const id = e.target.closest(".ac-bub")?.dataset.id || lastDown;
     if (!id) return;
     sel = id; ctl.select(id); syncPanel(); openGeo();
   });
