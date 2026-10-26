@@ -60,6 +60,7 @@
   <button type="button" id="unlock" hidden>🔊 Activer le son</button>
   <button type="button" id="fs" class="wide">Plein écran</button>
   <button type="button" id="folder" hidden title="Ouvrir le dossier (index.html, vidéos, sons)">📁 Dossier</button>
+  <button type="button" id="pub" hidden title="Mettre en ligne cette version, sans repasser par l'application">🚀 Publier</button>
   <button type="button" id="edit" hidden aria-pressed="false" title="Retoucher les cases : tremblé, boucle, couleurs, sons, régénérer">✏️ Éditer</button>
 </header>
 <main id="main">
@@ -147,6 +148,30 @@
                 location.pathname.match(/^\/api\/books\/([a-z0-9-]+)\/file\//);
   if (local) {
     $("folder").hidden = false;
+    // publier depuis l'apercu : meme action que « Publier » de l'application (planche ou livre)
+    $("pub").hidden = false;
+    $("pub").onclick = async () => {
+      const isPage = location.pathname.startsWith("/projects/");
+      const title = (B.title || document.title || "").trim();
+      let body = {};
+      if (isPage) {
+        const slug = (title || local[1]).normalize("NFKD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40) || local[1];
+        let known = "";
+        try { known = ((await (await fetch(`/api/projects/${local[1]}`)).json()).published || {}).name || ""; } catch (e) {}
+        const name = prompt("Publier cette planche en ligne.\nAdresse (nom du dossier) :", known || slug);
+        if (!name) return;
+        body = { name };
+      } else if (!confirm("Publier ce livre en ligne ?")) return;
+      const btn = $("pub"); btn.disabled = true; btn.textContent = "Publication…";
+      try {
+        const r = await fetch(isPage ? `/api/projects/${local[1]}/publish` : `/api/books/${local[1]}/publish`,
+                              { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+        const j = await r.json();
+        if (!r.ok) throw new Error(j.error || j.detail || r.status);
+        prompt("C'est en ligne. Lien :", j.url);
+      } catch (e) { alert("Publication impossible : " + e.message); }
+      btn.disabled = false; btn.textContent = "🚀 Publier";
+    };
     $("folder").onclick = () => fetch(location.pathname.startsWith("/projects/") ? `/api/projects/${local[1]}/reveal`
                                                                                  : `/api/books/${local[1]}/reveal`,
                                       { method: "POST" }).catch(() => {});
