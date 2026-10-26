@@ -595,12 +595,8 @@
     fade(g, duckedVolume(g));
   }
 
-  // le son global se fait discret pendant qu'une case joue ses sons
-  function duckedVolume(g) {
-    let busy = false;
-    for (const inst of pages) for (const st of inst.panels) if (st.hover && (st.layers || []).length) busy = true;
-    return busy ? g.vol * 0.45 : g.vol;
-  }
+  // le son global reste toujours au meme volume (pas de baisse quand une case joue ses sons)
+  function duckedVolume(g) { return g.vol; }
 
   function reduckAll() {
     for (const inst of pages) if (inst.global && !inst.global.a.paused) fade(inst.global, duckedVolume(inst.global));
