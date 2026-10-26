@@ -54,7 +54,7 @@ export async function openBubbleEditor(app, caseId) {
     lastDown = id;
     sel = id; ctl.select(id); syncPanel();
     const [px, py] = pt(e);
-    drag = { b, tip: !!tip, px, py, x: b.x, y: b.y, tx: b.tx, ty: b.ty };
+    drag = { b, tip: !!tip && !tip.classList.contains("base"), base: !!tip && tip.classList.contains("base"), px, py, x: b.x, y: b.y, tx: b.tx, ty: b.ty, bx: b.bx, by: b.by };
     stage.setPointerCapture(e.pointerId);
     e.preventDefault();
   });
@@ -62,7 +62,9 @@ export async function openBubbleEditor(app, caseId) {
     if (!drag) return;
     const [px, py] = pt(e), dx = px - drag.px, dy = py - drag.py, b = drag.b;
     if (drag.tip) { b.tx = clamp(drag.tx + dx, -0.3, 1.3); b.ty = clamp(drag.ty + dy, -0.3, 1.3); }
+    else if (drag.base) { b.bx = clamp(px, -0.3, 1.3); b.by = clamp(py, -0.3, 1.3); }              // la queue part dans cette direction
     else {
+      if (drag.bx != null) { b.bx = drag.bx + (clamp(drag.x + dx, -0.2, 1.2) - drag.x); b.by = drag.by + (clamp(drag.y + dy, -0.2, 1.2) - drag.y); }
       b.x = clamp(drag.x + dx, -0.2, 1.2); b.y = clamp(drag.y + dy, -0.2, 1.2);
       if (drag.tx != null) { b.tx = clamp(drag.tx + (b.x - drag.x), -0.3, 1.3); b.ty = clamp(drag.ty + (b.y - drag.y), -0.3, 1.3); }
     }
@@ -199,13 +201,14 @@ export async function openBubbleEditor(app, caseId) {
       h("button.mini", { title: "Rejouer l'apparition", on: { click: () => { ctl.update({ hover: false, t: -1 }); ctl.replay(b.id); } } }, "▶")));
     const hasTail = b.tx != null;
     const tail = h("input", { type: "checkbox" }); tail.checked = hasTail;
-    tail.addEventListener("change", () => { change(() => { if (tail.checked) { b.tx = clamp(b.x + 0.08, -0.3, 1.3); b.ty = clamp(b.y + 0.22, -0.3, 1.3); } else { delete b.tx; delete b.ty; } }); syncPanel(); });
-    side.append(h("div.row", h("label", tail, " Queue (glisse le losange violet)")));
+    tail.addEventListener("change", () => { change(() => { if (tail.checked) { b.tx = clamp(b.x + 0.08, -0.3, 1.3); b.ty = clamp(b.y + 0.22, -0.3, 1.3); } else { delete b.tx; delete b.ty; delete b.bx; delete b.by; } }); syncPanel(); });
+    side.append(h("div.row", h("label", tail, " Queue (losange foncé = pointe, clair = base)")));
     if (hasTail) {
       const tw = h("input", { type: "range", min: 0.3, max: 2.5, step: 0.05, value: b.tw || 1, style: { flex: 1 } });
       tw.addEventListener("input", () => { b.tw = parseFloat(tw.value); ctl.layout(); });
       tw.addEventListener("change", save);
       side.append(h("div.row", h("span.lab", "Largeur de la queue"), tw));
+      if (b.bx != null) side.append(h("div.row", h("span.lab", "Base de la queue"), h("button.mini", { title: "La base suit la pointe (automatique)", on: { click: () => change(() => { delete b.bx; delete b.by; }) } }, "Automatique")));
     }
     side.append(h("div.row", h("button.mini", { title: "Forme de la bulle (ou double-clic sur la bulle)", on: { click: openGeo } }, "Forme…"),
       h("span.sp"), h("button.mini.danger", { title: "Suppr", on: { click: removeSel } }, "Supprimer")));
@@ -237,7 +240,7 @@ export async function openBubbleEditor(app, caseId) {
     const t = b.type, pct = (v) => Math.round(v * 100) + " %";
     body.append(h("div.row", h("span.lab", "Forme"), seg(Object.entries(LABEL), t, (v) => {
       b.type = v;
-      if (!TAIL[v] && b.tx != null) { delete b.tx; delete b.ty; }
+      if (!TAIL[v] && b.tx != null) { delete b.tx; delete b.ty; delete b.bx; delete b.by; }
       ctl.layout(); save(); syncPanel();
     })));
     body.append(slider(b, "Marge autour du texte", "pad", 0.7, 1.8, 0.05, 1, pct));

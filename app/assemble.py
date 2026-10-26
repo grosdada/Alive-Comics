@@ -165,6 +165,8 @@ def clean_bubbles(lst):
              "anim": b.get("anim") if b.get("anim") in ("pop", "fade", "rise", "shake", "type") else "pop"}
         if isinstance(b.get("tx"), (int, float)) and isinstance(b.get("ty"), (int, float)):
             o["tx"], o["ty"] = round(num(b["tx"], -0.35, 1.35, 0.5), 4), round(num(b["ty"], -0.35, 1.35, 0.5), 4)
+            if isinstance(b.get("bx"), (int, float)) and isinstance(b.get("by"), (int, float)):      # base de la queue (direction)
+                o["bx"], o["by"] = round(num(b["bx"], -0.35, 1.35, 0.5), 4), round(num(b["by"], -0.35, 1.35, 0.5), 4)
         if isinstance(b.get("tw"), (int, float)) and not isinstance(b.get("tw"), bool) and abs(b["tw"] - 1) > 0.01:
             o["tw"] = round(max(0.2, min(3, float(b["tw"]))), 2)
         geo = clean_geo(b.get("geo"))

@@ -45,6 +45,7 @@
 .ac-bub.ed.sel .ac-btxt { outline: 2px dashed rgba(179, 107, 255, .9); outline-offset: 4px; border-radius: 6px; }
 .ac-btip { position: absolute; width: 16px; height: 16px; margin: -8px 0 0 -8px; background: #b36bff; border: 2px solid #fff; transform: rotate(45deg);
   pointer-events: auto; cursor: grab; z-index: 2; border-radius: 2px; }
+.ac-btip.base { width: 13px; height: 13px; margin: -6.5px 0 0 -6.5px; background: #d9b8ff; }
 .ac-bin.a-pop { animation: acb-pop .38s cubic-bezier(.2, 1.5, .4, 1); }
 .ac-bin.a-fade { animation: acb-fade .5s ease-out; }
 .ac-bin.a-rise { animation: acb-rise .42s cubic-bezier(.2, .9, .3, 1); }
@@ -89,21 +90,23 @@
     const cx = mx + (ux - mx) * 0.97, cy = my + (uy - my) * 0.97;       // pointe un peu en retrait pour que le trait ne depasse pas
     return { tail: `M ${b1} ${flanks(b1, b2, ux, uy, curve)} Z`, cover: `M ${i1} L ${b1} ${flanks(b1, b2, cx, cy, curve)} L ${i2} Z` };
   }
-  function ellipseTail(rx, ry, ux, uy, spread, curve) {
+  // vx, vy : direction de la base de la queue (losange du bas) ; absent = vers la pointe
+  function ellipseTail(rx, ry, ux, uy, spread, curve, vx, vy) {
     const d = Math.hypot(ux / rx, uy / ry);
     if (d < 1.06) return null;
-    const phi = Math.atan2(uy / ry, ux / rx);
+    const phi = vx != null ? Math.atan2(vy / ry, vx / rx) : Math.atan2(uy / ry, ux / rx);
     const pt = (a, k) => [rx * k * Math.cos(a), ry * k * Math.sin(a)];
     return tailShapes(pt(phi - spread, 1), pt(phi + spread, 1), pt(phi - spread, 0.82), pt(phi + spread, 0.82), ux, uy, curve);
   }
-  function boxTail(hw, hh, ux, uy, spread, curve) {
+  function boxTail(hw, hh, ux, uy, spread, curve, vx, vy) {
     if (Math.abs(ux) < hw && Math.abs(uy) < hh) return null;
+    const ex = vx != null ? vx : ux, ey = vy != null ? vy : uy, k = vx != null ? 1 : 0.5;
     let b1, b2, i1, i2;
-    if (Math.abs(uy) * hw >= Math.abs(ux) * hh) {                 // bord haut ou bas
-      const sy = uy > 0 ? 1 : -1, cx = Math.max(-hw * 0.7, Math.min(hw * 0.7, ux * 0.5));
+    if (Math.abs(ey) * hw >= Math.abs(ex) * hh) {                 // bord haut ou bas
+      const sy = ey > 0 ? 1 : -1, cx = Math.max(-hw * 0.7, Math.min(hw * 0.7, ex * k));
       b1 = [cx - spread, sy * hh]; b2 = [cx + spread, sy * hh]; i1 = [cx - spread, sy * hh * 0.7]; i2 = [cx + spread, sy * hh * 0.7];
     } else {
-      const sx = ux > 0 ? 1 : -1, cy = Math.max(-hh * 0.7, Math.min(hh * 0.7, uy * 0.5));
+      const sx = ex > 0 ? 1 : -1, cy = Math.max(-hh * 0.7, Math.min(hh * 0.7, ey * k));
       b1 = [sx * hw, cy - spread]; b2 = [sx * hw, cy + spread]; i1 = [sx * hw * 0.8, cy - spread]; i2 = [sx * hw * 0.8, cy + spread];
     }
     return tailShapes(b1, b2, i1, i2, ux, uy, curve);
@@ -133,7 +136,7 @@
     return "M " + pts.map((p) => p.map(f2).join(" ")).join(" L ") + " Z";
   }
 
-  function draw(svg, b, bw, bh, ux, uy, hasTail, sw) {
+  function draw(svg, b, bw, bh, ux, uy, hasTail, sw, vx, vy) {
     svg.textContent = "";
     const g = b.geo || {}, [fill, stroke] = colorOf(b);
     sw *= g.line || 1;
@@ -151,7 +154,7 @@
     const tw = Math.max(0.2, Math.min(3, b.tw || 1));
     const spread = Math.max(0.07, Math.min(0.9, tw * Math.max(0.1, Math.min(0.2, 13 / Math.max(30, Math.min(rx, ry))))));
     if (b.type === "box") {
-      const hw = bw / 2 * 1.04 * pad, hh = bh / 2 * 1.02 * pad, t = hasTail ? boxTail(hw, hh, ux, uy, Math.max(sw * 2, Math.min(hw, hh) * 0.17 * tw), curve) : null;
+      const hw = bw / 2 * 1.04 * pad, hh = bh / 2 * 1.02 * pad, t = hasTail ? boxTail(hw, hh, ux, uy, Math.max(sw * 2, Math.min(hw, hh) * 0.17 * tw), curve, vx, vy) : null;
       if (t) add(t.tail, dash);
       body(roundRect(hw, hh, Math.min(hw, hh) * (g.round ?? 0.16)));
       if (t) add(t.cover, { stroke: "none" });
@@ -167,7 +170,7 @@
       if (hasTail) {
         const d = Math.hypot(ux / rx, uy / ry);
         if (d > 1.1) {
-          const phi = Math.atan2(uy / ry, ux / rx), sx = rx * 1.08 * Math.cos(phi), sy = ry * 1.08 * Math.sin(phi);
+          const phi = vx != null ? Math.atan2(vy / ry, vx / rx) : Math.atan2(uy / ry, ux / rx), sx = rx * 1.08 * Math.cos(phi), sy = ry * 1.08 * Math.sin(phi);
           [[0.3, 0.17], [0.62, 0.12], [0.92, 0.085]].forEach(([k, s]) => {
             const cx = sx + (ux - sx) * k, cy = sy + (uy - sy) * k, rr = Math.max(sw * 1.4, Math.min(rx, ry) * s);
             add(`M ${f2(cx - rr)} ${f2(cy)} a ${f2(rr)} ${f2(rr)} 0 1 0 ${f2(2 * rr)} 0 a ${f2(rr)} ${f2(rr)} 0 1 0 ${f2(-2 * rr)} 0 Z`);
@@ -177,13 +180,13 @@
       return;
     }
     if (b.type === "shout") {
-      const R = [rx * 1.05, ry * 1.1], t = hasTail ? ellipseTail(rx * 0.95, ry * 0.95, ux, uy, spread, curve) : null;
+      const R = [rx * 1.05, ry * 1.1], t = hasTail ? ellipseTail(rx * 0.95, ry * 0.95, ux, uy, spread, curve, vx, vy) : null;
       if (t) add(t.tail, dash);
       body(star(R[0], R[1], g.n || 13, b.id || "x", g.len ?? 0.32, g.irr ?? 0.35));
       if (t) add(t.cover, { stroke: "none" });
       return;
     }
-    const t = hasTail ? ellipseTail(rx, ry, ux, uy, spread, curve) : null;       // oval, chuchotement
+    const t = hasTail ? ellipseTail(rx, ry, ux, uy, spread, curve, vx, vy) : null;       // oval, chuchotement
     if (t) add(t.tail, dash);
     body(g.wob ? wobbly(rx, ry, g.wob, b.id || "x") : ellipse(rx, ry));
     if (t) add(t.cover, { stroke: "none" });
@@ -206,7 +209,7 @@
     const ctl = { root, items, selected: null, edit: !!opts.edit };
 
     function build() {
-      for (const it of items) { it.node.remove(); it.tip && it.tip.remove(); clearInterval(it.timer); }
+      for (const it of items) { it.node.remove(); it.tip && it.tip.remove(); it.base && it.base.remove(); clearInterval(it.timer); }
       items.length = 0;
       for (const b of list || []) {
         const node = document.createElement("div");
@@ -218,7 +221,10 @@
         bin.append(svg, txt); node.append(bin);
         root.append(node);
         const it = { b, node, bin, svg, txt, on: ctl.edit, timer: null, tip: null };
-        if (ctl.edit) { it.tip = document.createElement("div"); it.tip.className = "ac-btip"; it.tip.dataset.id = b.id || ""; root.append(it.tip); }
+        if (ctl.edit) {
+          it.tip = document.createElement("div"); it.tip.className = "ac-btip"; it.tip.dataset.id = b.id || ""; root.append(it.tip);
+          it.base = document.createElement("div"); it.base.className = "ac-btip base"; it.base.dataset.id = b.id || ""; it.base.title = "Base de la queue"; root.append(it.base);
+        }
         items.push(it);
       }
       layout();
@@ -237,7 +243,21 @@
         const bw = it.txt.offsetWidth, bh = it.txt.offsetHeight;
         const hasTail = b.tx != null && b.ty != null;
         const ux = hasTail ? (b.tx - (b.x ?? 0.5)) * W : 0, uy = hasTail ? (b.ty - (b.y ?? 0.5)) * H : 0;
-        draw(it.svg, b, bw, bh, ux, uy, hasTail, Math.max(1.4, W * 0.0042));
+        const hasBase = hasTail && b.bx != null && b.by != null;
+        const vx = hasBase ? (b.bx - (b.x ?? 0.5)) * W : null, vy = hasBase ? (b.by - (b.y ?? 0.5)) * H : null;
+        draw(it.svg, b, bw, bh, ux, uy, hasTail, Math.max(1.4, W * 0.0042), vx, vy);
+        if (it.base) {                                                // le losange de la base se pose sur le contour de la bulle
+          it.base.style.display = hasTail && ctl.selected === b.id ? "" : "none";
+          if (hasTail) {
+            const dx = hasBase ? vx : ux, dy = hasBase ? vy : uy, pad = (b.geo && b.geo.pad) || 1;
+            let px = 0, py = bh * 0.68 * pad;
+            if (dx || dy) {
+              if (b.type === "box") { const hw = bw / 2 * 1.04 * pad, hh = bh / 2 * 1.02 * pad, s = Math.min(dx ? hw / Math.abs(dx) : 1e9, dy ? hh / Math.abs(dy) : 1e9); px = dx * s; py = dy * s; }
+              else { const rx = bw * 0.66 * pad, ry = bh * 0.68 * pad, phi = Math.atan2(dy / ry, dx / rx); px = rx * Math.cos(phi); py = ry * Math.sin(phi); }
+            }
+            it.base.style.left = ((b.x ?? 0.5) + px / W) * 100 + "%"; it.base.style.top = ((b.y ?? 0.5) + py / H) * 100 + "%";
+          }
+        }
         if (it.tip) {
           it.tip.style.display = hasTail && ctl.selected === b.id ? "" : "none";
           if (hasTail) { it.tip.style.left = b.tx * 100 + "%"; it.tip.style.top = b.ty * 100 + "%"; }
