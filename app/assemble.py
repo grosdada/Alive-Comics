@@ -169,6 +169,8 @@ def clean_bubbles(lst):
                 o["bx"], o["by"] = round(num(b["bx"], -0.35, 1.35, 0.5), 4), round(num(b["by"], -0.35, 1.35, 0.5), 4)
         if isinstance(b.get("tw"), (int, float)) and not isinstance(b.get("tw"), bool) and abs(b["tw"] - 1) > 0.01:
             o["tw"] = round(max(0.2, min(3, float(b["tw"]))), 2)
+        if isinstance(b.get("fs"), (int, float)) and not isinstance(b.get("fs"), bool):
+            o["fs"] = round(max(1.5, min(14, float(b["fs"]))), 2)
         geo = clean_geo(b.get("geo"))
         if geo:
             o["geo"] = geo
@@ -188,7 +190,7 @@ def clean_bubble_presets(lst):
             continue
         one = clean_bubbles([{"text": "x", "type": p.get("type"), "size": p.get("size"), "color": p.get("color"), "font": p.get("font"),
                               "anim": p.get("anim"), "show": p.get("show"), "tw": p.get("tw"), "geo": p.get("geo"),
-                              "fill": p.get("fill"), "ink": p.get("ink")}])[0]
+                              "fill": p.get("fill"), "ink": p.get("ink"), "fs": p.get("fs")}])[0]
         for k in ("id", "text", "x", "y", "at"):
             one.pop(k, None)
         one["id"] = re.sub(r"[^A-Za-z0-9_-]", "", str(p.get("id") or ""))[:12] or "p" + str(len(out))

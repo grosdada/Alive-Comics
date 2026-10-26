@@ -235,7 +235,7 @@
       for (const it of items) {
         const b = it.b, text = colorOf(b)[2], F = FONTS[b.font] || FONTS.bd;
         it.node.style.left = (b.x ?? 0.5) * 100 + "%"; it.node.style.top = (b.y ?? 0.5) * 100 + "%";
-        it.txt.style.setProperty("--fs", SIZES[b.size] || SIZES.M);
+        it.txt.style.setProperty("--fs", b.fs || SIZES[b.size] || SIZES.M);        // b.fs : taille libre (en % de la largeur de la case)
         it.txt.style.setProperty("--mw", (b.geo && b.geo.mw) || (b.type === "box" ? 62 : b.type === "shout" ? 36 : 32));
         it.txt.style.color = text;
         it.txt.style.setProperty("--bf", F[1]); it.txt.style.setProperty("--bw8", F[2]); it.txt.style.setProperty("--bt", F[3] || "none");

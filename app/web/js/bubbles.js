@@ -9,7 +9,7 @@ const LABEL = { oval: "Parole", thought: "Pensée", shout: "Cri", whisper: "Chuc
 const DEFAULT_TEXT = { oval: "Bonjour !", thought: "Hmm…", shout: "ATTENTION !", whisper: "chut…", box: "Le lendemain…" };
 const DEFAULT_MW = { box: 62, shout: 36 };
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-const KEEP = ["type", "size", "color", "fill", "ink", "font", "tw", "show", "anim"];      // ce qu'un preset garde (jamais le texte ni la position)
+const KEEP = ["type", "size", "fs", "color", "fill", "ink", "font", "tw", "show", "anim"];      // ce qu'un preset garde (jamais le texte ni la position)
 
 let loading = null;
 function loadLib() {                                   // le dessin des bulles est dans le lecteur : chargement a la demande
@@ -174,7 +174,13 @@ export async function openBubbleEditor(app, caseId) {
     ta.addEventListener("input", () => { b.text = ta.value; ctl.layout(); });
     ta.addEventListener("change", save);
     side.append(h("label.field", h("span.lab", "Texte"), ta));
-    side.append(h("div.row", h("span.lab", "Taille"), seg([["S", "S"], ["M", "M"], ["L", "L"]], b.size || "M", (v) => change(() => { b.size = v; }))));
+    side.append(h("div.row", h("span.lab", "Taille"), seg([["S", "S"], ["M", "M"], ["L", "L"]], b.fs ? "" : b.size || "M", (v) => { change(() => { b.size = v; delete b.fs; }); syncPanel(); })));
+    const cur = b.fs || AB.SIZES[b.size || "M"];
+    const fsv = h("span.val", cur.toFixed(1));
+    const fs = h("input", { type: "range", min: 1.5, max: 12, step: 0.1, value: cur, style: { flex: 1 }, title: "Taille libre du texte (pour un long texte)" });
+    fs.addEventListener("input", () => { b.fs = parseFloat(fs.value); fsv.textContent = b.fs.toFixed(1); ctl.layout(); });
+    fs.addEventListener("change", () => { save(); syncPanel(); });
+    side.append(h("div.row", h("span.lab", "Taille du texte"), fs, fsv));
     side.append(h("div.row", h("span.lab", "Typo"),
       (() => { const s = h("select", Object.entries(AB.FONTS).map(([k, f]) => h("option", { value: k, style: { fontFamily: f[1] } }, f[0]))); s.value = b.font || "bd";
                s.addEventListener("change", () => change(() => { b.font = s.value; })); return s; })()));
