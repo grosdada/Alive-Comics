@@ -21,6 +21,7 @@ from collections import defaultdict
 from pathlib import Path
 
 from . import depth, presets, store
+from . import geometry as G
 from . import layers as relief_layers   # « layers » designe aussi les couches de son ici
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -242,8 +243,11 @@ def page_key(p, d):
     page_sound = {k: ps.get(k) for k in ("mode", "file", "volume")}
     if ps.get("file"):
         page_sound["mtime"] = _mtime(d / ps["file"])
-    blob = {"v": 5, "name": p.get("name"), "geometry": p.get("geometry"), "pageSound": page_sound,
-            "stroke": (p.get("page") or {}).get("strokeWidth"), "panels": panels,
+    pgs = p.get("page") or {}
+    blob = {"v": 6, "name": p.get("name"), "geometry": p.get("geometry"), "pageSound": page_sound,
+            "stroke": pgs.get("strokeWidth"), "panels": panels,
+            "frame": [p.get("layout"), G.clean_anim(p.get("anim"), p.get("layout") or {}),
+                      [pgs.get(k) for k in ("bg", "fill", "stroke", "strokeWidth", "gutter", "margin")]],
             "page": [_mtime(d / "page" / n) for n in ("page.jpg", "frames.png")],
             "player": [_mtime(PLAYER / n) for n in ("book.html", "alive-player.js", "alive-player.css", "alive-bubbles.js")]}
     return hashlib.sha1(json.dumps(blob, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
@@ -288,8 +292,19 @@ def _build(pid, log=print, force=False):
         shutil.copy2(src, out / name)
     stroke = float((p.get("page") or {}).get("strokeWidth", 4))
     data = {"page": "page.jpg", "frames": "frames.png", "size": geo["size"], "fps": FPS, "panels": []}
+    anim = G.clean_anim(p.get("anim"), p.get("layout") or {})
+    cases = list(geo["panels"])
+    if anim:                                         # cadrage anime : le lecteur recalcule les cases a chaque instant
+        pg = p.get("page") or {}
+        data.update(layout=p["layout"], anim=anim, pagep={
+            "width": geo["size"][0], "height": geo["size"][1], "margin": pg.get("margin"), "gutter": pg.get("gutter"),
+            "strokeWidth": pg.get("strokeWidth"), "stroke": pg.get("stroke") or "#111111",
+            "bg": pg.get("bg") or "#ffffff", "fill": pg.get("fill") or "#ffffff"})
+        known = {g["id"] for g in cases}             # cases refermees dans la page finie : presentes a d'autres instants
+        cases += [{"id": i, "rect": [0, 0, 1, 1], "poly": [[0, 0], [1, 0], [1, 1], [0, 1]]}
+                  for i in G.leaves(p.get("layout") or {}) if i not in known]
     report, encoded = [], []
-    for g in geo["panels"]:
+    for g in cases:
         panel = p["panels"].get(g["id"]) or {}
         plan = presets.plan_panel(panel, p.get("style", ""))
         entry = {"id": g["id"], "rect": [round(v) for v in g["rect"]], "poly": grow(g["poly"], stroke / 2 + 1),
