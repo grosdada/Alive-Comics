@@ -75,5 +75,5 @@ export async function pageImages(project, geom) {
   const base = `projects/${project.id}/page?name=`;
   await upload(base + "page.jpg", await toBlob(cv, "image/jpeg", 0.92));
   await upload(base + "frames.png", await toBlob(fr, "image/png"));
-  await upload(base + "thumb.jpg", await toBlob(th, "image/jpeg", 0.8));
+  return (await upload(base + "thumb.jpg", await toBlob(th, "image/jpeg", 0.8))).rev;      // nouveau numero de la planche
 }

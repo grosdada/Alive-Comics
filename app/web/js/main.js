@@ -471,7 +471,11 @@ class App {
     const P = this.project;
     const before = this.snapshot();
     const order = compute(P.page, P.layout).panels.map(g => g.id);
-    const layout = make(() => ({ t: "leaf", id: "p" + (P.nextId++) }));
+    let layout = make(() => ({ t: "leaf", id: "p" + (P.nextId++) }));
+    const ren = {};                   // les cases gardent leur identifiant (et donc leurs rendus) dans l'ordre de lecture
+    compute(P.page, layout).panels.forEach((g, i) => { if (order[i]) ren[g.id] = order[i]; });
+    const rename = (n) => n.t === "leaf" ? { t: "leaf", id: ren[n.id] || n.id } : { ...n, c: n.c.map(rename) };
+    layout = rename(layout);
     const fresh = compute(P.page, layout).panels.map(g => g.id);
     const panels = {};
     fresh.forEach((id, i) => {        // les images suivent l'ordre de lecture
@@ -642,11 +646,12 @@ class App {
   pushUndo(snap) { this.undo.push(snap); if (this.undo.length > 80) this.undo.shift(); this.redo = []; }
   restore(snap) {
     Object.assign(this.project, JSON.parse(snap));
+    this._last = snap; this._lastKind = null;               // l'etat courant : la prochaine action s'annule jusqu'ici
     if (this.selected && !this.project.panels[this.selected]) this.selected = null;
     this.editor.render(); this.renderLeft(); this.refreshInspector(); this.save(); this.pageSoon();
   }
-  doUndo() { if (this.undo.length) { this.redo.push(this.snapshot()); this.restore(this.undo.pop()); } }
-  doRedo() { if (this.redo.length) { this.undo.push(this.snapshot()); this.restore(this.redo.pop()); } }
+  doUndo() { if (this.undo.length) { this.redo.push(this.snapshot()); this.restore(this.undo.pop()); this._last = this.snapshot(); } else toast("Rien à annuler."); }
+  doRedo() { if (this.redo.length) { this.undo.push(this.snapshot()); this.restore(this.redo.pop()); this._last = this.snapshot(); } }
 
   commit(kind) {
     if (this._last && this._lastKind === kind && Date.now() - this._lastT < 1200) { /* meme geste : une seule etape */ }
@@ -710,7 +715,10 @@ class App {
   async uploadPage(strict) {
     if (!this.project) return;
     const sig = this.pageSig();
-    try { await pageImages(this.project, this.editor.geom); this._pageSig = sig; }
+    try {
+      const rev = await pageImages(this.project, this.editor.geom); this._pageSig = sig;
+      if (rev === this._rev + 1) this._rev = rev;            // notre propre vignette : pas de rechargement de la planche
+    }
     catch (e) { if (strict) throw e; console.warn(e); }
   }
 
@@ -905,8 +913,9 @@ class App {
       if (this._rev == null) { this._rev = r.rev; return; }
       if (r.rev > this._rev && this.snapshot() === this._savedSig && !document.querySelector(".popover, .modal-back, .veil")) {
         this._reloading = true;
-        const keep = this.selected;
+        const keep = this.selected, undo = this.undo, redo = this.redo;
         await this.open(this.project.id);
+        this.undo = undo; this.redo = redo; this._last = this.snapshot();   // le rechargement ne doit pas effacer l'historique
         if (keep && this.project.panels[keep]) this.select(keep);
         this._reloading = false;
       }
@@ -1125,7 +1134,8 @@ class App {
   }
 
   keys(e) {
-    if (!this.project || e.target.closest("input, textarea, select")) return;
+    const t = e.target;     // curseurs et cases a cocher gardent le focus apres usage : Ctrl+Z doit marcher quand meme
+    if (!this.project || t.closest("textarea, select, [contenteditable]") || (t.matches("input") && !/^(range|checkbox|radio|button)$/.test(t.type))) return;
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") { e.preventDefault(); e.shiftKey ? this.doRedo() : this.doUndo(); }
     else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "y") { e.preventDefault(); this.doRedo(); }
     else if (e.key === "Delete" && this.selected) this.deleteSelected();

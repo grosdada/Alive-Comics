@@ -58,9 +58,19 @@ def merge_project(server_p, ui_p):
     """La version de l'interface gagne, sauf ce que le moteur ecrit : rendus, choix, sons generes."""
     out = dict(ui_p)
     out["id"], out["created"] = server_p["id"], server_p.get("created")
+    # corbeille des cases : une case retiree (variante au hasard, suppression...) garde ses rendus, choix et reglages,
+    # pour que « Annuler » les retrouve
+    trash = dict(server_p.get("_trash") or {})
+    for pid, old in (server_p.get("panels") or {}).items():
+        if pid not in (ui_p.get("panels") or {}):
+            trash[pid] = old
     panels = {}
     for pid, panel in (ui_p.get("panels") or {}).items():
-        old = (server_p.get("panels") or {}).get(pid, {})
+        old = (server_p.get("panels") or {}).get(pid)
+        if old is None:
+            cand = trash.get(pid)
+            same = cand and (cand.get("image") or {}).get("file") == (panel.get("image") or {}).get("file")
+            old = trash.pop(pid) if same else {}
         panel = dict(panel)
         panel["renders"] = old.get("renders", [])
         panel["chosen"] = old.get("chosen", {})
@@ -78,6 +88,10 @@ def merge_project(server_p, ui_p):
             panel[layer] = cur
         panels[pid] = panel
     out["panels"] = panels
+    for pid in list(trash):
+        if pid in panels:
+            trash.pop(pid)
+    out["_trash"] = dict(list(trash.items())[-40:])
     # son global : l'import et le moteur l'ecrivent aussi ; « rev » dit qui est le plus recent
     prev, cur = server_p.get("pageSound") or {}, dict(ui_p.get("pageSound") or {})
     if (prev.get("rev") or 0) > (cur.get("rev") or 0):
@@ -471,8 +485,9 @@ class Handler(BaseHTTPRequestHandler):
             if name not in ("page.jpg", "frames.png", "thumb.jpg"):
                 raise ApiError("nom de fichier de page invalide")
             rel = store.write_file(pid, "page", name, self.body())
-            if name == "thumb.jpg":
-                store.mutate(pid, lambda p: p.update(thumb=f"/projects/{pid}/{rel}"))
+            if name == "thumb.jpg":                  # la planche change de numero : l'application le reprend (pas de rechargement)
+                p = store.mutate(pid, lambda p: p.update(thumb=f"/projects/{pid}/{rel}"))
+                return self.send_json({"file": rel, "rev": p.get("rev")})
             return self.send_json({"file": rel})
         if sub == "estimate" and m == "POST":
             return self.send_json(S.estimate(pid, self.jbody().get("panels", [])))
