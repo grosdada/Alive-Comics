@@ -432,7 +432,7 @@ page : { page: "page.jpg", frames: "frames.png", size: [W, H], fps: 24, sound: {
       <tr><td>Ambiance / musique</td><td>fichier ou MiniMax Music 3</td><td>en boucle au survol</td><td>−24 LUFS</td></tr>
       <tr><td>Bruitages</td><td>piste son de la vidéo H3, ou Hunyuan / MMAudio sur fal</td><td>calés sur l'image affichée</td><td>−21 LUFS</td></tr>
       <tr><td>Sons ajoutés</td><td>fichiers</td><td>en boucle ou une fois</td><td>−20 LUFS</td></tr>
-      <tr><td>Musique de la page</td><td>fichier ou MiniMax Music 3</td><td>en continu, baisse à 45 % quand une case parle</td><td>−23 LUFS</td></tr>
+      <tr><td>Musique de la page</td><td>fichier ou MiniMax Music 3</td><td>en continu, volume constant (ne baisse plus quand une case joue)</td><td>−23 LUFS</td></tr>
     </tbody>
   </table></div>
   <p>Les sons sont égalisés à l'export (loudnorm) : les curseurs de volume restent comparables. Un son importé est reconnu à son
@@ -481,7 +481,7 @@ page : { page: "page.jpg", frames: "frames.png", size: [W, H], fps: 24, sound: {
       </ul>
     </div>
   </div>
-  <p>Partout : sons au survol en fondu, musique de page qui baisse, bouton « Activer le son » (règle des navigateurs), noir et
+  <p>Partout : sons au survol en fondu, musique de page à volume constant, bouton « Activer le son » (règle des navigateurs), noir et
     blanc, plein écran, livre (flèches, clavier, balayage, page suivante préchargée), tactile (la dernière case touchée joue).</p>
 </section>
 

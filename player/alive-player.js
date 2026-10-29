@@ -15,7 +15,7 @@
  * play?: "hover" (defaut) | "always" : les cases qui jouent seules ne bougent qu'au survol (demarrage et arret en
  * douceur), ou tout le temps.
  * sound?: {src, vol} = son global de la page : joue en continu (apres le premier geste, regle des
- * navigateurs), baisse de moitie pendant qu'un son de case joue, fondu en sortie de page.
+ * navigateurs), toujours au meme volume (aucune baisse pendant les sons des cases), fondu en sortie de page.
  * Sons au survol : audio = ambiance en boucle ; voice = voix off (reprise du debut a chaque survol, ou
  * boucle) ; foley = bruitages, cales sur l'image affichee quand la case joue toute seule ; more = sons ajoutes.
  * fx (retouches, appliquees en direct, sans re-encoder la video) :
