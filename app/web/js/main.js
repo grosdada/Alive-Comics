@@ -1,6 +1,8 @@
 // Alive-Comics : application (etat, projets, edition, rendus, export, publication, reglages, livres).
 import { api, get, post, put, upload, uploadSound, h, toast, debounce, modal, loadImage, dragByHeader } from "./api.js";
-import { compute, PRESETS, PAGE_DEFAULTS, FORMATS, pageSize, transpose, randomLayout, removeLeaf, splitLeaf, leaves, clone } from "./geometry.js";
+import { compute, PRESETS, PAGE_DEFAULTS, FORMATS, pageSize, transpose, randomLayout, removeLeaf, splitLeaf, leaves, clone,
+         layoutAt, ensureCutIds, animEnd, cutIdsOf, pageAt } from "./geometry.js";
+import { Timeline } from "./timeline.js";
 import { Editor, icon } from "./editor.js";
 import { startImage, pageImages } from "./exporter.js";
 import { openBubbleEditor } from "./bubbles.js";
@@ -16,6 +18,9 @@ class App {
     this.workers = [];
     this.undo = [];
     this.redo = [];
+    this.editMode = pref("ac-edit", "1") === "1";   // mode Edit : les icones des cases ; sinon la planche nette
+    this.animMode = false;          // « Animate framing » : timeline ouverte, les attaches posent des cles
+    this.animT = 0; this.animPlaying = false; this.selectedCut = null;
     this.saveSoon = debounce(() => this.save(), 700);
     this.pageSoon = debounce(() => this.uploadPage(), 2500);
     this.commitSoon = debounce((k) => this.commit(k), 350);
@@ -393,14 +398,22 @@ class App {
     if (P.page.format === "paysage") Object.assign(P.page, { format: "ecran", orientation: "paysage" });
     P.nextId = P.nextId || (Math.max(0, ...leaves(P.layout).map(id => +id.slice(1) || 0)) + 1);
     for (const id of leaves(P.layout)) P.panels[id] = Object.assign(NEW_PANEL(), P.panels[id] || {});
+    ensureCutIds(P.layout);                              // chaque trait a un identifiant (pistes d'animation)
+    P.anim = P.anim && P.anim.tracks ? P.anim : { tracks: {} };
+    const keepAnim = this.animMode && this._reloading;
+    this._tlKeep = keepAnim ? this.timeline?.state() : null;   // selection et copie de la timeline
     this.selected = null; this.undo = []; this.redo = [];
+    this.animPlaying = false;
+    if (!keepAnim) { this.animMode = false; this.animT = 0; this.selectedCut = null; }
+    this.timeline = null;
     this.root.textContent = "";
     this.root.append(this.topbar(false));
     this.left = h("aside.left");
     this.center = h("section.center");
     this.right = h("aside.right");
     this.drawer = h("div.drawer");
-    this.root.append(h("div.work", this.left, this.center, this.right), this.drawer);
+    this.tlHost = h("div.tlhost", { hidden: true });
+    this.root.append(h("div.work", this.left, this.center, this.right), this.tlHost, this.drawer);
     this.editor = new Editor(this.center, this);
     this.director = h("div.director");
     this.root.append(this.director);
@@ -410,6 +423,7 @@ class App {
     this.refreshInspector();
     this.renderDrawer();
     this.pollJobs();
+    if (keepAnim) this.setAnimMode(true);
     this.save(true);
   }
 
@@ -424,6 +438,14 @@ class App {
       bar.append(name,
         h("button.icon", { title: "Annuler (Ctrl+Z)", on: { click: () => this.doUndo() } }, "↶"),
         h("button.icon", { title: "Rétablir (Ctrl+Y)", on: { click: () => this.doRedo() } }, "↷"));
+      // deux modes : Edit (icones des cases) et Animate framing (timeline) ; aucun des deux : la planche nette
+      this.editBtn = h("button.animbtn" + (this.editMode && !this.animMode ? ".on" : ""), {
+        title: "Mode Edit : les icônes de chaque case (média, caméra, sons, bulles) et leurs étiquettes",
+        on: { click: () => this.setEditMode(!(this.editMode && !this.animMode)) } }, "✏️ Edit");
+      this.animBtn = h("button.animbtn" + (this.animMode ? ".on" : ""), {
+        title: "Animer le cadrage : une timeline s'ouvre, chaque attache des traits a sa ligne ; glisser une attache pose une clé",
+        on: { click: () => this.setAnimMode(!this.animMode) } }, "🎞 Animate framing");
+      bar.append(h("span.modes", this.editBtn, this.animBtn));
     }
     this.workerChips = h("div.workers");
     bar.append(h("span.sp"), this.workerChips);
@@ -482,7 +504,7 @@ class App {
       const old = order[i] ? P.panels[order[i]] : null;
       panels[id] = old ? Object.assign({}, old, { startSig: null }) : NEW_PANEL();
     });
-    P.layout = layout; P.panels = panels;
+    P.layout = ensureCutIds(layout); P.panels = panels; P.anim = { tracks: {} };
     this.selected = null;
     this.pushUndo(before);
     this.editor.render(); this.renderLeft(); this.refreshInspector();
@@ -641,20 +663,23 @@ class App {
   // ---------------------------------------------------------------- historique et enregistrement
   snapshot() {
     const P = this.project;
-    return JSON.stringify({ page: P.page, layout: P.layout, panels: P.panels, style: P.style, nextId: P.nextId });
+    return JSON.stringify({ page: P.page, layout: P.layout, anim: P.anim, panels: P.panels, style: P.style, nextId: P.nextId });
   }
   pushUndo(snap) { this.undo.push(snap); if (this.undo.length > 80) this.undo.shift(); this.redo = []; }
   restore(snap) {
+    const keep = this.timeline?.state();                    // cles et lignes choisies, retrouvees par leur instant
     Object.assign(this.project, JSON.parse(snap));
     this._last = snap; this._lastKind = null;               // l'etat courant : la prochaine action s'annule jusqu'ici
+    if (keep) this.timeline.remap(keep);
+    this.timeline?.render();
     if (this.selected && !this.project.panels[this.selected]) this.selected = null;
     this.editor.render(); this.renderLeft(); this.refreshInspector(); this.save(); this.pageSoon();
   }
   doUndo() { if (this.undo.length) { this.redo.push(this.snapshot()); this.restore(this.undo.pop()); this._last = this.snapshot(); } else toast("Rien à annuler."); }
   doRedo() { if (this.redo.length) { this.undo.push(this.snapshot()); this.restore(this.redo.pop()); this._last = this.snapshot(); } }
 
-  commit(kind) {
-    if (this._last && this._lastKind === kind && Date.now() - this._lastT < 1200) { /* meme geste : une seule etape */ }
+  commit(kind, step) {                                      // step : une action de la timeline = une etape, jamais fusionnee
+    if (!step && this._last && this._lastKind === kind && Date.now() - this._lastT < 1200) { /* meme geste : une seule etape */ }
     else if (this._last) this.pushUndo(this._last);
     this._last = this.snapshot(); this._lastKind = kind; this._lastT = Date.now();
     this.editor?.renderOverlay();
@@ -662,8 +687,14 @@ class App {
     if (kind !== "panel") this.pageSoon();
   }
 
+  // la page finie : le decoupage a la fin de l'animation du cadrage (le decoupage tout court s'il n'y en a pas)
+  finalGeom() {
+    const P = this.project, t = animEnd(P.anim);
+    return compute(pageAt(P.page, P.anim, t), layoutAt(P.layout, P.anim, t));
+  }
+
   geometryForSave() {
-    const g = compute(this.project.page, this.project.layout);
+    const g = this.finalGeom();
     return { size: [this.project.page.width, this.project.page.height],
              panels: g.panels.map(p => ({ id: p.id, order: p.order, rect: [p.bbox.x0, p.bbox.y0, p.bbox.x1, p.bbox.y1].map(v => Math.round(v * 10) / 10),
                                           poly: p.poly.map(([x, y]) => [Math.round(x * 10) / 10, Math.round(y * 10) / 10]) })) };
@@ -671,6 +702,7 @@ class App {
 
   async save(first) {
     if (!this.project) return;
+    this.cleanAnim();
     this.project.geometry = this.geometryForSave();
     if (!this._last) this._last = this.snapshot();
     const sig = this.snapshot();
@@ -716,7 +748,7 @@ class App {
     if (!this.project) return;
     const sig = this.pageSig();
     try {
-      const rev = await pageImages(this.project, this.editor.geom); this._pageSig = sig;
+      const rev = await pageImages(this.project, this.finalGeom(), pageAt(this.project.page, this.project.anim, animEnd(this.project.anim))); this._pageSig = sig;
       if (rev === this._rev + 1) this._rev = rev;            // notre propre vignette : pas de rechargement de la planche
     }
     catch (e) { if (strict) throw e; console.warn(e); }
@@ -1134,14 +1166,189 @@ class App {
   }
 
   keys(e) {
-    const t = e.target;     // curseurs et cases a cocher gardent le focus apres usage : Ctrl+Z doit marcher quand meme
-    if (!this.project || t.closest("textarea, select, [contenteditable]") || (t.matches("input") && !/^(range|checkbox|radio|button)$/.test(t.type))) return;
+    const tgt = e.target instanceof Element ? e.target : document.body;
+    const field = tgt.closest("input, textarea, select");
+    const typing = field && (field.tagName === "TEXTAREA" || (field.tagName === "INPUT" && !/^(range|color|checkbox|radio|button)$/.test(field.type)));
+    if (!this.project || tgt.closest("[contenteditable]") || typing) return;      // saisie de texte : son propre Ctrl+Z
+    if (field) {                                             // curseur, couleur, menu : seulement annuler / refaire
+      const k = e.key.toLowerCase();
+      if (!(e.ctrlKey || e.metaKey) || (k !== "z" && k !== "y")) return;
+      field.blur();
+    }
+    if (document.querySelector(".modal-back")) return;      // une fenetre est ouverte (editeur de bulles : sa propre touche Suppr)
+    if (this.animMode && e.code === "Space") { e.preventDefault(); this.animToggle(); return; }
+    const tl = this.animMode && this.timeline, mod = e.ctrlKey || e.metaKey, kk = e.key.toLowerCase();
+    if (tl) {                                       // cles de la timeline : effacer, dupliquer, copier / coller, tout
+      const any = tl.selList().length > 0;
+      if ((e.key === "Delete" || e.key === "Backspace") && any) { e.preventDefault(); tl.deleteKey(); return; }
+      if (mod && kk === "d" && any) { e.preventDefault(); tl.duplicate("head"); return; }
+      if (mod && kk === "c" && any && !String(getSelection?.() || "")) { e.preventDefault(); tl.copy(); return; }
+      if (mod && kk === "v" && tl.clip) { e.preventDefault(); tl.paste(); return; }
+      if (mod && kk === "a") { e.preventDefault(); tl.selectAll(); return; }
+      if (e.key === "Escape" && (any || tl.menu)) { tl.closeMenu(); tl.selSet = new Set(); tl.paintSel(); return; }
+    }
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") { e.preventDefault(); e.shiftKey ? this.doRedo() : this.doUndo(); }
     else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "y") { e.preventDefault(); this.doRedo(); }
     else if (e.key === "Delete" && this.selected) this.deleteSelected();
     else if (e.key === "Escape") { document.querySelectorAll(".popover").forEach(p => p.remove()); this.select(null); }
   }
 }
+
+// ================================================================ Animate framing (cadrage anime)
+Object.assign(App.prototype, {
+  // le decoupage montre dans l'editeur : a la tete de lecture en mode animation, sinon la page finie
+  viewLayout() {
+    const P = this.project;
+    return layoutAt(P.layout, P.anim, this.animMode ? this.animT : animEnd(P.anim));
+  },
+
+  // la page montree : son style (fond, cases, traits, gouttiere, marge) au meme instant
+  viewPage() {
+    const P = this.project;
+    return pageAt(P.page, P.anim, this.animMode ? this.animT : animEnd(P.anim));
+  },
+
+  // icones des cases : seulement en mode Edit (jamais pendant l'animation du cadrage)
+  showTools() { return this.editMode && !this.animMode; },
+
+  setEditMode(on) {
+    if (on && this.animMode) this.setAnimMode(false);
+    this.editMode = !!on;
+    setPref("ac-edit", this.editMode ? "1" : "0");
+    this.paintModes();
+    this.editor.render();
+  },
+
+  paintModes() {
+    this.editBtn?.classList.toggle("on", this.editMode && !this.animMode);
+    this.animBtn?.classList.toggle("on", this.animMode);
+  },
+
+  fps() { return 24; },
+
+  // duree de la timeline : au moins 4 s, et la fin de l'animation + 1 s
+  timelineLength() { return Math.max(4, animEnd(this.project.anim) + 1); },
+
+  // les cles tombent sur les images (24 par seconde)
+  snap(t) { const fps = this.fps(); return Math.round(t * fps) / fps; },
+
+  setAnimMode(on) {
+    this.animMode = !!on;
+    this.animPlaying = false;
+    if (on) {
+      if (!this.timeline) this.timeline = new Timeline(this, this.tlHost);
+      this.tlHost.hidden = false;
+    } else {
+      this.timeline?.destroy();
+      this.timeline = null;
+      this.tlHost.hidden = true;
+      this.selectedCut = null;
+    }
+    document.body.classList.toggle("anim-on", this.animMode);
+    this.paintModes();
+    this.editor.render();
+  },
+
+  animSeek(t, live) {
+    this.animT = Math.max(0, Math.min(this.timelineLength(), t));
+    this.editor.render(live);
+    this.timeline?.update();
+  },
+
+  animToggle() {
+    this.animPlaying = !this.animPlaying;
+    this.editor.wrap.classList.toggle("playing", this.animPlaying);
+    if (!this.animPlaying) { this.editor.render(); this.timeline?.update(); return; }
+    let last = performance.now();
+    const step = (now) => {
+      if (!this.animPlaying || !this.animMode || !this.project) {
+        this.animPlaying = false;
+        this.editor?.wrap.classList.remove("playing");
+        if (this.project) { this.editor.render(); this.timeline?.update(); }
+        return;
+      }
+      this.animT = (this.animT + (now - last) / 1000) % this.timelineLength();
+      last = now;
+      this.editor.render(true);
+      this.timeline?.update();
+      requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+  },
+
+  // une attache touchee dans la planche : la timeline se met sur sa ligne
+  touchCut(id, mode) {
+    this.selectedCut = id;
+    if (this.timeline) this.timeline.selectCut(id, mode);
+  },
+
+  cutAnimated(id) {
+    const T = (this.project.anim && this.project.anim.tracks) || {};
+    return !!((T[id + ".a"] || []).length || (T[id + ".b"] || []).length);
+  },
+
+  // pose (ou met a jour) une cle ; une cle par image
+  setKey(track, t, v) {
+    const T = this.project.anim.tracks, keys = T[track] = T[track] || [];
+    const k = keys.find(x => Math.abs(x.t - t) < 0.5 / this.fps());
+    if (k) k.v = v;
+    else { keys.push({ t, v, e: "ease" }); keys.sort((a, b) => a.t - b.t); }
+  },
+
+  // glisser une attache en mode animation : cle(s) a la tete de lecture ; la premiere cle d'une piste en ajoute une
+  // a 0 s avec la position de depart (le trait part de la ou il etait)
+  keyCut(d, a, b) {
+    const P = this.project;
+    P.anim.tracks = JSON.parse(JSON.stringify(d.keys0));
+    const t = this.snap(this.animT);
+    const ends = d.mode === "move" ? ["a", "b"] : d.mode === "end0" ? ["a"] : ["b"];
+    for (const end of ends) {
+      const track = `${d.id}.${end}`, start = end === "a" ? d.a : d.b;
+      if (!(P.anim.tracks[track] || []).length && t > 1e-6) this.setKey(track, 0, start);
+      this.setKey(track, t, end === "a" ? a : b);
+    }
+  },
+
+  // glisser un trait anime hors du mode animation : toute son animation se decale d'autant
+  shiftCut(d, a, b) {
+    const P = this.project;
+    P.anim.tracks = JSON.parse(JSON.stringify(d.keys0));
+    const node = this.nodeOfCut(d.id);
+    const ends = d.mode === "move" ? ["a", "b"] : d.mode === "end0" ? ["a"] : ["b"];
+    for (const end of ends) {
+      const delta = end === "a" ? a - d.a : b - d.b, keys = P.anim.tracks[`${d.id}.${end}`];
+      if (keys && keys.length) for (const k of keys) k.v = Math.max(0, Math.min(1, k.v + delta));
+      else if (node) node[end] = Math.max(0.04, Math.min(0.96, node[end] + delta));
+    }
+  },
+
+  nodeOfCut(id) {
+    let found = null;
+    (function walk(x) { if (!x || x.t !== "split" || found) return; if (x.id === id) found = x; walk(x.c[0]); walk(x.c[1]); })(this.project.layout);
+    return found;
+  },
+
+  // pistes des traits disparus (case supprimee, nouveau decoupage) retirees
+  cleanAnim() {
+    const P = this.project;
+    if (!P.anim || !P.anim.tracks) { P.anim = { tracks: {} }; return; }
+    const ids = new Set(cutIdsOf(P.layout));
+    ids.add("page");                                       // style de page anime
+    for (const k of Object.keys(P.anim.tracks)) {
+      if (!ids.has(k.split(".")[0]) || !(P.anim.tracks[k] || []).length) delete P.anim.tracks[k];
+    }
+  },
+
+  animChanged() {
+    this.cleanAnim();
+    this.timeline?.render();
+    this.editor.render();
+    if (!this.selected) this.refreshInspector();          // reglages de page : badges « animé »
+    this.commit("anim", true);
+  },
+
+  toast(msg, kind, ms) { toast(msg, kind, ms); },
+});
 
 function section(title, ico, body) {
   return h("section.insp", h("h4", ico ? icon(ico) : null, " ", title), body);

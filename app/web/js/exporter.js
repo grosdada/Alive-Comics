@@ -47,15 +47,15 @@ function polyPath(ctx, poly) {
 }
 
 // page.jpg (fond, images, traits), frames.png (traits seuls), thumb.jpg
-export async function pageImages(project, geom) {
-  const pg = project.page;
+export async function pageImages(project, geom, page) {
+  const pg = page || project.page;                     // page animee : son style a la fin de l'animation
   const cv = Object.assign(document.createElement("canvas"), { width: pg.width, height: pg.height });
   const ctx = cv.getContext("2d");
   ctx.fillStyle = pg.bg; ctx.fillRect(0, 0, pg.width, pg.height);
   for (const g of geom.panels) {
     const panel = project.panels[g.id];
     ctx.save(); polyPath(ctx, g.poly); ctx.clip();
-    ctx.fillStyle = "#ffffff"; ctx.fill();
+    ctx.fillStyle = pg.fill || "#ffffff"; ctx.fill();                  // couleur des cases
     if (panel?.image) {
       const im = await img(panel.image.url);
       const pl = placement(g.bbox, im.naturalWidth, im.naturalHeight, panel.view);
@@ -67,9 +67,9 @@ export async function pageImages(project, geom) {
     c.lineJoin = "miter"; c.strokeStyle = pg.stroke; c.lineWidth = pg.strokeWidth;
     for (const g of geom.panels) { polyPath(c, g.poly); c.stroke(); }
   };
-  strokes(ctx);
+  if (pg.strokeWidth > 0) strokes(ctx);
   const fr = Object.assign(document.createElement("canvas"), { width: pg.width, height: pg.height });
-  strokes(fr.getContext("2d"));
+  if (pg.strokeWidth > 0) strokes(fr.getContext("2d"));
   const th = Object.assign(document.createElement("canvas"), { width: 360, height: Math.round(360 * pg.height / pg.width) });
   th.getContext("2d").drawImage(cv, 0, 0, th.width, th.height);
   const base = `projects/${project.id}/page?name=`;

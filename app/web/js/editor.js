@@ -61,11 +61,11 @@ export class Editor {
   }
 
   // ---------------------------------------------------------------- dessin
-  render() {
+  render(light) {                  // light : sans les barres d'outils des cases (lecture de l'animation)
     const P = this.project;
     if (!P) return;
-    const pg = P.page;
-    this.geom = compute(pg, P.layout);
+    const pg = this.app.viewPage();                          // style de page anime compris
+    this.geom = compute(pg, this.app.viewLayout());          // cadrage anime : la page a l'instant affiche
     this.wrap.style.aspectRatio = `${pg.width} / ${pg.height}`;
     this.wrap.style.setProperty("--ratio", pg.width / pg.height);
     const svg = this.svg;
@@ -80,7 +80,7 @@ export class Editor {
       cp.append(s("polygon", { points: pts(g.poly) }));
       defs.append(cp);
       const grp = s("g", { "clip-path": `url(#cp-${g.id})` });
-      grp.append(s("polygon", { points: pts(g.poly), fill: panel.image ? "#fff" : "var(--empty)" }));
+      grp.append(s("polygon", { points: pts(g.poly), fill: panel.image ? (pg.fill || "#fff") : "var(--empty)" }));
       if (panel.image) {
         // on garde les elements <image> d'un rendu a l'autre : pas de clignotement pendant les glisser
         const pl = placement(g.bbox, panel.image.w, panel.image.h, panel.view);
@@ -105,25 +105,30 @@ export class Editor {
     }
     // poignees des decoupes : le trait entier deplace, les bouts inclinent
     const k = pg.width / 900;
+    const tracks = (P.anim && P.anim.tracks) || {}, animOn = this.app.animMode;
     this.geom.cuts.forEach((c, i) => {
       if (!c.seg) return;
       const [E0, E1] = c.seg;
-      const gl = s("g", { class: "cut", "data-cut": i });
+      const id = c.node.id, keyed = (end) => (tracks[`${id}.${end}`] || []).length > 0;
+      const cls = "cut" + (animOn ? " anim" : "") + (id && id === this.app.selectedCut ? " sel" : "");
+      const gl = s("g", { class: cls, "data-cut": i });
       gl.append(s("line", { x1: E0[0], y1: E0[1], x2: E1[0], y2: E1[1], class: "cut-hit",
                             "stroke-width": Math.max(pg.gutter + 8, 20 * k), "data-cut": i, "data-mode": "move" }));
       gl.append(s("line", { x1: E0[0], y1: E0[1], x2: E1[0], y2: E1[1], class: "cut-line", "stroke-width": 3 * k }));
       const mid = [(E0[0] + E1[0]) / 2, (E0[1] + E1[1]) / 2];
       gl.append(s("circle", { cx: mid[0], cy: mid[1], r: 9 * k, class: "cut-mid", "data-cut": i, "data-mode": "move" }));
-      gl.append(s("circle", { cx: E0[0], cy: E0[1], r: 8 * k, class: "cut-end", "data-cut": i, "data-mode": "end0" }));
-      gl.append(s("circle", { cx: E1[0], cy: E1[1], r: 8 * k, class: "cut-end", "data-cut": i, "data-mode": "end1" }));
+      // attache animee (elle a des cles) : en accent
+      gl.append(s("circle", { cx: E0[0], cy: E0[1], r: 8 * k, class: "cut-end" + (keyed("a") ? " keyed" : ""), "data-cut": i, "data-mode": "end0" }));
+      gl.append(s("circle", { cx: E1[0], cy: E1[1], r: 8 * k, class: "cut-end" + (keyed("b") ? " keyed" : ""), "data-cut": i, "data-mode": "end1" }));
       svg.append(gl);
     });
-    this.renderOverlay();
+    if (!light) this.renderOverlay();
   }
 
   renderOverlay() {
     const P = this.project, pg = P.page;
     this.overlay.textContent = "";
+    if (!this.app.showTools()) return;                     // icones des cases : seulement en mode Edit
     for (const g of this.geom.panels) {
       const panel = P.panels[g.id] || {};
       const st = this.app.panelStatus(g.id);
@@ -163,7 +168,9 @@ export class Editor {
     if (t.dataset && t.dataset.cut != null) {
       const cut = this.geom.cuts[+t.dataset.cut];
       this.drag = { kind: "cut", mode: t.dataset.mode, path: cut.path, bb: cut.bb, seg: cut.seg, start: pt,
-                    a: cut.node.a, b: cut.node.b, before: JSON.stringify(this.project.layout) };
+                    id: cut.node.id, a: cut.node.a, b: cut.node.b, before: JSON.stringify(this.project.layout),
+                    keys0: JSON.parse(JSON.stringify((this.project.anim && this.project.anim.tracks) || {})) };
+      this.app.touchCut(cut.node.id, t.dataset.mode);   // la timeline se met sur la ligne de cette attache
       e.preventDefault();
       return;
     }
@@ -208,6 +215,19 @@ export class Editor {
       b = (along(pt) - d.a * (1 - t)) / t;
     }
     if (e.shiftKey && d.mode !== "move") { if (d.mode === "end0") a = b; else b = a; }   // Maj : trait droit
+    if (this.app.animMode) {                       // Animate framing : une cle a l'instant de la tete de lecture
+      a = Math.max(0, Math.min(1, a)); b = Math.max(0, Math.min(1, b));   // une case peut se refermer entierement
+      this.app.keyCut(d, a, b);
+      d.moved = d.anim = true;
+      this.render();
+      return;
+    }
+    if (this.app.cutAnimated(d.id)) {              // trait anime, hors du mode : toute son animation se decale
+      this.app.shiftCut(d, Math.max(0, Math.min(1, a)), Math.max(0, Math.min(1, b)));
+      d.moved = d.anim = true;
+      this.render();
+      return;
+    }
     a = Math.max(0.04, Math.min(0.96, a)); b = Math.max(0.04, Math.min(0.96, b));
     const keep = [node.a, node.b];
     node.a = a; node.b = b;
@@ -224,6 +244,7 @@ export class Editor {
     const d = this.drag;
     this.drag = null;
     if (!d || !d.moved) return;
+    if (d.anim) { this.app.animChanged(); return; }
     this.app.commit(d.kind === "pan" ? "image" : "layout");
   }
 

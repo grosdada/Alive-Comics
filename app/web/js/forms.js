@@ -379,17 +379,20 @@ export function pageForm(app) {
     field("Format", select(FORMATS, pg.format, (v) => { pg.format = v; resize(); })),
     field("Sens", h("div.seg", [["portrait", "Vertical"], ["paysage", "Horizontal"]].map(([k, l]) =>
       h("button" + ((pg.orientation || "portrait") === k ? ".on" : ""), { on: { click: () => { pg.orientation = k; resize(); app.refreshInspector(); } } }, l))))));
+  // un reglage anime (module « Style de page » de la timeline) se regle dans la timeline
+  const animated = (k) => ((P.anim && P.anim.tracks && P.anim.tracks["page." + k]) || []).length > 0;
+  const badge = (k) => animated(k) ? h("small.animated", { title: "Animé : se règle dans la timeline (Animate framing › Style de page)" }, " 🎞 animé") : null;
   const color = (k, label) => {
-    const el = h("input", { type: "color", value: pg[k] });
+    const el = h("input", { type: "color", value: pg[k] || (k === "stroke" ? "#111111" : "#ffffff"), disabled: animated(k) });
     el.addEventListener("input", () => { pg[k] = el.value; app.editor.render(); app.commitSoon("page"); });
-    return field(label, el);
+    return h("label.field", h("span.lab", label, badge(k)), el);
   };
-  box.append(h("div.row", color("bg", "Fond (autour des cases)"), color("stroke", "Traits")));
+  box.append(h("div.row", color("bg", "Fond (autour des cases)"), color("fill", "Cases"), color("stroke", "Traits")));
   const num = (k, label, min, max) => {
-    const el = h("input", { type: "range", min, max, value: pg[k] });
+    const el = h("input", { type: "range", min, max, value: pg[k], disabled: animated(k) });
     const out = h("output", String(pg[k]));
     el.addEventListener("input", () => { pg[k] = +el.value; out.textContent = el.value; app.editor.render(); app.commitSoon("page"); });
-    return field(label, h("div.range", el, out));
+    return h("label.field", h("span.lab", label, badge(k)), h("div.range", el, out));
   };
   box.append(num("strokeWidth", "Épaisseur des traits", 0, 16), num("gutter", "Gouttière", 0, 80), num("margin", "Marge", 0, 200));
   box.append(field("Ambiance commune (anglais, ajoutée aux plans animés)",
