@@ -58,6 +58,108 @@
     return e;
   }
   const mod = (a, n) => ((a % n) + n) % n;
+
+  // ---------------------------------------------------------------- cadrage anime (« Animate framing »)
+  // Le decoupage de la page bouge avec le temps : chaque bout de trait a sa piste d'images cles. MEMES calculs que
+  // app/web/js/geometry.js (editeur) et app/geometry.py (serveur) : ne modifier aucun des trois sans les deux autres.
+  const hexRgb = (s) => { s = String(s || "#ffffff").replace("#", ""); return [0, 2, 4].map(i => (parseInt(s.slice(i, i + 2), 16) || 0) / 255); };
+  const rgbHex = (c) => "#" + c.map(x => Math.round(Math.max(0, Math.min(1, x)) * 255).toString(16).padStart(2, "0")).join("");
+  function ease(e, u) {
+    if (e === "linear") return u;
+    if (e === "in") return u ** 3;
+    if (e === "out") return 1 - (1 - u) ** 3;
+    if (e === "in2") return u ** 5;
+    if (e === "out2") return 1 - (1 - u) ** 5;
+    if (e === "ease2") return u < 0.5 ? 16 * u ** 5 : 1 - (-2 * u + 2) ** 5 / 2;
+    if (e === "hold") return 0;
+    return u < 0.5 ? 4 * u ** 3 : 1 - (-2 * u + 2) ** 3 / 2;
+  }
+  function trackValue(keys, t, fb) {
+    if (!keys || !keys.length) return fb;
+    if (t <= keys[0].t) return keys[0].v;
+    for (let i = 0; i < keys.length - 1; i++) {
+      const k0 = keys[i], k1 = keys[i + 1];
+      if (t < k1.t) return k0.v + (k1.v - k0.v) * ease(k0.e, (t - k0.t) / Math.max(1e-9, k1.t - k0.t));
+    }
+    return keys[keys.length - 1].v;
+  }
+  const hasAnim = (a) => !!a && Object.values(a.tracks || {}).some(k => k && k.length);
+  function animEnd(anim) {
+    let e = 0;
+    for (const k of Object.values((anim && anim.tracks) || {})) for (const x of k || []) e = Math.max(e, x.t);
+    return e;
+  }
+  function colorValue(keys, t, fb) {
+    if (!keys || !keys.length) return hexRgb(fb);
+    if (t <= keys[0].t) return hexRgb(keys[0].v);
+    for (let i = 0; i < keys.length - 1; i++) {
+      const k0 = keys[i], k1 = keys[i + 1];
+      if (t < k1.t) {
+        const e = ease(k0.e, (t - k0.t) / Math.max(1e-9, k1.t - k0.t)), a = hexRgb(k0.v), b = hexRgb(k1.v);
+        return a.map((x, j) => x + (b[j] - x) * e);
+      }
+    }
+    return hexRgb(keys[keys.length - 1].v);
+  }
+  function pageAt(pg, anim, t) {
+    const T = (anim && anim.tracks) || {}, out = Object.assign({}, pg);
+    for (const k of ["bg", "fill", "stroke"]) out[k] = rgbHex(colorValue(T["page." + k], t, pg[k] || (k === "stroke" ? "#111111" : "#ffffff")));
+    for (const k of ["strokeWidth", "gutter", "margin"]) out[k] = trackValue(T["page." + k], t, pg[k]);
+    return out;
+  }
+  function layoutAt(layout, anim, t) {
+    if (!hasAnim(anim)) return layout;
+    const T = anim.tracks;
+    const walk = (n) => n.t === "leaf" ? n : Object.assign({}, n, {
+      a: trackValue(T[n.id + ".a"], t, n.a), b: trackValue(T[n.id + ".b"], t, n.b), c: [walk(n.c[0]), walk(n.c[1])] });
+    return walk(layout);
+  }
+  function gbbox(poly) {
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const [x, y] of poly) { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); }
+    return { x0, y0, x1, y1, w: x1 - x0, h: y1 - y0 };
+  }
+  function clipHalf(poly, f) {
+    const out = [];
+    for (let i = 0; i < poly.length; i++) {
+      const P = poly[i], Q = poly[(i + 1) % poly.length], fp = f(P), fq = f(Q);
+      if (fp <= 0) out.push(P);
+      if ((fp < 0 && fq > 0) || (fp > 0 && fq < 0)) { const t = fp / (fp - fq); out.push([P[0] + (Q[0] - P[0]) * t, P[1] + (Q[1] - P[1]) * t]); }
+    }
+    return out;
+  }
+  // cases de la page : { id: polygone } (les cases refermees n'y sont pas)
+  function computeLayout(pg, layout) {
+    const m = +pg.margin, W = +pg.width, H = +pg.height, g = +pg.gutter, out = {};
+    (function walk(node, poly) {
+      if (!node) return;
+      if (node.t === "leaf") { if (poly.length >= 3) out[node.id] = poly; return; }
+      if (poly.length < 3) { walk(node.c[0], []); walk(node.c[1], []); return; }
+      const bb = gbbox(poly);
+      let P, Q;
+      if (node.dir === "h") { P = [bb.x0, bb.y0 + node.a * bb.h]; Q = [bb.x1, bb.y0 + node.b * bb.h]; }
+      else { P = [bb.x0 + node.a * bb.w, bb.y0]; Q = [bb.x0 + node.b * bb.w, bb.y1]; }
+      const dx = Q[0] - P[0], dy = Q[1] - P[1], L = Math.hypot(dx, dy) || 1;
+      let n = [-dy / L, dx / L];
+      if (node.dir === "h" && n[1] < 0) n = [-n[0], -n[1]];
+      if (node.dir === "v" && n[0] < 0) n = [-n[0], -n[1]];
+      const f = (X) => n[0] * (X[0] - P[0]) + n[1] * (X[1] - P[1]);
+      const A = clipHalf(poly, (X) => f(X) + g / 2), B = clipHalf(poly, (X) => -f(X) + g / 2);
+      walk(node.c[0], A.length >= 3 ? A : []);
+      walk(node.c[1], B.length >= 3 ? B : []);
+    })(layout, [[m, m], [W - m, m], [W - m, H - m], [m, H - m]]);
+    return out;
+  }
+  // polygone elargi depuis son centre (la video passe sous le trait), arrondi au dixieme comme app/geometry.py grow
+  function grow(poly, px) {
+    let cx = 0, cy = 0;
+    for (const [x, y] of poly) { cx += x; cy += y; }
+    cx /= poly.length; cy /= poly.length;
+    return poly.map(([x, y]) => {
+      const dx = x - cx, dy = y - cy, d = Math.hypot(dx, dy) || 1;
+      return [Math.round((x + dx / d * px) * 10) / 10, Math.round((y + dy / d * px) * 10) / 10];
+    });
+  }
   const withStamp = (url, stamp) => stamp ? url + (url.includes("?") ? "&" : "?") + "v=" + stamp : url;
 
   // ---------------------------------------------------------------- une page
@@ -1156,7 +1258,7 @@
   function resetAll() { for (const inst of pages) resetPage(inst); }
   function hasAudio(M) { return !!M.sound || M.panels.some(p => p.audio || p.voice || p.foley || (p.more || []).length); }
 
-  window.AlivePlayer = { isUnlocked: () => unlocked, mount, setBW, setSound, resetAll, hasAudio, isLightboxOpen: () => !!lb.st,
+  window.AlivePlayer = { _calc: { ease, trackValue, pageAt, layoutAt, computeLayout, animEnd, grow }, isUnlocked: () => unlocked, mount, setBW, setSound, resetAll, hasAudio, isLightboxOpen: () => !!lb.st,
                          setEditHook, addView, removeView, setFx, updatePanel, setLayerVolume, setGlobalVolume, seekTo,
                          setPinned, setPanelSound, setPageSound, frameOf: idxOf, _pages: pages,
                          addReliefView, setRelief, reliefShowMap, reliefLayers, reliefPlay, reliefDepthAt, updateRelief,
