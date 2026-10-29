@@ -4,6 +4,10 @@
 .ac-page.bw { filter: grayscale(1) contrast(1.12); }
 .ac-page > img { display: block; width: 100%; height: 100%; pointer-events: none; }
 .ac-page > img.ac-frames { position: absolute; inset: 0; z-index: 5; }       /* traits des cadres au-dessus des videos */
+/* cadrage anime : page.jpg et frames.png sont figes, la page est redessinee par deux calques SVG */
+.ac-page.ac-anim > img.ac-bg, .ac-page.ac-anim > img.ac-frames { visibility: hidden; }
+.ac-page > svg.ac-fbg, .ac-page > svg.ac-fst { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.ac-page > svg.ac-fst { z-index: 5; }
 .ac-panel { position: absolute; overflow: hidden; cursor: ew-resize; touch-action: pan-y; }
 .ac-panel.static { cursor: default; }
 .ac-panel video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0;

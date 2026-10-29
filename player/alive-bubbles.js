@@ -38,8 +38,8 @@
 .ac-bub.on { opacity: 1; visibility: visible; transition: opacity .12s, visibility 0s; }
 .ac-bin { position: relative; }
 .ac-bin svg { position: absolute; left: 50%; top: 50%; width: 1px; height: 1px; overflow: visible; pointer-events: none; }
-.ac-btxt { position: relative; font-family: var(--bf); font-weight: var(--bw8, 700); text-transform: var(--bt, none); text-align: center; white-space: pre-wrap; overflow-wrap: normal; word-break: normal; hyphens: none; max-width: calc(var(--mw, 34) * 1cqw);
-  min-width: min-content; padding: .55em .8em; width: max-content; font-size: calc(var(--fs, 5.6) * 1cqw); }
+.ac-btxt { position: relative; font-family: var(--bf); font-weight: var(--bw8, 700); text-transform: var(--bt, none); text-align: center; white-space: pre-wrap; overflow-wrap: normal; word-break: normal; hyphens: none; max-width: calc(var(--mw, 34) * var(--cq, 1cqw));
+  min-width: min-content; padding: .55em .8em; width: max-content; font-size: calc(var(--fs, 5.6) * var(--cq, 1cqw)); }
 .ac-btxt .h { visibility: hidden; }
 .ac-bub.ed { pointer-events: auto; cursor: grab; }
 .ac-bub.ed.sel .ac-btxt { outline: 2px dashed rgba(179, 107, 255, .9); outline-offset: 4px; border-radius: 6px; }
@@ -308,6 +308,13 @@
 
     const ro = new ResizeObserver(() => layout());
     ro.observe(root);
+    // case qui bouge (cadrage anime) : le calque suit la case ; le texte garde sa taille (unite fixee par --cq, en px)
+    ctl.place = (rect, unitPx) => {
+      const [l, t, w, h] = rect;
+      Object.assign(root.style, { inset: "auto", left: l + "%", top: t + "%", width: w + "%", height: h + "%" });
+      if (unitPx) root.style.setProperty("--cq", unitPx + "px");
+      layout();
+    };
     ctl.layout = layout; ctl.update = update; ctl.replay = replay;
     ctl.setList = (l) => { list = l; build(); };
     ctl.select = (id) => { ctl.selected = id; layout(); };

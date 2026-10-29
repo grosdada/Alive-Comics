@@ -178,8 +178,26 @@
     bg.src = base + M.page; bg.alt = opts.alt || ""; bg.draggable = false;
     const inst = { pageEl, panels: [], statics: [], fps, play: opts.play || M.play || "hover", data: M, base,
                    stamp: opts.stamp || "" };
+    // cadrage anime : le decoupage de la page bouge avec le temps (horloge de page) ; sinon rien de tout ceci
+    inst.anim = !!(M.layout && M.pagep && hasAnim(M.anim));
+    inst.clock = 0; inst.animEnd = inst.anim ? animEnd(M.anim) : 0; inst.geoKey = null; inst.visible = true;
+    inst.loop = !!(M.pagep && M.pagep.animLoop);
+    if (inst.anim) buildFrameLayers(inst);
 
     for (const p of M.panels) makePanel(inst, p, base, PW, PH);
+    if (inst.anim) {
+      inst.pageEl.append(inst.stSvg);
+      layoutPageAt(inst, REDUCED || editHook ? inst.animEnd : 0);
+      if (typeof IntersectionObserver === "function") {         // l'animation demarre quand la page devient visible
+        inst.visible = false;
+        inst.io = new IntersectionObserver((es) => {
+          const v = es[es.length - 1].isIntersecting;
+          if (v && !inst.visible) inst.clock = 0;
+          inst.visible = v;
+        }, { threshold: 0.3 });
+        inst.io.observe(pageEl);
+      }
+    }
     if (M.frames) {
       const fr = node("img", "ac-frames", pageEl);
       fr.src = base + M.frames; fr.alt = ""; fr.draggable = false;
@@ -198,11 +216,54 @@
     return inst;
   }
 
+  const REDUCED = typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const SVGNS = "http://www.w3.org/2000/svg";
+  // calques SVG du fond et des cases vides (dessous) et des traits (dessus) : page.jpg et frames.png sont figes
+  function buildFrameLayers(inst) {
+    const [PW, PH] = inst.data.size;
+    const mk = (cls) => {
+      const s = document.createElementNS(SVGNS, "svg");
+      s.setAttribute("class", cls); s.setAttribute("viewBox", `0 0 ${PW} ${PH}`); s.setAttribute("preserveAspectRatio", "none");
+      return s;
+    };
+    inst.pageEl.classList.add("ac-anim");
+    inst.bgSvg = mk("ac-fbg"); inst.stSvg = mk("ac-fst");
+    inst.pageEl.insertBefore(inst.bgSvg, inst.pageEl.querySelector(".ac-bg").nextSibling);
+  }
+  const pstr = (poly) => poly.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(" ");
+  // la page a l'instant t : fond, cases vides, traits, et chaque case (boite, forme, bulles) a sa place
+  function layoutPageAt(inst, t) {
+    const M = inst.data, [PW, PH] = M.size, pg = pageAt(M.pagep, M.anim, t), sw = Math.max(0, +pg.strokeWidth || 0);
+    const polys = computeLayout(pg, layoutAt(M.layout, M.anim, t));       // { id: polygone } des cases visibles
+    const key = JSON.stringify([polys, pg.bg, pg.fill, pg.stroke, sw, inst.pageEl.clientWidth]);
+    if (key === inst.geoKey) return;                                      // rien n'a bouge (animation finie) : aucun travail
+    inst.geoKey = key;
+    const list = Object.values(polys);
+    inst.bgSvg.innerHTML = `<rect width="${PW}" height="${PH}" fill="${pg.bg}"/>` +
+      list.map((poly) => `<polygon points="${pstr(poly)}" fill="${pg.fill}"/>`).join("");
+    inst.stSvg.innerHTML = sw > 0 ? list.map((poly) =>
+      `<polygon points="${pstr(poly)}" fill="none" stroke="${pg.stroke}" stroke-width="${sw}" stroke-linejoin="miter"/>`).join("") : "";
+    for (const st of [...inst.panels, ...inst.statics]) {
+      const poly = polys[st.p.id], el = st.el;
+      el.hidden = !poly;                                                  // case refermee a cet instant
+      if (st.el._bub) st.el._bub.root.style.display = poly ? "" : "none";
+      if (!poly) continue;
+      const b = gbbox(poly);
+      st.p.rect = [b.x0, b.y0, b.x1, b.y1];
+      const gp = grow(poly, sw / 2 + 1);                                  // la video passe sous le trait
+      const w = Math.max(1e-6, b.w), h = Math.max(1e-6, b.h);
+      Object.assign(el.style, { left: b.x0 / PW * 100 + "%", top: b.y0 / PH * 100 + "%", width: b.w / PW * 100 + "%", height: b.h / PH * 100 + "%",
+                                clipPath: `polygon(${gp.map(([x, y]) => `${(x - b.x0) / w * 100}% ${(y - b.y0) / h * 100}%`).join(", ")})` });
+      if (st.el._bub && st.el._bub.place) st.el._bub.place([b.x0 / PW * 100, b.y0 / PH * 100, b.w / PW * 100, b.h / PH * 100], (st.el._bub.fw || 0.25) * inst.pageEl.clientWidth / 100);
+    }
+  }
+
   function makePanel(inst, p, base, PW, PH) {
     const el = node("div", "ac-panel", inst.pageEl);
     const [x0, y0, x1, y1] = p.rect;
     Object.assign(el.style, { left: x0 / PW * 100 + "%", top: y0 / PH * 100 + "%",
                               width: (x1 - x0) / PW * 100 + "%", height: (y1 - y0) / PH * 100 + "%" });
+    if (inst.anim && p.poster) Object.assign(el.style, { background: `url("${withStamp(base + p.poster, inst.stamp)}") center / cover no-repeat` });
     if (p.poly) {             // case penchee : la video prend la forme du cadre
       const pts = p.poly.map(([x, y]) => `${(x - x0) / (x1 - x0) * 100}% ${(y - y0) / (y1 - y0) * 100}%`);
       el.style.clipPath = `polygon(${pts.join(", ")})`;
@@ -210,12 +271,13 @@
     // bulles : calque sur la page (pas dans la case : elles peuvent depasser un peu du cadre)
     if (p.bubbles && p.bubbles.length && window.AliveBubbles) {
       el._bub = window.AliveBubbles.mount(inst.pageEl, p.bubbles, { rect: [x0 / PW * 100, y0 / PH * 100, (x1 - x0) / PW * 100, (y1 - y0) / PH * 100] });
+      if (inst.anim) el._bub.fw = Math.max(0.15, (x1 - x0) / PW);    // taille du texte : celle de la case dans la page finie
       if (!p.video && !p.depth) {                                  // case fixe : « a t secondes » et « au survol » = survol
         el.addEventListener("pointerenter", () => el._bub.update({ hover: true, t: null }));
         el.addEventListener("pointerleave", () => el._bub.update({ hover: false, t: null }));
       }
     }
-    if (!p.video && p.depth) { makeRelief(inst, p, el, base); return; }
+    if (!p.video && p.depth && !inst.anim) { makeRelief(inst, p, el, base); return; }       // (page animee : image fixe)
     if (!p.video) {
       el.classList.add("static");
       const so = { p, inst, el, static: true };
@@ -562,6 +624,11 @@
 
   function tick(now) {
     const dt = Math.min(0.05, (now - lastTick) / 1000); lastTick = now;
+    for (const inst of pages) if (inst.anim && inst.visible) {       // horloge de page : le decoupage suit les images cles
+      inst.clock += dt;
+      const end = inst.animEnd;
+      layoutPageAt(inst, REDUCED || editHook ? end : inst.loop ? inst.clock % (end + 1) : Math.min(inst.clock, end));
+    }
     for (const inst of pages) for (const st of inst.panels) step(st, now, dt);
     for (const R of renderers) if (R.dirty) R.draw();
     if (pages.size) requestAnimationFrame(tick); else ticking = false;
@@ -627,6 +694,7 @@
 
   function resetPage(inst) {
     const t0 = performance.now();
+    if (inst.anim) inst.clock = 0;                                    // la page revient : le cadrage rejoue
     for (const st of inst.panels) {
       if (st.relief) { st.rv.once = -1; continue; }
       st.vel = 0;
@@ -643,6 +711,7 @@
   function destroyPage(inst) {
     if (lb.st && lb.st.inst === inst) closeLightbox();
     if (inst.rr) inst.rr.destroy();
+    if (inst.io) inst.io.disconnect();
     for (const st of inst.panels) {
       for (const rv of (st.rviews || []).slice()) rv.remove();
       for (const vw of st.views.slice()) removeView(st, vw);

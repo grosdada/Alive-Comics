@@ -247,7 +247,8 @@ def page_key(p, d):
     blob = {"v": 6, "name": p.get("name"), "geometry": p.get("geometry"), "pageSound": page_sound,
             "stroke": pgs.get("strokeWidth"), "panels": panels,
             "frame": [p.get("layout"), G.clean_anim(p.get("anim"), p.get("layout") or {}),
-                      [pgs.get(k) for k in ("bg", "fill", "stroke", "strokeWidth", "gutter", "margin")]],
+                      [pgs.get(k) for k in ("bg", "fill", "stroke", "strokeWidth", "gutter", "margin")],
+                      [_mtime(d / f"start/{k}.png") for k in sorted(p.get("panels") or {})] if p.get("anim") else None],
             "page": [_mtime(d / "page" / n) for n in ("page.jpg", "frames.png")],
             "player": [_mtime(PLAYER / n) for n in ("book.html", "alive-player.js", "alive-player.css", "alive-bubbles.js")]}
     return hashlib.sha1(json.dumps(blob, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
@@ -312,6 +313,14 @@ def _build(pid, log=print, force=False):
         bubbles = clean_bubbles(panel.get("bubbles"))
         if bubbles:
             entry["bubbles"] = bubbles
+        if anim:                                     # affiche : l'image de depart, sous la video (page.jpg ne dit plus rien des cases)
+            sp = d / "start" / f"{g['id']}.png"
+            if sp.exists():
+                dst = out / "images" / f"{g['id']}_poster.jpg"
+                if not dst.exists() or dst.stat().st_mtime < sp.stat().st_mtime:
+                    from PIL import Image
+                    Image.open(sp).convert("RGB").save(dst, quality=85)
+                entry["poster"] = f"images/{g['id']}_poster.jpg"
         chosen = panel.get("chosen") or {}
         need = [j["side"] for j in plan["jobs"]]
         srcs = {s: d / chosen[s] for s in need if chosen.get(s) and (d / chosen[s]).exists()}
@@ -457,7 +466,7 @@ def relief_files(e):
     """Fichiers d'une case en relief : image, nappe, et ses couches s'il y en a."""
     dp = e.get("depth") or {}
     lay = dp.get("layers") or {}
-    return [f for f in [dp.get("img"), dp.get("map"), lay.get("bg"), lay.get("ld"), *(lay.get("fg") or [])] if f]
+    return [f for f in [dp.get("img"), dp.get("map"), lay.get("bg"), lay.get("ld"), *(lay.get("fg") or []), e.get("poster")] if f]
 
 
 def read_data(folder):
