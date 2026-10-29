@@ -115,6 +115,7 @@ footer { margin-top: 40px; padding-top: 16px; border-top: 1px solid var(--line);
       <li><a href="#ia">L'intelligence et le réalisateur</a></li>
       <li><a href="#lecteur">Le lecteur</a></li>
       <li><a href="#edition">Le mode édition</a></li>
+      <li><a href="#cadrage">Animate framing : le cadrage animé</a></li>
       <li><a href="#accueil">L'accueil et les livres</a></li>
       <li><a href="#publication">La publication</a></li>
       <li><a href="#api">L'API complète</a></li>
@@ -483,6 +484,37 @@ page : { page: "page.jpg", frames: "frames.png", size: [W, H], fps: 24, sound: {
   </div>
   <p>Partout : sons au survol en fondu, musique de page à volume constant, bouton « Activer le son » (règle des navigateurs), noir et
     blanc, plein écran, livre (flèches, clavier, balayage, page suivante préchargée), tactile (la dernière case touchée joue).</p>
+</section>
+
+<!-- ============================================================ CADRAGE ANIME -->
+<section id="cadrage">
+  <div class="sec-head"><p class="eyebrow">11 bis · Le découpage qui bouge</p><h2>Animate framing</h2></div>
+  <p>Repris d'Alive-Video (cahier de portage <code>ANIMATE-FRAMING-POUR-ALIVE-COMICS.html</code>, 29/10/2026). Le découpage d'une
+    planche s'anime : un trait glisse, une case s'ouvre ou se referme, la gouttière s'élargit, le fond change de couleur.
+    On pose des images clés sur une timeline ; chaque bout de trait (<code>cN.a</code>, <code>cN.b</code>) et chaque réglage de
+    page (<code>page.bg / fill / stroke / strokeWidth / gutter / margin</code>) a sa piste.</p>
+  <ul>
+    <li><b>Données</b> : <code>project.anim = {tracks: {"c2.a": [{t, v, e}]}}</code> ; chaque nœud <code>split</code> du découpage a un
+      <code>id</code> (<code>ensureCutIds</code> à l'ouverture, <code>ensure_cut_ids</code> côté serveur). Huit courbes : ease, linear, in, out,
+      ease2, in2, out2, hold. Nouvelle couleur de page <code>page.fill</code> (cases vides).</li>
+    <li><b>Règle d'or</b> : le calcul (<code>ease, trackValue, layoutAt, pageAt, compute</code>) existe en trois copies identiques :
+      <code>app/web/js/geometry.js</code>, <code>player/alive-player.js</code>, <code>app/geometry.py</code>. Ne jamais en changer une seule.
+      Contrôle fait : 40 valeurs de courbes identiques à 1e-15, polygones à 0,05 près (arrondi au dixième).</li>
+    <li><b>Éditeur</b> : deux modes exclusifs dans la barre du haut, <b>✏️ Edit</b> (icônes des cases) et <b>🎞 Animate framing</b>
+      (timeline sous la planche, poignées en mode clé, <kbd>Espace</kbd> = lecture). Glisser une attache pose une clé à l'instant de la tête
+      de lecture (la première clé d'une ligne en pose aussi une à 0 s). Hors du mode, glisser un trait animé décale toutes ses clés.
+      <code>app/web/js/timeline.js</code> : sélection rectangle, déplacer, dupliquer, copier / coller, courbes, style de page.</li>
+    <li><b>Page finie</b> : <code>page.jpg</code>, <code>frames.png</code>, la vignette et <code>project.geometry</code> sont dessinés à la fin de
+      l'animation (<code>finalGeom()</code>, <code>compose.py</code>).</li>
+    <li><b>Export</b> : seulement si la planche est animée, <code>manga_data.js</code> reçoit <code>layout</code>, <code>anim</code>, <code>pagep</code>
+      et les cases refermées dans la page finie ; chaque case a une affiche (<code>images/&lt;case&gt;_poster.jpg</code>, l'image de départ).</li>
+    <li><b>Lecteur</b> : horloge de page (démarre quand la page est visible à 30 %, repart de 0 quand on revient sur la page ; une fois par défaut,
+      en boucle avec <code>pagep.animLoop</code> ; « réduire les animations » = page finie directement). Le fond, les cases vides et les traits sont
+      redessinés dans deux calques SVG, les cases (vidéo, bulles) suivent leur forme. Les cases en relief d'une page animée restent des images fixes.</li>
+    <li><b>Annuler / recharger</b> (deux bugs corrigés en même temps) : la vignette ne fait plus recharger la planche (<code>rev</code> renvoyé),
+      <code>restore()</code> remet l'état courant ; une action de la timeline = une étape d'annulation.</li>
+    <li><b>Pas encore fait</b> : vidéos des cases calées sur la tête de lecture dans l'éditeur (§ 5 du cahier, optionnel).</li>
+  </ul>
 </section>
 
 <!-- ============================================================ EDITION -->

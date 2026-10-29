@@ -32,6 +32,9 @@ Pilotage par API (une autre instance de Claude fabrique les livres) : `docs/PILO
 - Licence MiniMax H3 : elle exclut l'UE, le Royaume-Uni, les USA et la Corée, y compris l'affichage des vidéos produites
   (§ V.4). David publie depuis la France : ne pas présenter H3 comme « sans risque » ; c'est à lui de trancher.
 - Sons importés : jamais deux fois le même fichier (app/sounds.py) ; un son déjà utilisé déclenche une alerte.
+- **Animate framing** (cadrage animé, `project.anim`) : le calcul du découpage à l'instant t existe en **trois copies
+  identiques** : `app/web/js/geometry.js` (éditeur), `player/alive-player.js` (lecteur), `app/geometry.py` (serveur).
+  Ne jamais en modifier une sans les deux autres. Une planche sans animation doit rester strictement inchangée.
 
 ## Repères techniques
 - Serveur Python, bibliothèque standard + `requirements.txt` (pillow, numpy, onnxruntime, opencv-contrib) ; ffmpeg dans le PATH.

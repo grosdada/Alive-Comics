@@ -87,6 +87,12 @@ L'interface s'ouvre sur http://127.0.0.1:8790/. Il faut Python 3.10+ et ffmpeg d
    **Livres** : repliés (titre, nombre de pages, note) ou dépliés ; ◀ ▶ changent l'ordre des pages ; clic sur une page :
    ouvrir la planche, aperçu, édition (seule ou dans le livre) ; aperçu et publication du livre.
 
+## Animate framing (cadrage animé)
+Barre du haut de l'éditeur : **✏️ Edit** (icônes des cases) ou **🎞 Animate framing** (une timeline s'ouvre sous la planche).
+Glisser une attache de trait pose une image clé à l'instant de la tête de lecture ; la timeline gère aussi le style de page
+(fond, couleur des cases, traits, gouttière, marge). Le lecteur rejoue le découpage à l'ouverture de la page.
+Une planche sans animation reste identique. Détails : `docs/ALIVE-COMICS-DOC.html`, section « Animate framing ».
+
 ## Réglages (⚙)
 
 - **Machines** : les ComfyUI du réseau (ComfyUI ≥ 0.33, MiniMax H3, nœud `comfyui-h3-orbital`, LoRA 360 Orbit ;
