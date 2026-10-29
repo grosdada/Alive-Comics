@@ -16,13 +16,24 @@ FORMATS = {
     "carre": (2000, 2000, "Carré"),
     "ecran": (1350, 2400, "Écran 9:16"),
 }
-PAGE_DEFAULTS = {"format": "bd", "orientation": "portrait", "width": 1600, "height": 2400, "bg": "#ffffff",
+PAGE_DEFAULTS = {"format": "bd", "orientation": "portrait", "width": 1600, "height": 2400, "bg": "#ffffff", "fill": "#ffffff",
                  "stroke": "#111111", "strokeWidth": 5, "gutter": 22, "margin": 60}
 
 
 def page_size(fmt, orientation="portrait"):
     w, h, _ = FORMATS.get(fmt, FORMATS["bd"])
     return (h, w) if orientation == "paysage" else (w, h)
+
+
+def gen_size(w, h, mp=0.8, long_max=1344):
+    """Taille de generation H3 : ~0,8 Mpx au ratio de la case, cote long <= 1344, multiples de 32."""
+    ratio = w / h
+    gw = math.sqrt(mp * 1024 * 1024 * ratio)
+    gh = gw / ratio
+    if max(gw, gh) > long_max:
+        s = long_max / max(gw, gh)
+        gw, gh = gw * s, gh * s
+    return max(32, round(gw / 32) * 32), max(32, round(gh / 32) * 32)
 
 
 def bbox(poly):
@@ -84,6 +95,10 @@ def compute(page, layout):
         if node["t"] == "leaf":
             panels.append({"id": node["id"], "poly": poly, "bbox": bbox(poly) if len(poly) >= 3 else None})
             return
+        if len(poly) < 3:                  # case refermee (animation) : ses sous-cases n'existent pas a cet instant
+            walk(node["c"][0], [])
+            walk(node["c"][1], [])
+            return
         bb = bbox(poly)
         P, n = _cut_line(node, bb)[0], _cut_line(node, bb)[2]
         f = lambda X: n[0] * (X[0] - P[0]) + n[1] * (X[1] - P[1])
@@ -110,17 +125,6 @@ def compute(page, layout):
     return live
 
 
-def gen_size(w, h, mp=0.8, long_max=1344):
-    """Taille de generation H3 : ~0,8 Mpx au ratio de la case, cote long <= 1344, multiples de 32."""
-    ratio = w / h
-    gw = math.sqrt(mp * 1024 * 1024 * ratio)
-    gh = gw / ratio
-    if max(gw, gh) > long_max:
-        s = long_max / max(gw, gh)
-        gw, gh = gw * s, gh * s
-    return max(32, round(gw / 32) * 32), max(32, round(gh / 32) * 32)
-
-
 def placement(bb, iw, ih, view=None):
     """Image dans la boite de la case : couverture * zoom, decalage (ox, oy) en fraction de la boite."""
     v = view or {}
@@ -132,6 +136,199 @@ def placement(bb, iw, ih, view=None):
     oy = max(-my, min(my, float(v.get("oy") or 0)))
     return {"x": bb["x0"] + bb["w"] / 2 - dw / 2 + ox * bb["w"], "y": bb["y0"] + bb["h"] / 2 - dh / 2 + oy * bb["h"],
             "w": dw, "h": dh}
+
+
+def grow(poly, px):
+    """Elargit le polygone depuis son centre (la video passe sous le trait)."""
+    cx = sum(p[0] for p in poly) / len(poly)
+    cy = sum(p[1] for p in poly) / len(poly)
+    out = []
+    for x, y in poly:
+        dx, dy = x - cx, y - cy
+        d = (dx * dx + dy * dy) ** 0.5 or 1
+        out.append([round(x + dx / d * px, 1), round(y + dy / d * px, 1)])
+    return out
+
+
+def offset(poly, d):
+    """Polygone convexe decale de d vers l'exterieur (d < 0 : vers l'interieur), coins en onglet : le contour
+    d'un trait d'epaisseur w = offset(+w/2) moins offset(-w/2), comme le trait du canevas (lineJoin miter)."""
+    n = len(poly)
+    s = sum(poly[i][0] * poly[(i + 1) % n][1] - poly[(i + 1) % n][0] * poly[i][1] for i in range(n))
+    sign = 1 if s > 0 else -1                 # sens de parcours : normale sortante de chaque cote
+    lines = []
+    for i in range(n):
+        (x1, y1), (x2, y2) = poly[i], poly[(i + 1) % n]
+        dx, dy = x2 - x1, y2 - y1
+        L = math.hypot(dx, dy) or 1
+        nx, ny = dy / L * sign, -dx / L * sign
+        lines.append(((x1 + nx * d, y1 + ny * d), (dx, dy)))
+    out = []
+    for i in range(n):
+        (p, r), (q, s2) = lines[i - 1], lines[i]
+        den = r[0] * s2[1] - r[1] * s2[0]
+        if abs(den) < 1e-9:
+            out.append([q[0], q[1]])
+            continue
+        t = ((q[0] - p[0]) * s2[1] - (q[1] - p[1]) * s2[0]) / den
+        out.append([p[0] + r[0] * t, p[1] + r[1] * t])
+    return out
+
+
+# ------------------------------------------------------------------ animation du cadrage (« Animate framing »)
+# Chaque trait a un identifiant (c1, c2...) ; chacun de ses deux bouts (a, b) peut avoir une piste d'images cles :
+# anim = {"tracks": {"c2.a": [{"t": secondes, "v": 0..1, "e": courbe}]}}. Entre deux cles, la valeur suit la courbe
+# de la premiere. MEME CALCUL que app/web/js/geometry.js et player/alive-player.js.
+EASES = ("ease", "linear", "in", "out", "ease2", "in2", "out2", "hold")
+
+
+def ease(e, u):
+    """Courbe entre deux cles (u de 0 a 1). Les memes dans app/web/js/geometry.js et player/alive-player.js."""
+    if e == "linear":
+        return u
+    if e == "in":
+        return u ** 3
+    if e == "out":
+        return 1 - (1 - u) ** 3
+    if e == "in2":
+        return u ** 5
+    if e == "out2":
+        return 1 - (1 - u) ** 5
+    if e == "ease2":
+        return 16 * u ** 5 if u < 0.5 else 1 - (-2 * u + 2) ** 5 / 2
+    if e == "hold":
+        return 0.0
+    return 4 * u ** 3 if u < 0.5 else 1 - (-2 * u + 2) ** 3 / 2
+
+
+def track_value(keys, t, fallback):
+    if not keys:
+        return fallback
+    if t <= keys[0]["t"]:
+        return keys[0]["v"]
+    for k0, k1 in zip(keys, keys[1:]):
+        if t < k1["t"]:
+            u = (t - k0["t"]) / max(1e-9, k1["t"] - k0["t"])
+            return k0["v"] + (k1["v"] - k0["v"]) * ease(k0.get("e"), u)
+    return keys[-1]["v"]
+
+
+def has_anim(anim):
+    return bool(anim) and any((anim.get("tracks") or {}).values())
+
+
+def layout_at(layout, anim, t):
+    """Le decoupage a l'instant t (arbre recopie, bouts animes remplaces)."""
+    if not has_anim(anim):
+        return layout
+    T = anim["tracks"]
+
+    def walk(n):
+        if n["t"] == "leaf":
+            return n
+        return dict(n, a=track_value(T.get(f"{n.get('id')}.a"), t, n["a"]),
+                    b=track_value(T.get(f"{n.get('id')}.b"), t, n["b"]), c=[walk(n["c"][0]), walk(n["c"][1])])
+    return walk(layout)
+
+
+# style de page anime (module « Style de page » de la timeline) : pistes "page.<cle>"
+PAGE_COLORS = ("bg", "fill", "stroke")
+PAGE_NUMS = {"strokeWidth": (0, 30), "gutter": (0, 120), "margin": (0, 400)}
+
+
+def hex_rgb(h):
+    s = str(h or "#ffffff").lstrip("#")
+    try:
+        return [int(s[i:i + 2], 16) / 255 for i in (0, 2, 4)]
+    except ValueError:
+        return [1.0, 1.0, 1.0]
+
+
+def color_value(keys, t, fallback):
+    """Couleur a l'instant t (composantes 0..1, interpolees une a une) : meme calcul que colorValue (JS)."""
+    if not keys:
+        return hex_rgb(fallback)
+    if t <= keys[0]["t"]:
+        return hex_rgb(keys[0]["v"])
+    for k0, k1 in zip(keys, keys[1:]):
+        if t < k1["t"]:
+            e = ease(k0.get("e"), (t - k0["t"]) / max(1e-9, k1["t"] - k0["t"]))
+            a, b = hex_rgb(k0["v"]), hex_rgb(k1["v"])
+            return [x + (y - x) * e for x, y in zip(a, b)]
+    return hex_rgb(keys[-1]["v"])
+
+
+def page_at(page, anim, t):
+    """La page a l'instant t : nombres interpoles ; couleurs en composantes 0..1 dans out["rgb"]."""
+    T = (anim or {}).get("tracks") or {}
+    out = dict(page)
+    rgb = {}
+    for k in PAGE_COLORS:
+        rgb[k] = color_value(T.get(f"page.{k}"), t, page.get(k) or ("#111111" if k == "stroke" else "#ffffff"))
+    for k in PAGE_NUMS:
+        out[k] = track_value(T.get(f"page.{k}"), t, page.get(k))
+    out["rgb"] = rgb
+    return out
+
+
+def anim_end(anim):
+    return max([k["t"] for keys in ((anim or {}).get("tracks") or {}).values() for k in keys or []] or [0.0])
+
+
+def cut_ids(node, out=None):
+    out = [] if out is None else out
+    if node and node["t"] == "split":
+        if node.get("id"):
+            out.append(node["id"])
+        cut_ids(node["c"][0], out)
+        cut_ids(node["c"][1], out)
+    return out
+
+
+def ensure_cut_ids(layout):
+    """Donne un identifiant aux traits qui n'en ont pas (modifie l'arbre) ; meme regle que l'editeur."""
+    n = [max([int(i[1:]) for i in cut_ids(layout) if i[1:].isdigit()] or [0])]
+
+    def walk(x):
+        if not x or x["t"] != "split":
+            return
+        if not x.get("id"):
+            n[0] += 1
+            x["id"] = f"c{n[0]}"
+        walk(x["c"][0])
+        walk(x["c"][1])
+    walk(layout)
+    return layout
+
+
+def clean_anim(anim, layout, max_t=600.0):
+    """Pistes propres : traits existants, cles triees, valeurs 0..1, une cle par instant, courbes connues."""
+    ids = set(cut_ids(layout))
+    out = {}
+    for key, keys in ((anim or {}).get("tracks") or {}).items():
+        cid, _, end = str(key).rpartition(".")
+        page = cid == "page" and (end in PAGE_COLORS or end in PAGE_NUMS)
+        if not isinstance(keys, list) or not (page or (cid in ids and end in ("a", "b"))):
+            continue
+        clean = {}
+        for k in keys:
+            try:
+                t = round(max(0.0, min(max_t, float(k["t"]))), 4)
+                if page and end in PAGE_COLORS:
+                    v = str(k["v"]).lower()
+                    if not (len(v) == 7 and v[0] == "#" and all(c in "0123456789abcdef" for c in v[1:])):
+                        continue
+                elif page:
+                    lo, hi = PAGE_NUMS[end]
+                    v = round(max(lo, min(hi, float(k["v"]))), 3)
+                else:
+                    v = round(max(0.0, min(1.0, float(k["v"]))), 5)
+            except (KeyError, TypeError, ValueError):
+                continue
+            clean[t] = {"t": t, "v": v, "e": k.get("e") if k.get("e") in EASES else "ease"}
+        if clean:
+            out[key] = [clean[t] for t in sorted(clean)]
+    return {"tracks": out} if out else {}
 
 
 # ------------------------------------------------------------------ decoupages prets (memes que l'editeur)
@@ -176,7 +373,7 @@ def make_layout(preset, start=1):
     def new():
         n[0] += 1
         return f"p{n[0]}"
-    return PRESETS[preset][1](lambda: _L(new)), n[0] + 1
+    return ensure_cut_ids(PRESETS[preset][1](lambda: _L(new))), n[0] + 1
 
 
 def random_layout(count, tilt=0.05, seed=None, start=1):
@@ -198,7 +395,7 @@ def random_layout(count, tilt=0.05, seed=None, start=1):
         pos = k1 / k * 0.6 + 0.2 + (rnd.random() - 0.5) * 0.1
         w1, h1, w2, h2 = (w, h * pos, w, h * (1 - pos)) if d == "h" else (w * pos, h, w * (1 - pos), h)
         return _S(d, tilted(pos), tilted(pos), build(k1, w1, h1), build(k - k1, w2, h2))
-    return build(count, 2, 3), n[0] + 1
+    return ensure_cut_ids(build(count, 2, 3)), n[0] + 1
 
 
 def leaves(node, out=None):
