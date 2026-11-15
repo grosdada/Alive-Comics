@@ -10,3 +10,6 @@ __pycache__/
 .venv/
 .claude/settings.local.json
 data/
+
+# jeux d essai Lytro (lourds) : gardes en local
+lytro-testdata/
