@@ -236,7 +236,7 @@ def page_key(p, d):
                       relief_layers.used(panel), _mtime(d / f"layers/{pid_}/meta.json")]
         panels[pid_] = {"player": plan["player"], "autoplay": plan["autoplay"], "loop": plan["loop"],
                         "fx": player_fx(panel, pid_, plan), "extra": extra, "relief": relief,
-                        "bubbles": clean_bubbles(panel.get("bubbles")),
+                        "bubbles": clean_bubbles(panel.get("bubbles")), "trigger": panel.get("trigger"),
                         "sides": [j["side"] for j in plan["jobs"]],
                         "chosen": {k: [v, _mtime(d / v)] for k, v in sorted(chosen.items())}, "layers": layers}
     ps = p.get("pageSound") or {}
@@ -244,7 +244,7 @@ def page_key(p, d):
     if ps.get("file"):
         page_sound["mtime"] = _mtime(d / ps["file"])
     pgs = p.get("page") or {}
-    blob = {"v": 6, "name": p.get("name"), "geometry": p.get("geometry"), "pageSound": page_sound,
+    blob = {"v": 7, "play": pgs.get("trigger"), "name": p.get("name"), "geometry": p.get("geometry"), "pageSound": page_sound,
             "stroke": pgs.get("strokeWidth"), "panels": panels,
             "frame": [p.get("layout"), G.clean_anim(p.get("anim"), p.get("layout") or {}),
                       [pgs.get(k) for k in ("bg", "fill", "stroke", "strokeWidth", "gutter", "margin")],
@@ -293,6 +293,8 @@ def _build(pid, log=print, force=False):
         shutil.copy2(src, out / name)
     stroke = float((p.get("page") or {}).get("strokeWidth", 4))
     data = {"page": "page.jpg", "frames": "frames.png", "size": geo["size"], "fps": FPS, "panels": []}
+    if (p.get("page") or {}).get("trigger") in ("always", "scroll"):   # declenchement par defaut de la planche (sinon : survol)
+        data["play"] = p["page"]["trigger"]
     anim = G.clean_anim(p.get("anim"), p.get("layout") or {})
     cases = list(geo["panels"])
     if anim:                                         # cadrage anime : le lecteur recalcule les cases a chaque instant
@@ -313,6 +315,8 @@ def _build(pid, log=print, force=False):
         bubbles = clean_bubbles(panel.get("bubbles"))
         if bubbles:
             entry["bubbles"] = bubbles
+        if panel.get("trigger") in ("hover", "always", "scroll"):      # exception de la case
+            entry["trigger"] = panel["trigger"]
         if anim:                                     # affiche : l'image de depart, sous la video (page.jpg ne dit plus rien des cases)
             sp = d / "start" / f"{g['id']}.png"
             if sp.exists():

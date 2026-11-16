@@ -35,6 +35,19 @@ function volume(obj, def, app) {
 
 // ------------------------------------------------------------------ camera
 // traitement d'une case : video MiniMax H3 (quelques minutes sur les machines) ou photo en relief (instantane)
+// declenchement des videos : par planche (defaut : survol) et, en exception, par case
+const TRIGGERS = [["hover", "Au survol"], ["always", "Toujours"], ["scroll", "Au défilement"]];
+export function triggerForm(app, pid) {
+  const panel = app.panel(pid);
+  const box = h("div.form");
+  box.append(seg([["", "Comme la planche"], ...TRIGGERS], panel.trigger || "", (m) => {
+    if (m) panel.trigger = m; else delete panel.trigger;
+    app.commitSoon("panel");
+  }));
+  box.append(h("p.muted", "Au survol : la case joue sous la souris ou le doigt. Toujours : elle joue en permanence. Au défilement : elle joue quand elle est visible à l'écran."));
+  return box;
+}
+
 export function treatmentForm(app, pid) {
   const panel = app.panel(pid);
   const relief = panel.treatment === "relief";
@@ -379,6 +392,8 @@ export function pageForm(app) {
     field("Format", select(FORMATS, pg.format, (v) => { pg.format = v; resize(); })),
     field("Sens", h("div.seg", [["portrait", "Vertical"], ["paysage", "Horizontal"]].map(([k, l]) =>
       h("button" + ((pg.orientation || "portrait") === k ? ".on" : ""), { on: { click: () => { pg.orientation = k; resize(); app.refreshInspector(); } } }, l))))));
+  box.append(h("label.field", h("span.lab", "Déclenchement des vidéos (par défaut)"),
+    seg(TRIGGERS, pg.trigger || "hover", (m) => { if (m === "hover") delete pg.trigger; else pg.trigger = m; app.commitSoon("page"); })));
   // un reglage anime (module « Style de page » de la timeline) se regle dans la timeline
   const animated = (k) => ((P.anim && P.anim.tracks && P.anim.tracks["page." + k]) || []).length > 0;
   const badge = (k) => animated(k) ? h("small.animated", { title: "Animé : se règle dans la timeline (Animate framing › Style de page)" }, " 🎞 animé") : null;

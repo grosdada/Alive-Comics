@@ -6,7 +6,7 @@ import { Timeline } from "./timeline.js";
 import { Editor, icon } from "./editor.js";
 import { startImage, pageImages } from "./exporter.js";
 import { openBubbleEditor } from "./bubbles.js";
-import { cameraForm, actionForm, audioForm, renderSection, pageForm, statusText, sideName, treatmentForm } from "./forms.js";
+import { cameraForm, actionForm, audioForm, triggerForm, renderSection, pageForm, statusText, sideName, treatmentForm } from "./forms.js";
 
 const NEW_PANEL = () => ({ camera: { id: "arc", fields: {} }, action: { id: "fige", fields: {} }, audio: { mode: "none" } });
 
@@ -572,6 +572,7 @@ class App {
       h("h3", `Case ${g ? g.order : ""}`),
       section("Image", "image", imgBox),
       section("Traitement", null, treatmentForm(this, id)),
+      relief ? null : section("Déclenchement", null, triggerForm(this, id)),
       relief ? null : section("Caméra", "camera", cameraForm(this, id)),
       relief ? null : section("Action", "action", actionForm(this, id)),
       section("Sons", "audio", audioForm(this, id)),

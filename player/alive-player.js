@@ -272,7 +272,11 @@
     if (p.bubbles && p.bubbles.length && window.AliveBubbles) {
       el._bub = window.AliveBubbles.mount(inst.pageEl, p.bubbles, { rect: [x0 / PW * 100, y0 / PH * 100, (x1 - x0) / PW * 100, (y1 - y0) / PH * 100] });
       if (inst.anim) el._bub.fw = Math.max(0.15, (x1 - x0) / PW);    // taille du texte : celle de la case dans la page finie
-      if (!p.video && !p.depth) {                                  // case fixe : « a t secondes » et « au survol » = survol
+      const tg = p.trigger || inst.play;                            // case fixe : bulles selon le declenchement
+      if (!p.video && !p.depth && tg === "always") el._bub.update({ hover: true, t: null });
+      else if (!p.video && !p.depth && tg === "scroll" && typeof IntersectionObserver === "function")
+        new IntersectionObserver((es) => el._bub.update({ hover: es[es.length - 1].isIntersecting, t: null }), { threshold: 0.35 }).observe(el);
+      if (!p.video && !p.depth && tg !== "always" && tg !== "scroll") {  // case fixe : « a t secondes » et « au survol » = survol
         el.addEventListener("pointerenter", () => el._bub.update({ hover: true, t: null }));
         el.addEventListener("pointerleave", () => el._bub.update({ hover: false, t: null }));
       }
@@ -319,6 +323,7 @@
     bindDrag(el, () => st);
     el.addEventListener("dblclick", () => { if (!editHook) openLightbox(st); });
     inst.panels.push(st);
+    watchScroll(st);
   }
 
   // reglages derives des donnees et des retouches (fx) : plage d'images, boucle, vitesse, image de depart
@@ -634,12 +639,22 @@
     if (pages.size) requestAnimationFrame(tick); else ticking = false;
   }
 
+  // declenchement des cases : « hover » (survol, defaut), « always » (toujours) ou « scroll » (des que la case est visible) ;
+  // reglage de la case (p.trigger), sinon celui de la planche (inst.play)
+  const trig = (st) => (st.p && st.p.trigger) || st.inst.play || "hover";
+  const auto = (st) => { const t = trig(st); return t === "always" || (t === "scroll" && !!st.vis); };
+  function watchScroll(st) {
+    if (trig(st) !== "scroll" || typeof IntersectionObserver !== "function") { if (trig(st) === "scroll") st.vis = true; return; }
+    st.io = new IntersectionObserver((es) => { st.vis = es[es.length - 1].isIntersecting; }, { threshold: 0.35 });
+    st.io.observe(st.el);
+  }
+
   function step(st, now, dt) {
     if (st.relief) { stepRelief(st, now, dt); return; }
     const fps = st.inst.fps;
     if (st.el._bub) {                         // bulles : au survol, ou a t secondes de la boucle de la case
       const t0 = st.loopMode ? st.lo : st.a;
-      st.el._bub.update({ hover: st.over || st.pinned || st.inst.play === "always", t: Math.max(0, (st.pos - t0) / fps) });
+      st.el._bub.update({ hover: st.over || st.pinned || auto(st), t: Math.max(0, (st.pos - t0) / fps) });
     }
     // editeur : le tremble vit meme sur une image fixe (il parcourt sa boucle en temps reel)
     if (st.freeShake) st.shFree += dt / Math.max(0.2, shakeLoop(st).sec); else st.shFree = 0;
@@ -656,7 +671,7 @@
       else { st.idleOn = true; st.idle.classList.add("on"); st.idle.play().catch(() => {}); }
     } else if (st.p.autoplay && !st.drag && now > st.resumeAt) {
       // vitesse qui monte et descend en douceur : la case s'anime au survol et se fige quand on la quitte
-      const active = !st.freeze && (st.inst.play === "always" || st.over || lb.st === st || st.pinned);
+      const active = !st.freeze && (auto(st) || st.over || lb.st === st || st.pinned);
       st.speed += ((active ? 1 : 0) - st.speed) * Math.min(1, dt * (active ? 3 : 2.2));
       if ((st.speed < 0.004 && !active) || st.freeze) st.speed = 0;     // editeur : « figer l'image » = arret net
       const stp = fps * dt * st.speed * st.rate * easeK(st, frac(st));
@@ -713,6 +728,7 @@
     if (inst.rr) inst.rr.destroy();
     if (inst.io) inst.io.disconnect();
     for (const st of inst.panels) {
+      if (st.io) st.io.disconnect();
       for (const rv of (st.rviews || []).slice()) rv.remove();
       for (const vw of st.views.slice()) removeView(st, vw);
       if (st.idle) { st.idle.pause(); st.idle.removeAttribute("src"); st.idle.load(); }
@@ -1136,14 +1152,15 @@
     el.addEventListener("pointerup", up);
     el.addEventListener("pointercancel", up);
     inst.panels.push(st);
+    watchScroll(st);
   }
 
   // mouvement d'une case en relief : boucle douce tant qu'elle est survolee (ou un tour au clic), plus le glisser
   function stepRelief(st, now, dt) {
-    if (st.el._bub) st.el._bub.update({ hover: st.over || st.pinned || st.inst.play === "always", t: null });
+    if (st.el._bub) st.el._bub.update({ hover: st.over || st.pinned || auto(st), t: null });
     const c = st.p.depth || {}, rv = st.rv, a = c.amount || 0.025, dur = Math.max(0.5, c.duration || 2);
     const move = RELIEF_MOVES[c.preset] || RELIEF_MOVES.respire;
-    const hoverOn = (c.trigger || "hover") === "hover" && (st.over || st.pinned || st.inst.play === "always");
+    const hoverOn = (c.trigger || "hover") === "hover" && (st.over || st.pinned || auto(st));
     rv.lvl += ((hoverOn ? 1 : 0) - rv.lvl) * Math.min(1, dt * (hoverOn ? 2.5 : 2));
     if (rv.lvl < 0.002 && !hoverOn) rv.lvl = 0;
     let m;
